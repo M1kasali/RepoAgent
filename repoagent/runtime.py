@@ -113,6 +113,7 @@ class RepoAgent:
         self.last_prompt_metadata = {}
         self.last_completion_metadata = {}
         self.last_model_result = None
+        self.last_call_efficiency_summary = {}
         self.last_durable_promotions = []
         self.last_durable_rejections = []
         self.last_durable_superseded = []
@@ -543,7 +544,15 @@ class RepoAgent:
             text=user_message,
         )
         handle = self._scheduler.submit(request)
-        outcome = await handle.result()
+        try:
+            outcome = await handle.result()
+        except asyncio.CancelledError:
+            handle.cancel()
+            try:
+                await handle.result()
+            except Exception:
+                pass
+            raise
         if outcome.state is TurnState.FAILED:
             raise RuntimeError(outcome.error or "Turn failed")
         if outcome.state is TurnState.CANCELLED:
@@ -621,6 +630,22 @@ class RepoAgent:
             "resume_status": task_state.resume_status,
             "task_state": task_state.to_dict(),
             "prompt_metadata": self.last_prompt_metadata,
+            "usage": {
+                key: self.last_completion_metadata.get(key)
+                for key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                    "usage_source",
+                    "input_token_semantics",
+                    "model_call_count",
+                    "usage_source_counts",
+                    "usage_complete",
+                )
+            },
+            "call_efficiency": dict(self.last_call_efficiency_summary),
             "durable_promotions": list(self.last_durable_promotions),
             "durable_rejections": list(self.last_durable_rejections),
             "durable_superseded": list(self.last_durable_superseded),

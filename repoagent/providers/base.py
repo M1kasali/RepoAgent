@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -11,6 +12,69 @@ class UsageSource(str, Enum):
     ACTUAL = "actual"
     ESTIMATED = "estimated"
     MISSING = "missing"
+    MIXED = "mixed"
+
+
+class InputTokenSemantics(str, Enum):
+    FRESH = "fresh"
+    TOTAL = "total"
+    AMBIGUOUS = "ambiguous"
+
+
+class CancellationToken:
+    """Thread-safe cooperative cancellation with close-resource callbacks."""
+
+    def __init__(self) -> None:
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._callbacks: dict[int, Callable[[], None]] = {}
+        self._next_callback_id = 0
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._cancelled.is_set():
+                return False
+            self._cancelled.set()
+            callbacks = tuple(self._callbacks.values())
+            self._callbacks.clear()
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                continue
+        return True
+
+    def add_callback(self, callback: Callable[[], None]) -> Callable[[], None]:
+        with self._lock:
+            if self._cancelled.is_set():
+                invoke_now = True
+                callback_id = -1
+            else:
+                invoke_now = False
+                callback_id = self._next_callback_id
+                self._next_callback_id += 1
+                self._callbacks[callback_id] = callback
+        if invoke_now:
+            try:
+                callback()
+            except Exception:
+                pass
+
+        def remove() -> None:
+            with self._lock:
+                self._callbacks.pop(callback_id, None)
+
+        return remove
+
+    def raise_if_cancelled(self, *, provider: str = "") -> None:
+        if self.cancelled:
+            raise ProviderCancelledError(
+                "model request was cancelled", provider=provider
+            )
 
 
 @dataclass(frozen=True)
@@ -21,6 +85,7 @@ class ModelUsage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     source: UsageSource = UsageSource.MISSING
+    input_token_semantics: InputTokenSemantics = InputTokenSemantics.AMBIGUOUS
 
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, Any] | None) -> "ModelUsage":
@@ -51,6 +116,12 @@ class ModelUsage:
         source = UsageSource(source_value) if source_value else (
             UsageSource.ACTUAL if has_usage else UsageSource.MISSING
         )
+        semantics_value = values.get("input_token_semantics")
+        semantics = (
+            InputTokenSemantics(semantics_value)
+            if semantics_value
+            else InputTokenSemantics.AMBIGUOUS
+        )
         return cls(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -62,6 +133,7 @@ class ModelUsage:
                 values.get("cache_write_tokens", 0)
             ),
             source=source,
+            input_token_semantics=semantics,
         )
 
     def to_metadata(self) -> dict[str, Any]:
@@ -72,6 +144,83 @@ class ModelUsage:
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "usage_source": self.source.value,
+            "input_token_semantics": self.input_token_semantics.value,
+        }
+
+
+@dataclass(frozen=True)
+class ModelUsageAggregate:
+    """Token totals plus explicit source completeness across model calls."""
+
+    usage: ModelUsage = field(default_factory=ModelUsage)
+    model_call_count: int = 0
+    source_counts: Mapping[UsageSource, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.model_call_count < 0:
+            raise ValueError("model_call_count must not be negative")
+        counts = {
+            source: int(dict(self.source_counts).get(source, 0))
+            for source in UsageSource
+        }
+        if any(value < 0 for value in counts.values()):
+            raise ValueError("usage source counts must not be negative")
+        if sum(counts.values()) != self.model_call_count:
+            raise ValueError("usage source counts must equal model_call_count")
+        object.__setattr__(self, "source_counts", MappingProxyType(counts))
+
+    @classmethod
+    def from_usages(cls, usages) -> "ModelUsageAggregate":
+        rows = tuple(usages)
+        counts = {source: 0 for source in UsageSource}
+        for row in rows:
+            if not isinstance(row, ModelUsage):
+                raise TypeError("usage aggregate accepts only ModelUsage rows")
+            counts[row.source] += 1
+        present_sources = {source for source, count in counts.items() if count}
+        if not rows:
+            source = UsageSource.MISSING
+        elif len(present_sources) == 1 and UsageSource.MIXED not in present_sources:
+            source = next(iter(present_sources))
+        else:
+            source = UsageSource.MIXED
+        usage = ModelUsage(
+            input_tokens=sum(row.input_tokens for row in rows),
+            output_tokens=sum(row.output_tokens for row in rows),
+            total_tokens=sum(row.total_tokens for row in rows),
+            cache_read_tokens=sum(row.cache_read_tokens for row in rows),
+            cache_write_tokens=sum(row.cache_write_tokens for row in rows),
+            source=source,
+            input_token_semantics=(
+                next(iter({row.input_token_semantics for row in rows}))
+                if rows
+                and len({row.input_token_semantics for row in rows}) == 1
+                else InputTokenSemantics.AMBIGUOUS
+            ),
+        )
+        return cls(
+            usage=usage,
+            model_call_count=len(rows),
+            source_counts=counts,
+        )
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.model_call_count > 0
+            and self.source_counts[UsageSource.MISSING] == 0
+            and self.source_counts[UsageSource.MIXED] == 0
+            and self.usage.source is not UsageSource.MIXED
+        )
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            **self.usage.to_metadata(),
+            "model_call_count": self.model_call_count,
+            "usage_source_counts": {
+                source.value: self.source_counts[source] for source in UsageSource
+            },
+            "usage_complete": self.complete,
         }
 
 
@@ -121,6 +270,8 @@ class ModelRequest:
     request_id: str = ""
     attempt: int = 1
     tools: tuple[ModelTool, ...] = ()
+    cancellation_token: CancellationToken | None = None
+    call_kind: str = "agent"
 
     def __post_init__(self) -> None:
         if not isinstance(self.prompt, str) or not self.prompt:
@@ -131,6 +282,8 @@ class ModelRequest:
             raise ValueError("timeout_seconds must be positive")
         if self.attempt < 1:
             raise ValueError("attempt must be positive")
+        if self.call_kind not in {"agent", "compaction"}:
+            raise ValueError("call_kind must be agent or compaction")
         object.__setattr__(self, "tools", tuple(self.tools))
 
 
@@ -225,6 +378,17 @@ class ProviderTimeoutError(ProviderError):
         )
 
 
+class ProviderCancelledError(ProviderError):
+    def __init__(self, message: str, *, provider: str = "") -> None:
+        super().__init__(
+            message,
+            category="cancelled",
+            provider=provider,
+            retryable=False,
+            should_fallback=False,
+        )
+
+
 @runtime_checkable
 class ModelProvider(Protocol):
     def generate(self, request: ModelRequest) -> ModelResult: ...
@@ -234,6 +398,8 @@ class ModelProvider(Protocol):
 
 def generate_model(client: Any, request: ModelRequest) -> ModelResult:
     """Invoke a typed provider or adapt one legacy complete-only client."""
+    if request.cancellation_token is not None:
+        request.cancellation_token.raise_if_cancelled(provider=type(client).__name__)
     generate = getattr(client, "generate", None)
     if callable(generate):
         result = generate(request)
@@ -263,6 +429,8 @@ def generate_model(client: Any, request: ModelRequest) -> ModelResult:
             f"generate() returned {type(result).__name__}, expected ModelResult",
             provider=type(client).__name__,
         )
+    if request.cancellation_token is not None:
+        request.cancellation_token.raise_if_cancelled(provider=type(client).__name__)
     return result
 
 
@@ -272,12 +440,18 @@ def stream_model(
     on_event: Callable[[ModelEvent], None] | None = None,
 ) -> ModelResult:
     """Consume normalized streaming events and require one terminal result."""
+    if request.cancellation_token is not None:
+        request.cancellation_token.raise_if_cancelled(provider=type(client).__name__)
     stream = getattr(client, "stream", None)
     if not callable(stream):
         return generate_model(client, request)
 
     terminal: ModelResult | None = None
     for event in stream(request):
+        if request.cancellation_token is not None:
+            request.cancellation_token.raise_if_cancelled(
+                provider=type(client).__name__
+            )
         if not isinstance(event, ModelEvent):
             raise ProviderProtocolError(
                 f"stream() yielded {type(event).__name__}, expected ModelEvent",
@@ -302,16 +476,21 @@ def stream_model(
             "stream() ended without a completed model event",
             provider=type(client).__name__,
         )
+    if request.cancellation_token is not None:
+        request.cancellation_token.raise_if_cancelled(provider=type(client).__name__)
     return terminal
 
 
 __all__ = [
+    "CancellationToken",
     "ModelEvent",
     "ModelProvider",
     "ModelRequest",
     "ModelResult",
     "ModelTool",
     "ModelUsage",
+    "ModelUsageAggregate",
+    "ProviderCancelledError",
     "ProviderConnectionError",
     "ProviderError",
     "ProviderProtocolError",

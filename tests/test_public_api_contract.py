@@ -1,7 +1,23 @@
 from pathlib import Path
 
 import repoagent
-from repoagent import RepoAgent, SessionStore, WorkspaceContext, build_agent, build_arg_parser, build_welcome, main
+from repoagent import (
+    CallEfficiencyEntry,
+    CallEfficiencySummary,
+    FallbackModelClient,
+    InputTokenSemantics,
+    ModelPricing,
+    ModelProfile,
+    ModelUsageAggregate,
+    RepoAgent,
+    SessionStore,
+    WorkspaceContext,
+    build_agent,
+    build_arg_parser,
+    build_welcome,
+    main,
+    price_usage,
+)
 from repoagent.run_store import RunStore
 from repoagent.spine import RuntimeEvent, TurnRequest
 
@@ -10,10 +26,18 @@ def test_public_api_exports_current_names_only():
     assert RepoAgent is not None
     assert SessionStore is not None
     assert WorkspaceContext is not None
+    assert FallbackModelClient is not None
+    assert CallEfficiencyEntry is not None
+    assert CallEfficiencySummary is not None
+    assert InputTokenSemantics is not None
+    assert ModelPricing is not None
+    assert ModelProfile is not None
+    assert ModelUsageAggregate is not None
     assert callable(build_agent)
     assert callable(build_arg_parser)
     assert callable(build_welcome)
     assert callable(main)
+    assert callable(price_usage)
     assert not hasattr(repoagent, "MiniAgent")
     assert "MiniAgent" not in repoagent.__all__
 

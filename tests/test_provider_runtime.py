@@ -1,4 +1,9 @@
+import asyncio
+from io import BytesIO
 import json
+import threading
+import time
+import urllib.error
 from unittest.mock import patch
 
 import pytest
@@ -6,6 +11,8 @@ import pytest
 from repoagent import RepoAgent, SessionStore, WorkspaceContext
 from repoagent.providers import (
     AnthropicCompatibleModelClient,
+    CancellationToken,
+    FallbackModelClient,
     ModelEvent,
     ModelRequest,
     ModelResult,
@@ -13,7 +20,9 @@ from repoagent.providers import (
     ModelUsage,
     OllamaModelClient,
     OpenAICompatibleModelClient,
+    ProviderCancelledError,
     ProviderError,
+    ProviderFallbackExhaustedError,
     ProviderProtocolError,
     ToolCall,
     UsageSource,
@@ -29,6 +38,19 @@ def test_model_request_validates_budget_timeout_and_attempt():
         ModelRequest(prompt="hello", max_output_tokens=1, timeout_seconds=0)
     with pytest.raises(ValueError, match="attempt"):
         ModelRequest(prompt="hello", max_output_tokens=1, attempt=0)
+
+
+def test_cancellation_token_is_idempotent_and_closes_registered_resources():
+    token = CancellationToken()
+    calls = []
+    remove = token.add_callback(lambda: calls.append("closed"))
+
+    assert token.cancel() is True
+    assert token.cancel() is False
+    remove()
+    assert calls == ["closed"]
+    with pytest.raises(ProviderCancelledError):
+        token.raise_if_cancelled(provider="test")
 
 
 def test_model_usage_normalizes_actual_and_missing_metadata():
@@ -151,6 +173,239 @@ def test_provider_error_exposes_stable_classification_without_message_parsing():
     }
 
 
+@pytest.mark.parametrize(
+    "status,category,retryable,should_fallback",
+    [
+        (401, "auth", False, False),
+        (402, "billing", False, True),
+        (404, "model_unavailable", False, True),
+        (408, "timeout", True, True),
+        (429, "rate_limit", True, True),
+        (503, "server", True, True),
+    ],
+)
+def test_http_errors_have_explicit_fallback_classification(
+    status, category, retryable, should_fallback
+):
+    client = OpenAICompatibleModelClient(
+        "gpt-test", "https://api.openai.com/v1", "key", 0, 30
+    )
+    error = urllib.error.HTTPError(
+        "https://api.openai.com/v1/responses",
+        status,
+        "failed",
+        {},
+        BytesIO(b'{"error":"redacted"}'),
+    )
+
+    with patch("urllib.request.urlopen", side_effect=error):
+        with pytest.raises(ProviderError) as raised:
+            list(client.stream(ModelRequest(prompt="hello", max_output_tokens=8)))
+
+    assert raised.value.category == category
+    assert raised.value.retryable is retryable
+    assert raised.value.should_fallback is should_fallback
+
+
+def test_fallback_chain_switches_only_before_stream_output():
+    class Provider:
+        supports_prompt_cache = False
+
+        def __init__(self, name, error=None, text=""):
+            self.model = name
+            self.error = error
+            self.text = text
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            if self.error is not None:
+                raise self.error
+            result = ModelResult(
+                text=self.text,
+                provider=self.model,
+                model=self.model,
+            )
+            yield ModelEvent(kind="text_delta", text=self.text)
+            yield ModelEvent(kind="completed", result=result)
+
+    primary = Provider(
+        "primary",
+        ProviderError(
+            "overloaded",
+            category="server",
+            provider="primary",
+            retryable=True,
+            should_fallback=True,
+            status_code=503,
+        ),
+    )
+    backup = Provider("backup", text="recovered")
+
+    result = stream_model(
+        FallbackModelClient([primary, backup]),
+        ModelRequest(prompt="hello", max_output_tokens=8),
+    )
+
+    assert result.text == "recovered"
+    assert primary.calls == backup.calls == 1
+    fallback = result.metadata["fallback"]
+    assert fallback["used"] is True
+    assert fallback["selected_index"] == 1
+    assert fallback["selected_provider"] == "backup"
+    assert fallback["selected_model"] == "backup"
+    assert [row["status"] for row in fallback["attempts"]] == [
+        "failed",
+        "completed",
+    ]
+    assert fallback["attempts"][0]["category"] == "server"
+    assert fallback["attempts"][0]["status_code"] == 503
+    assert all(row["duration_ms"] >= 0 for row in fallback["attempts"])
+
+
+def test_fallback_chain_does_not_switch_on_non_fallback_error():
+    class Provider:
+        supports_prompt_cache = False
+        model = "primary"
+
+        def __init__(self, error=None):
+            self.error = error
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            if self.error:
+                raise self.error
+            yield ModelEvent(
+                kind="completed", result=ModelResult(text="unexpected")
+            )
+
+    primary = Provider(
+        ProviderError(
+            "unauthorized",
+            category="auth",
+            provider="primary",
+            should_fallback=False,
+            status_code=401,
+        )
+    )
+    backup = Provider()
+
+    with pytest.raises(ProviderError, match="unauthorized"):
+        stream_model(
+            FallbackModelClient([primary, backup]),
+            ModelRequest(prompt="hello", max_output_tokens=8),
+        )
+
+    assert primary.calls == 1
+    assert backup.calls == 0
+
+
+def test_fallback_chain_does_not_mix_partial_streams():
+    class PartialProvider:
+        supports_prompt_cache = False
+        model = "partial"
+
+        def stream(self, request):
+            yield ModelEvent(kind="text_delta", text="partial")
+            raise ProviderError(
+                "connection lost",
+                category="connection",
+                provider="partial",
+                retryable=True,
+                should_fallback=True,
+            )
+
+    class BackupProvider:
+        supports_prompt_cache = False
+        model = "backup"
+
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            yield ModelEvent(
+                kind="completed", result=ModelResult(text="backup")
+            )
+
+    backup = BackupProvider()
+    chain = FallbackModelClient([PartialProvider(), backup])
+
+    with pytest.raises(ProviderError, match="connection lost"):
+        list(chain.stream(ModelRequest(prompt="hello", max_output_tokens=8)))
+
+    assert backup.calls == 0
+
+
+def test_fallback_chain_exhaustion_preserves_attempt_evidence():
+    class FailingProvider:
+        supports_prompt_cache = False
+
+        def __init__(self, model, status):
+            self.model = model
+            self.status = status
+
+        def stream(self, request):
+            raise ProviderError(
+                "unavailable",
+                category="server",
+                provider=self.model,
+                retryable=True,
+                should_fallback=True,
+                status_code=self.status,
+            )
+            yield
+
+    chain = FallbackModelClient(
+        [FailingProvider("primary", 503), FailingProvider("backup", 502)]
+    )
+
+    with pytest.raises(ProviderFallbackExhaustedError) as raised:
+        stream_model(chain, ModelRequest(prompt="hello", max_output_tokens=8))
+
+    evidence = raised.value.to_dict()
+    assert evidence["fallback_exhausted"] is True
+    assert [row["provider"] for row in evidence["fallback_attempts"]] == [
+        "primary",
+        "backup",
+    ]
+    assert evidence["should_fallback"] is False
+
+
+def test_fallback_chain_never_switches_on_cancellation():
+    class CancelledProvider:
+        supports_prompt_cache = False
+        model = "cancelled"
+
+        def stream(self, request):
+            raise ProviderCancelledError("cancelled", provider="cancelled")
+            yield
+
+    class BackupProvider:
+        supports_prompt_cache = False
+        model = "backup"
+
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            yield ModelEvent(
+                kind="completed", result=ModelResult(text="unexpected")
+            )
+
+    backup = BackupProvider()
+
+    with pytest.raises(ProviderCancelledError):
+        stream_model(
+            FallbackModelClient([CancelledProvider(), backup]),
+            ModelRequest(prompt="hello", max_output_tokens=8),
+        )
+
+    assert backup.calls == 0
+
+
 def test_stream_model_rejects_events_after_terminal_result():
     class InvalidStream:
         def stream(self, request):
@@ -267,6 +522,63 @@ def test_openai_stream_normalizes_text_tool_call_usage_and_schema():
     assert result.usage.total_tokens == 12
 
 
+def test_openai_stream_cancellation_closes_active_response():
+    class BlockingResponse:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self):
+            self.started = threading.Event()
+            self.closed = threading.Event()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def __iter__(self):
+            self.started.set()
+            self.closed.wait(timeout=2)
+            raise OSError("response closed")
+            yield b""
+
+        def close(self):
+            self.closed.set()
+
+    response = BlockingResponse()
+    token = CancellationToken()
+    client = OpenAICompatibleModelClient(
+        "gpt-test", "https://api.openai.com/v1", "key", 0, 30
+    )
+    captured = []
+
+    def consume():
+        try:
+            list(
+                client.stream(
+                    ModelRequest(
+                        prompt="wait",
+                        max_output_tokens=20,
+                        cancellation_token=token,
+                    )
+                )
+            )
+        except BaseException as exc:
+            captured.append(exc)
+
+    with patch("urllib.request.urlopen", return_value=response):
+        worker = threading.Thread(target=consume)
+        worker.start()
+        assert response.started.wait(timeout=1)
+        token.cancel()
+        worker.join(timeout=1)
+
+    assert worker.is_alive() is False
+    assert response.closed.is_set()
+    assert len(captured) == 1
+    assert isinstance(captured[0], ProviderCancelledError)
+
+
 def test_anthropic_stream_normalizes_text_tool_call_and_usage():
     class FakeResponse:
         headers = {"Content-Type": "text/event-stream"}
@@ -369,6 +681,59 @@ def test_agent_loop_accepts_typed_only_provider_and_passes_correlation(tmp_path)
     assert agent.last_completion_metadata["provider"] == "typed"
 
 
+def test_agent_loop_records_successful_provider_fallback(tmp_path):
+    class Primary:
+        supports_prompt_cache = False
+        model = "primary"
+
+        def stream(self, request):
+            raise ProviderError(
+                "overloaded",
+                category="server",
+                provider="primary",
+                retryable=True,
+                should_fallback=True,
+                status_code=503,
+            )
+            yield
+
+    class Backup:
+        supports_prompt_cache = False
+        model = "backup"
+
+        def stream(self, request):
+            result = ModelResult(
+                text="<final>recovered</final>",
+                provider="backup",
+                model="backup",
+            )
+            yield ModelEvent(kind="text_delta", text=result.text)
+            yield ModelEvent(kind="completed", result=result)
+
+    (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
+    agent = RepoAgent(
+        model_client=FallbackModelClient([Primary(), Backup()]),
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+    )
+
+    assert agent.ask("recover") == "recovered"
+    trace = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    fallback = next(event for event in trace if event["event"] == "model_fallback")
+    assert fallback["used"] is True
+    assert fallback["selected_provider"] == "backup"
+    assert [row["status"] for row in fallback["attempts"]] == [
+        "failed",
+        "completed",
+    ]
+
+
 def test_agent_loop_executes_normalized_native_tool_call(tmp_path):
     class NativeToolProvider:
         supports_prompt_cache = False
@@ -467,6 +832,63 @@ def test_final_text_stream_crosses_chunk_boundaries_without_leaking_protocol(tmp
     ]
     assert "".join(streamed) == "hello"
     assert all("analysis" not in text and "final" not in text for text in streamed)
+
+
+def test_ask_async_cancellation_converges_provider_and_turn(tmp_path):
+    class CancellableProvider:
+        supports_prompt_cache = False
+        model = "cancellable"
+
+        def __init__(self):
+            self.started = threading.Event()
+            self.stopped = threading.Event()
+
+        def stream(self, request):
+            self.started.set()
+            try:
+                while not request.cancellation_token.cancelled:
+                    time.sleep(0.005)
+                request.cancellation_token.raise_if_cancelled(provider="cancellable")
+                yield ModelEvent(kind="completed", result=ModelResult(text="late"))
+            finally:
+                self.stopped.set()
+
+    (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
+    provider = CancellableProvider()
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+    )
+
+    async def scenario():
+        task = asyncio.create_task(agent.ask_async("cancel me"))
+        assert await asyncio.to_thread(provider.started.wait, 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await agent.aclose()
+
+    asyncio.run(scenario())
+
+    assert provider.stopped.wait(timeout=1)
+    events = [
+        json.loads(line)
+        for line in agent.run_store.turn_events_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [event["kind"] for event in events].count("turn.cancelled") == 1
+    assert not any(event["kind"] == "turn.completed" for event in events)
+    trace = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(event["event"] == "model_cancelled" for event in trace)
+    assert not any(item["role"] == "tool" for item in agent.session["history"])
 
 
 def test_agent_loop_persists_structured_provider_failure_evidence(tmp_path):

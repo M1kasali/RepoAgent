@@ -11,9 +11,11 @@ import shutil
 import sys
 import textwrap
 
+from .pricing import ModelPricing
 from .config import load_project_env, load_user_env, provider_env
 from .paths import workspace_state_root
 from .providers.clients import AnthropicCompatibleModelClient, OllamaModelClient, OpenAICompatibleModelClient
+from .providers.profiles import BUILTIN_MODEL_PROFILES, get_model_profile
 from .run_store import RunStore
 from .runtime import RepoAgent, SessionStore
 from .workspace import WorkspaceContext, middle
@@ -58,16 +60,16 @@ HELP_DETAILS = textwrap.dedent(
 ).strip()
 
 
-DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
-DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
-DEFAULT_OPENAI_MODEL = "gpt-5.4"
-DEFAULT_OPENAI_BASE_URL = "https://www.right.codes/codex/v1"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
-DEFAULT_ANTHROPIC_BASE_URL = "https://www.right.codes/claude/v1"
-DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-pro"
-DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic"
+DEFAULT_OLLAMA_MODEL = BUILTIN_MODEL_PROFILES["ollama"].model
+DEFAULT_OLLAMA_HOST = BUILTIN_MODEL_PROFILES["ollama"].base_url
+DEFAULT_OPENAI_MODEL = BUILTIN_MODEL_PROFILES["openai"].model
+DEFAULT_OPENAI_BASE_URL = BUILTIN_MODEL_PROFILES["openai"].base_url
+DEFAULT_ANTHROPIC_MODEL = BUILTIN_MODEL_PROFILES["anthropic"].model
+DEFAULT_ANTHROPIC_BASE_URL = BUILTIN_MODEL_PROFILES["anthropic"].base_url
+DEFAULT_DEEPSEEK_MODEL = BUILTIN_MODEL_PROFILES["deepseek"].model
+DEFAULT_DEEPSEEK_BASE_URL = BUILTIN_MODEL_PROFILES["deepseek"].base_url
 DEFAULT_PROVIDER = "deepseek"
-PROVIDER_CHOICES = ("ollama", "openai", "anthropic", "deepseek")
+PROVIDER_CHOICES = tuple(BUILTIN_MODEL_PROFILES)
 SECRET_ENV_NAMES_VAR = "REPOAGENT_SECRET_ENV_NAMES"
 LEGACY_SECRET_ENV_NAMES_VAR = "PICO_SECRET_ENV_NAMES"
 
@@ -77,8 +79,21 @@ def _effective_provider(args):
     # 1. 用户显式传入 --provider
     # 2. 项目 .env / shell 里的 REPOAGENT_PROVIDER
     # 3. 代码里的默认 provider
-    provider = getattr(args, "provider", None) or provider_env(
-        "REPOAGENT_PROVIDER", default=DEFAULT_PROVIDER
+    explicit_profile = getattr(args, "profile", None)
+    explicit_provider = getattr(args, "provider", None)
+    if (
+        explicit_profile
+        and explicit_provider
+        and explicit_profile != explicit_provider
+    ):
+        raise ValueError(
+            "--profile and --provider must select the same built-in profile"
+        )
+    provider = (
+        explicit_profile
+        or explicit_provider
+        or provider_env("REPOAGENT_MODEL_PROFILE")
+        or provider_env("REPOAGENT_PROVIDER", default=DEFAULT_PROVIDER)
     )
     if provider not in PROVIDER_CHOICES:
         choices = ", ".join(PROVIDER_CHOICES)
@@ -109,7 +124,122 @@ def _effective_model(args, provider):
         if model:
             return model
         return DEFAULT_DEEPSEEK_MODEL
-    return DEFAULT_OLLAMA_MODEL
+    model = provider_env("REPOAGENT_OLLAMA_MODEL", ("OLLAMA_MODEL",))
+    return model or DEFAULT_OLLAMA_MODEL
+
+
+def _profile_base_url(args, provider):
+    if provider == "ollama":
+        return getattr(args, "host", None) or DEFAULT_OLLAMA_HOST
+    explicit = getattr(args, "base_url", None)
+    if explicit:
+        return explicit
+    if provider == "openai":
+        return provider_env(
+            "REPOAGENT_OPENAI_API_BASE",
+            ("OPENAI_API_BASE",),
+            DEFAULT_OPENAI_BASE_URL,
+        )
+    if provider == "anthropic":
+        return provider_env(
+            "REPOAGENT_ANTHROPIC_API_BASE",
+            ("ANTHROPIC_API_BASE",),
+            DEFAULT_ANTHROPIC_BASE_URL,
+        )
+    return provider_env(
+        "REPOAGENT_DEEPSEEK_API_BASE",
+        ("DEEPSEEK_API_BASE",),
+        DEFAULT_DEEPSEEK_BASE_URL,
+    )
+
+
+def _resolve_model_profile(args):
+    provider = _effective_provider(args)
+    profile = get_model_profile(provider)
+    timeout = (
+        getattr(args, "ollama_timeout", profile.timeout_seconds)
+        if profile.protocol == "ollama"
+        else getattr(
+            args,
+            "openai_timeout",
+            getattr(args, "ollama_timeout", profile.timeout_seconds),
+        )
+    )
+    return profile.with_overrides(
+        model=_effective_model(args, provider),
+        base_url=_profile_base_url(args, provider),
+        timeout_seconds=timeout,
+        max_output_tokens=getattr(
+            args, "max_new_tokens", profile.max_output_tokens
+        ),
+        temperature=getattr(args, "temperature", profile.temperature),
+        top_p=(
+            getattr(args, "top_p", profile.top_p)
+            if profile.protocol == "ollama"
+            else None
+        ),
+        pricing=_resolve_model_pricing(args, provider),
+    )
+
+
+def _profile_api_key(profile):
+    for name in profile.credential_envs:
+        value = provider_env(name)
+        if value:
+            return value
+    return ""
+
+
+def _resolve_model_pricing(args, provider):
+    prefix = f"REPOAGENT_{provider.upper()}"
+    input_rate = getattr(args, "input_cost_per_1m_usd", None)
+    output_rate = getattr(args, "output_cost_per_1m_usd", None)
+    if input_rate is None:
+        value = provider_env(
+            f"{prefix}_INPUT_COST_PER_1M_USD",
+            ("REPOAGENT_INPUT_COST_PER_1M_USD",),
+        )
+        input_rate = float(value) if value else None
+    if output_rate is None:
+        value = provider_env(
+            f"{prefix}_OUTPUT_COST_PER_1M_USD",
+            ("REPOAGENT_OUTPUT_COST_PER_1M_USD",),
+        )
+        output_rate = float(value) if value else None
+    if input_rate is None and output_rate is None:
+        return None
+    if input_rate is None or output_rate is None:
+        raise ValueError(
+            "input and output pricing rates must be configured together"
+        )
+    cache_read_rate = getattr(args, "cache_read_cost_per_1m_usd", None)
+    cache_write_rate = getattr(args, "cache_write_cost_per_1m_usd", None)
+    if cache_read_rate is None:
+        value = provider_env(
+            f"{prefix}_CACHE_READ_COST_PER_1M_USD",
+            ("REPOAGENT_CACHE_READ_COST_PER_1M_USD",),
+        )
+        cache_read_rate = float(value) if value else None
+    if cache_write_rate is None:
+        value = provider_env(
+            f"{prefix}_CACHE_WRITE_COST_PER_1M_USD",
+            ("REPOAGENT_CACHE_WRITE_COST_PER_1M_USD",),
+        )
+        cache_write_rate = float(value) if value else None
+    source = (
+        getattr(args, "pricing_source", None)
+        or provider_env(
+            f"{prefix}_PRICING_SOURCE", ("REPOAGENT_PRICING_SOURCE",)
+        )
+        or "user-configured"
+    )
+    return ModelPricing(
+        input_per_1m_usd=input_rate,
+        output_per_1m_usd=output_rate,
+        source=source,
+        cache_read_per_1m_usd=cache_read_rate,
+        cache_write_per_1m_usd=cache_write_rate,
+    )
 
 
 def _configured_secret_names(args):
@@ -126,58 +256,33 @@ def _configured_secret_names(args):
 
 
 def _build_model_client(args):
-    provider = _effective_provider(args)
-    # CLI 只负责把 provider 选择翻译成具体 client。
-    # 真正的提示词格式、缓存支持、HTTP 协议差异，都封装在 models.py 里。
-    if provider == "openai":
-        model = _effective_model(args, provider)
-        base_url = getattr(args, "base_url", None) or provider_env("REPOAGENT_OPENAI_API_BASE", ("OPENAI_API_BASE",), DEFAULT_OPENAI_BASE_URL)
-        api_key = provider_env(
-            "REPOAGENT_OPENAI_API_KEY",
-            ("OPENAI_API_KEY", "REPOAGENT_RIGHT_CODES_API_KEY", "RIGHT_CODES_API_KEY", "REPOAGENT_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
+    profile = _resolve_model_profile(args)
+    if profile.protocol == "ollama":
+        client = OllamaModelClient(
+            model=profile.model,
+            host=profile.base_url,
+            temperature=profile.temperature,
+            top_p=profile.top_p,
+            timeout=profile.timeout_seconds,
         )
-        return OpenAICompatibleModelClient(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            temperature=args.temperature,
-            timeout=getattr(args, "openai_timeout", getattr(args, "ollama_timeout", 300)),
+    elif profile.protocol == "openai":
+        client = OpenAICompatibleModelClient(
+            model=profile.model,
+            base_url=profile.base_url,
+            api_key=_profile_api_key(profile),
+            temperature=profile.temperature,
+            timeout=profile.timeout_seconds,
         )
-    if provider == "anthropic":
-        model = _effective_model(args, provider)
-        base_url = getattr(args, "base_url", None) or provider_env("REPOAGENT_ANTHROPIC_API_BASE", ("ANTHROPIC_API_BASE",), DEFAULT_ANTHROPIC_BASE_URL)
-        api_key = provider_env(
-            "REPOAGENT_ANTHROPIC_API_KEY",
-            ("ANTHROPIC_API_KEY", "REPOAGENT_RIGHT_CODES_API_KEY", "RIGHT_CODES_API_KEY", "REPOAGENT_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    else:
+        client = AnthropicCompatibleModelClient(
+            model=profile.model,
+            base_url=profile.base_url,
+            api_key=_profile_api_key(profile),
+            temperature=profile.temperature,
+            timeout=profile.timeout_seconds,
         )
-        return AnthropicCompatibleModelClient(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            temperature=args.temperature,
-            timeout=getattr(args, "openai_timeout", getattr(args, "ollama_timeout", 300)),
-        )
-    if provider == "deepseek":
-        model = _effective_model(args, provider)
-        base_url = getattr(args, "base_url", None) or provider_env("REPOAGENT_DEEPSEEK_API_BASE", ("DEEPSEEK_API_BASE",), DEFAULT_DEEPSEEK_BASE_URL)
-        api_key = provider_env("REPOAGENT_DEEPSEEK_API_KEY", ("DEEPSEEK_API_KEY",))
-        return AnthropicCompatibleModelClient(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            temperature=args.temperature,
-            timeout=getattr(args, "openai_timeout", getattr(args, "ollama_timeout", 300)),
-        )
-
-    model = _effective_model(args, provider)
-    host = getattr(args, "host", DEFAULT_OLLAMA_HOST)
-    return OllamaModelClient(
-        model=model,
-        host=host,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        timeout=args.ollama_timeout,
-    )
+    client.profile = profile
+    return client
 
 
 def build_welcome(agent, model, host):
@@ -252,6 +357,7 @@ def build_agent(args):
     run_store = RunStore(state_root / "runs")
     recovered_turn_ids = run_store.recover_incomplete_turns()
     model = _build_model_client(args)
+    model_profile = model.profile
     session_id = args.resume
     if session_id == "latest":
         session_id = store.latest()
@@ -264,7 +370,7 @@ def build_agent(args):
             session_id=session_id,
             approval_policy=args.approval,
             max_steps=args.max_steps,
-            max_new_tokens=args.max_new_tokens,
+            max_new_tokens=model_profile.max_output_tokens,
             secret_env_names=configured_secret_names,
         )
     else:
@@ -275,7 +381,7 @@ def build_agent(args):
             run_store=run_store,
             approval_policy=args.approval,
             max_steps=args.max_steps,
-            max_new_tokens=args.max_new_tokens,
+            max_new_tokens=model_profile.max_output_tokens,
             secret_env_names=configured_secret_names,
         )
     agent.recovered_turn_ids = tuple(recovered_turn_ids)
@@ -290,10 +396,16 @@ def build_arg_parser():
     parser.add_argument("prompt", nargs="*", help="Optional one-shot prompt.")
     parser.add_argument("--cwd", default=".", help="Workspace directory.")
     parser.add_argument(
+        "--profile",
+        choices=PROVIDER_CHOICES,
+        default=None,
+        help="Validated built-in model profile. Compatible with --provider when both match.",
+    )
+    parser.add_argument(
         "--provider",
         choices=PROVIDER_CHOICES,
         default=None,
-        help="Model backend to use. Defaults to REPOAGENT_PROVIDER or deepseek.",
+        help="Compatibility alias for a built-in model profile. Defaults to REPOAGENT_MODEL_PROFILE, REPOAGENT_PROVIDER, or deepseek.",
     )
     parser.add_argument(
         "--model",
@@ -304,6 +416,35 @@ def build_arg_parser():
     parser.add_argument("--base-url", default=None, help="Provider API base URL for deepseek, openai, or anthropic.")
     parser.add_argument("--ollama-timeout", type=int, default=300, help="Ollama request timeout in seconds.")
     parser.add_argument("--openai-timeout", type=int, default=300, help="OpenAI-compatible request timeout in seconds.")
+    parser.add_argument(
+        "--input-cost-per-1m-usd",
+        type=float,
+        default=None,
+        help="Explicit input-token price snapshot in USD per one million tokens.",
+    )
+    parser.add_argument(
+        "--output-cost-per-1m-usd",
+        type=float,
+        default=None,
+        help="Explicit output-token price snapshot in USD per one million tokens.",
+    )
+    parser.add_argument(
+        "--pricing-source",
+        default=None,
+        help="Human-readable provenance for explicitly configured model rates.",
+    )
+    parser.add_argument(
+        "--cache-read-cost-per-1m-usd",
+        type=float,
+        default=None,
+        help="Explicit cache-read price snapshot in USD per one million tokens.",
+    )
+    parser.add_argument(
+        "--cache-write-cost-per-1m-usd",
+        type=float,
+        default=None,
+        help="Explicit cache-write price snapshot in USD per one million tokens.",
+    )
     parser.add_argument("--resume", default=None, help="Session id to resume or 'latest'.")
     parser.add_argument("--approval", choices=("ask", "auto", "never"), default="ask", help="Approval policy for risky tools.")
     parser.add_argument(

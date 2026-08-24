@@ -532,6 +532,7 @@ def test_openai_compatible_client_sends_prompt_cache_fields_and_records_usage():
     assert client.last_completion_metadata["cached_tokens"] == 1536
     assert client.last_completion_metadata["cache_hit"] is True
     assert client.last_completion_metadata["input_tokens"] == 2048
+    assert client.last_completion_metadata["input_token_semantics"] == "total"
 
 
 def test_openai_compatible_client_extracts_text_from_event_stream():

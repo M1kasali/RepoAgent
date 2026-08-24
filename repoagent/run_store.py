@@ -55,6 +55,9 @@ class RunStore:
     def report_path(self, run_id):
         return self.run_dir(run_id) / "report.json"
 
+    def call_ledger_path(self, run_id):
+        return self.run_dir(run_id) / "calls.jsonl"
+
     def turn_path(self, turn_id):
         return self.run_dir(turn_id) / "turn.json"
 
@@ -84,6 +87,12 @@ class RunStore:
         # trace 采用 jsonl 追加写入，原因是 agent 运行过程是流式事件序列，
         # 逐条落盘比“最后一次性写整份 trace”更稳，也更适合调试。
         append_jsonl(path, event)
+        return path
+
+    def append_model_call(self, task_state, record):
+        path = self.call_ledger_path(task_state)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        append_jsonl(path, record)
         return path
 
     def write_report(self, task_state, report):

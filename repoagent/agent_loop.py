@@ -2,11 +2,59 @@
 
 import time
 
+from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
 from .checkpoint import CHECKPOINT_NONE_STATUS, CHECKPOINT_PARTIAL_STALE_STATUS, CHECKPOINT_WORKSPACE_MISMATCH_STATUS
-from .providers.base import ModelRequest, ProviderError, stream_model
+from .providers.base import (
+    CancellationToken,
+    ModelRequest,
+    ModelUsage,
+    ModelUsageAggregate,
+    ProviderCancelledError,
+    ProviderError,
+    stream_model,
+)
 from .providers.tool_schema import model_tools_from_registry
 from .task_state import TaskState
 from .workspace import clip, now
+
+
+def _pricing_for_client(client, provider, model):
+    candidates = tuple(getattr(client, "providers", ())) or (client,)
+    profiles = tuple(
+        profile
+        for candidate in candidates
+        if (profile := getattr(candidate, "profile", None)) is not None
+    )
+    for profile in profiles:
+        if profile.provider == provider:
+            return profile.pricing
+    for profile in profiles:
+        if profile.model == model:
+            return profile.pricing
+    profile = getattr(client, "profile", None)
+    return profile.pricing if profile is not None else None
+
+
+def _validated_fallback_attempts(value, *, statuses):
+    if not isinstance(value, (list, tuple)):
+        return ()
+    attempts = []
+    seen_indexes = set()
+    for raw in value:
+        if not isinstance(raw, dict) or raw.get("status") not in statuses:
+            continue
+        try:
+            index = int(raw.get("index", 0))
+            duration_ms = int(raw.get("duration_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        if index < 0 or duration_ms < 0 or index in seen_indexes:
+            continue
+        seen_indexes.add(index)
+        attempts.append(
+            {**raw, "index": index, "duration_ms": duration_ms}
+        )
+    return tuple(attempts)
 
 
 class _FinalTextStream:
@@ -56,9 +104,86 @@ class AgentLoop:
     def __init__(self, agent):
         self.agent = agent
 
-    def run(self, user_message, turn_request=None, model_text_sink=None):
+    def run(
+        self,
+        user_message,
+        turn_request=None,
+        model_text_sink=None,
+        cancellation_token: CancellationToken | None = None,
+    ):
         agent = self.agent
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled(
+                provider=type(agent.model_client).__name__
+            )
         run_started_at = time.monotonic()
+        usage_rows = []
+        call_entries = []
+        agent.last_completion_metadata = {}
+        agent.last_model_result = None
+        agent.last_prompt_metadata = {}
+        agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
+            (), turn_succeeded=False
+        ).to_dict()
+
+        def record_model_call(
+            model_request,
+            *,
+            provider_attempt,
+            provider,
+            model,
+            status,
+            duration_ms,
+            usage=None,
+            finish_reason="",
+            error_category="",
+        ):
+            entry = CallEfficiencyEntry(
+                provider_call_id=(
+                    f"{model_request.request_id}:{model_request.attempt}:"
+                    f"{provider_attempt}"
+                ),
+                turn_id=model_request.turn_id,
+                request_id=model_request.request_id,
+                session_id=model_request.session_id,
+                agent_attempt=model_request.attempt,
+                provider_attempt=provider_attempt,
+                provider=str(provider),
+                model=str(model),
+                status=status,
+                duration_ms=max(0, int(duration_ms)),
+                usage=usage or ModelUsage(),
+                pricing=_pricing_for_client(
+                    agent.model_client, str(provider), str(model)
+                ),
+                finish_reason=finish_reason,
+                error_category=error_category,
+                call_kind=model_request.call_kind,
+            )
+            call_entries.append(entry)
+            payload = entry.to_dict()
+            agent.run_store.append_model_call(task_state, payload)
+            agent.emit_trace(task_state, "model_call_accounted", payload)
+            agent.last_call_efficiency_summary = (
+                CallEfficiencySummary.from_entries(
+                    call_entries, turn_succeeded=False
+                ).to_dict()
+            )
+            return entry
+
+        def record_missing_model_calls(count, prompt_metadata):
+            usage_rows.extend(ModelUsage() for _ in range(max(1, int(count))))
+            aggregate = ModelUsageAggregate.from_usages(usage_rows)
+            aggregate_metadata = aggregate.to_metadata()
+            agent.last_completion_metadata = {
+                **agent.last_completion_metadata,
+                **aggregate_metadata,
+            }
+            agent.last_prompt_metadata = {
+                **prompt_metadata,
+                **agent.last_completion_metadata,
+            }
+            return aggregate_metadata
         agent.memory.set_task_summary(user_message)
         agent.record({"role": "user", "content": user_message, "created_at": now()})
 
@@ -90,6 +215,10 @@ class AgentLoop:
         # 4. 记录：把结果写回 history / task_state / trace / memory
         # 然后进入下一轮，直到停机条件满足
         while tool_steps < agent.max_steps and attempts < max_attempts:
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled(
+                    provider=type(agent.model_client).__name__
+                )
             attempts += 1
             task_state.record_attempt()
             agent.run_store.write_task_state(task_state)
@@ -150,6 +279,11 @@ class AgentLoop:
                     "attempts": task_state.attempts,
                     "tool_steps": task_state.tool_steps,
                     "prompt_cache_key": prompt_metadata.get("prompt_cache_key"),
+                    "model_profile": (
+                        agent.model_client.profile.to_dict()
+                        if getattr(agent.model_client, "profile", None) is not None
+                        else None
+                    ),
                 },
             )
             prompt_cache_key = None
@@ -173,6 +307,7 @@ class AgentLoop:
                 ),
                 attempt=task_state.attempts,
                 tools=model_tools_from_registry(agent.tools),
+                cancellation_token=cancellation_token,
             )
             stream_stats = {"events": 0, "text_deltas": 0, "tool_calls": 0}
             final_stream = (
@@ -194,10 +329,21 @@ class AgentLoop:
                     model_request,
                     on_event=observe_model_event,
                 )
-            except ProviderError as exc:
+            except ProviderCancelledError as exc:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=exc.provider or type(agent.model_client).__name__,
+                    model=str(getattr(agent.model_client, "model", "")),
+                    status="cancelled",
+                    duration_ms=int(
+                        (time.monotonic() - model_started_at) * 1000
+                    ),
+                    error_category=exc.category,
+                )
                 agent.emit_trace(
                     task_state,
-                    "model_failed",
+                    "model_cancelled",
                     {
                         **exc.to_dict(),
                         "model": str(getattr(agent.model_client, "model", "")),
@@ -208,7 +354,70 @@ class AgentLoop:
                     },
                 )
                 raise
+            except ProviderError as exc:
+                error_evidence = exc.to_dict()
+                fallback_attempts = _validated_fallback_attempts(
+                    error_evidence.get("fallback_attempts"),
+                    statuses={"failed"},
+                )
+                if fallback_attempts:
+                    for attempt in fallback_attempts:
+                        record_model_call(
+                            model_request,
+                            provider_attempt=int(attempt.get("index", 0)),
+                            provider=attempt.get("provider", exc.provider),
+                            model=attempt.get("model", ""),
+                            status="failed",
+                            duration_ms=int(attempt.get("duration_ms", 0)),
+                            error_category=attempt.get(
+                                "category", exc.category
+                            ),
+                        )
+                else:
+                    record_model_call(
+                        model_request,
+                        provider_attempt=0,
+                        provider=(
+                            exc.provider or type(agent.model_client).__name__
+                        ),
+                        model=str(getattr(agent.model_client, "model", "")),
+                        status="failed",
+                        duration_ms=int(
+                            (time.monotonic() - model_started_at) * 1000
+                        ),
+                        error_category=exc.category,
+                    )
+                missing_calls = len(fallback_attempts)
+                usage_aggregate = record_missing_model_calls(
+                    missing_calls or 1, prompt_metadata
+                )
+                agent.emit_trace(
+                    task_state,
+                    "model_failed",
+                    {
+                        **error_evidence,
+                        "model": str(getattr(agent.model_client, "model", "")),
+                        "attempts": task_state.attempts,
+                        "usage_aggregate": usage_aggregate,
+                        "duration_ms": int(
+                            (time.monotonic() - model_started_at) * 1000
+                        ),
+                    },
+                )
+                raise
             except Exception as exc:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=type(agent.model_client).__name__,
+                    model=str(getattr(agent.model_client, "model", "")),
+                    status="failed",
+                    duration_ms=int(
+                        (time.monotonic() - model_started_at) * 1000
+                    ),
+                    error_category="unexpected",
+                )
+                usage_aggregate = record_missing_model_calls(1, prompt_metadata)
                 agent.emit_trace(
                     task_state,
                     "model_failed",
@@ -221,6 +430,7 @@ class AgentLoop:
                         "status_code": None,
                         "error_type": type(exc).__name__,
                         "attempts": task_state.attempts,
+                        "usage_aggregate": usage_aggregate,
                         "duration_ms": int(
                             (time.monotonic() - model_started_at) * 1000
                         ),
@@ -228,7 +438,77 @@ class AgentLoop:
                 )
                 raise
             raw = model_result.text
-            completion_metadata = model_result.completion_metadata()
+            call_completion_metadata = model_result.completion_metadata()
+            fallback = call_completion_metadata.get("fallback")
+            if isinstance(fallback, dict):
+                fallback_attempts = _validated_fallback_attempts(
+                    fallback.get("attempts"),
+                    statuses={"completed", "failed"},
+                )
+                if (
+                    sum(
+                        attempt["status"] == "completed"
+                        for attempt in fallback_attempts
+                    )
+                    != 1
+                ):
+                    fallback_attempts = ()
+                failed_attempts = sum(
+                    1
+                    for attempt in fallback_attempts
+                    if attempt["status"] == "failed"
+                )
+                usage_rows.extend(ModelUsage() for _ in range(failed_attempts))
+                for attempt in fallback_attempts:
+                    status = str(attempt.get("status", ""))
+                    record_model_call(
+                        model_request,
+                        provider_attempt=int(attempt.get("index", 0)),
+                        provider=attempt.get("provider", model_result.provider),
+                        model=attempt.get("model", model_result.model),
+                        status=status,
+                        duration_ms=int(attempt.get("duration_ms", 0)),
+                        usage=(
+                            model_result.usage
+                            if status == "completed"
+                            else ModelUsage()
+                        ),
+                        finish_reason=(
+                            model_result.finish_reason
+                            if status == "completed"
+                            else ""
+                        ),
+                        error_category=attempt.get("category", ""),
+                    )
+            if not isinstance(fallback, dict) or not fallback_attempts:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=(
+                        model_result.provider
+                        or type(agent.model_client).__name__
+                    ),
+                    model=(
+                        model_result.model
+                        or str(getattr(agent.model_client, "model", ""))
+                    ),
+                    status="completed",
+                    duration_ms=(
+                        model_result.latency_ms
+                        or int(
+                            (time.monotonic() - model_started_at) * 1000
+                        )
+                    ),
+                    usage=model_result.usage,
+                    finish_reason=model_result.finish_reason,
+                )
+            usage_rows.append(model_result.usage)
+            usage_aggregate = ModelUsageAggregate.from_usages(usage_rows)
+            completion_metadata = {
+                **call_completion_metadata,
+                **usage_aggregate.to_metadata(),
+                "last_call_usage": model_result.usage.to_metadata(),
+            }
             if completion_metadata:
                 # 把后端返回的 usage/cache 统计并回 prompt_metadata，
                 # 方便统一写入 report 和 trace。
@@ -236,6 +516,8 @@ class AgentLoop:
             agent.last_completion_metadata = completion_metadata
             agent.last_model_result = model_result
             agent.last_prompt_metadata = prompt_metadata
+            if isinstance(fallback, dict) and fallback.get("used"):
+                agent.emit_trace(task_state, "model_fallback", fallback)
             if model_result.tool_calls:
                 kind, payload = "tools", [
                     {
@@ -252,7 +534,8 @@ class AgentLoop:
                 "model_parsed",
                 {
                     "kind": kind,
-                    "completion_metadata": completion_metadata,
+                    "completion_metadata": call_completion_metadata,
+                    "usage_aggregate": usage_aggregate.to_metadata(),
                     "stream": stream_stats,
                     "duration_ms": int((time.monotonic() - model_started_at) * 1000),
                 },
@@ -261,6 +544,10 @@ class AgentLoop:
             if kind in {"tool", "tools"}:
                 calls = payload if kind == "tools" else [payload]
                 for call in calls:
+                    if cancellation_token is not None:
+                        cancellation_token.raise_if_cancelled(
+                            provider=type(agent.model_client).__name__
+                        )
                     if tool_steps >= agent.max_steps:
                         break
                     tool_steps += 1
@@ -316,8 +603,17 @@ class AgentLoop:
                 continue
 
             final = (payload or raw).strip()
+            if cancellation_token is not None:
+                cancellation_token.raise_if_cancelled(
+                    provider=type(agent.model_client).__name__
+                )
             agent.record({"role": "assistant", "content": final, "created_at": now()})
             task_state.finish_success(final)
+            agent.last_call_efficiency_summary = (
+                CallEfficiencySummary.from_entries(
+                    call_entries, turn_succeeded=True
+                ).to_dict()
+            )
             agent.promote_durable_memory(user_message, final)
             checkpoint = agent.create_checkpoint(task_state, user_message, trigger="run_finished")
             agent.run_store.write_task_state(task_state)
@@ -336,6 +632,7 @@ class AgentLoop:
                     "status": task_state.status,
                     "stop_reason": task_state.stop_reason,
                     "final_answer": final,
+                    "call_efficiency": agent.last_call_efficiency_summary,
                     "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
                 },
             )
@@ -349,6 +646,11 @@ class AgentLoop:
             final = "Stopped after reaching the step limit without a final answer."
             task_state.stop_step_limit(final)
         agent.record({"role": "assistant", "content": final, "created_at": now()})
+        agent.last_call_efficiency_summary = (
+            CallEfficiencySummary.from_entries(
+                call_entries, turn_succeeded=False
+            ).to_dict()
+        )
         agent.promote_durable_memory(user_message, final)
         agent.run_store.write_task_state(task_state)
         checkpoint = agent.create_checkpoint(task_state, user_message, trigger=task_state.stop_reason or "run_stopped")
@@ -367,6 +669,7 @@ class AgentLoop:
                 "status": task_state.status,
                 "stop_reason": task_state.stop_reason,
                 "final_answer": final,
+                "call_efficiency": agent.last_call_efficiency_summary,
                 "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
             },
         )

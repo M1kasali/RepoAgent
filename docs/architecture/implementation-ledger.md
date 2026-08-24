@@ -76,11 +76,15 @@ Copy this section for each completed capability.
 | Tool execution | `repoagent/tool_executor.py`, `repoagent/tools.py` | partial | TECH-004 |
 | Context reduction | `repoagent/context_manager.py` | partial | TECH-005 |
 | Memory | `repoagent/features/memory.py` | partial | TECH-005 |
-| Provider contracts and adapters | `repoagent/providers/base.py`, `repoagent/providers/clients.py` | typed streaming and native tools implemented | TECH-011 |
+| Provider contracts and adapters | `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/providers/fallback.py` | typed streaming, cancellation, and explicit fallback implemented | TECH-011 |
+| Model profiles | `repoagent/providers/profiles.py`, `repoagent/cli.py` | validated built-in profiles and compatibility assembly implemented | TECH-012 |
+| Usage accounting | `repoagent/providers/base.py`, `repoagent/agent_loop.py`, `repoagent/spine/runner.py` | multi-call totals and source completeness implemented | TECH-013 |
+| Call efficiency | `repoagent/pricing.py`, `repoagent/call_efficiency.py`, `repoagent/run_store.py` | explicit price snapshots and per-attempt cost evidence implemented | TECH-014 |
+| Cache and compaction accounting | `repoagent/providers/base.py`, `repoagent/pricing.py`, `repoagent/call_efficiency.py` | provider-aware cache cost and compaction call classification implemented | TECH-015 |
 | Evaluation | `repoagent/evaluation/` | partial | TECH-007 |
 | Naming and compatibility | `repoagent/config.py`, `repoagent/paths.py` | implemented | TECH-001 |
 | Runtime Spine | `repoagent/spine/`, `repoagent/agent_turn_runner.py` | implemented single-Turn lifecycle | TECH-008 |
-| Turn scheduling | `repoagent/spine/scheduler.py`, `repoagent/spine/_barrier.py` | implemented; deep cancellation partial | TECH-009 |
+| Turn scheduling | `repoagent/spine/scheduler.py`, `repoagent/spine/_barrier.py` | implemented; provider cancellation integrated, tool cancellation pending | TECH-009 |
 | Crash recovery | `repoagent/run_store.py`, `repoagent/cli.py` | implemented for persisted Turns | TECH-010 |
 
 ## TECH-001 - RepoAgent Identity and Compatibility Layer
@@ -374,7 +378,7 @@ shutdown -> seal -> cancel queued -> grace for running -> cancel survivors
 
 ### Failure and Cancellation
 
-The scheduler handles cancellation while queued, while waiting for capacity, and while executing an async runner. `TurnRuntime` converts cancellation into a persisted terminal outcome. The current `AgentTurnRunner` delegates the synchronous AgentLoop through `asyncio.to_thread()`; Python cannot safely kill that worker thread or an active synchronous HTTP/subprocess call. Provider-level and tool-process cancellation therefore remain P2-04 and P3-05, and `P1-09` is not marked complete.
+The scheduler handles cancellation while queued, while waiting for capacity, and while executing an async runner. `TurnRuntime` converts cancellation into a persisted terminal outcome. `AgentTurnRunner` creates a cancellation token for its worker thread; cancellation reaches AgentLoop and the provider adapters, then the runner waits for worker convergence before returning control. Built-in providers close an active HTTP response, but Python still cannot kill a thread blocked before a response handle exists or stop a synchronous tool subprocess. Connection setup is timeout-bounded and tool-process cancellation remains `P3-05`, so `P1-09` is not marked complete.
 
 ### Verification
 
@@ -467,10 +471,10 @@ Focused tests cover atomic replacement, incomplete-tail repair, corrupt JSONL re
 
 ## TECH-011 - Typed Provider Runtime
 
-- Plan items: `P2-01`, `P2-02`, `P2-03`; partial `P2-04`, `P2-07`
-- Status: implemented typed streaming boundary; active-I/O cancellation pending
+- Plan items: `P2-01`, `P2-02`, `P2-03`, `P2-04`, `P2-05`
+- Status: implemented typed streaming, model cancellation, and fallback boundary
 - Implemented: 2026-08-24
-- Owning modules: `repoagent/providers/base.py`, `repoagent/providers/clients.py`
+- Owning modules: `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/providers/fallback.py`
 - Integration: `repoagent/agent_loop.py`, `repoagent/runtime.py`
 - Tests: `tests/test_provider_runtime.py`, `tests/test_repoagent.py`, `tests/test_agent_loop.py`
 
@@ -480,11 +484,12 @@ AgentLoop previously called `complete(prompt, max_tokens)` and then inspected th
 
 ### Interface
 
-- `ModelRequest` carries prompt, output budget, cache policy, timeout override, correlation IDs, attempt number, and provider-neutral `ModelTool` schemas.
+- `ModelRequest` carries prompt, output budget, cache policy, timeout override, correlation IDs, attempt number, a thread-safe cancellation token, and provider-neutral `ModelTool` schemas.
 - `ModelResult` carries text, normalized tool calls, finish reason, usage, provider/model identity, latency, and immutable metadata.
 - `ModelUsage` separates actual, estimated, and missing sources and normalizes cache token fields.
 - `ModelEvent` is the common text-delta, tool-call, and terminal streaming event shape.
 - `ProviderError` exposes category, retry/fallback verdicts, provider, and optional HTTP status without caller string matching.
+- `FallbackModelClient` executes an ordered provider chain and records immutable `ProviderAttempt` evidence.
 - `generate_model()` invokes typed providers and contains compatibility for complete-only clients.
 
 ### Invariants
@@ -496,6 +501,10 @@ AgentLoop previously called `complete(prompt, max_tokens)` and then inspected th
 - Every provider failure reaching AgentLoop writes a `model_failed` trace event before propagating.
 - Structured error evidence contains stable classifications, not secret-bearing response text.
 - Every stream must end with one normalized completed event; truncated provider streams fail closed.
+- Cancellation is classified separately from failure and never triggers retry or provider fallback.
+- Fallback requires an explicit `should_fallback` classification and is forbidden after any text or tool event has escaped from an attempt.
+- Authentication, invalid-request, protocol, and cancellation failures fail closed; rate-limit, server, timeout, billing, unavailable-model, and connection failures may switch when a next provider exists.
+- Cancellation is checked before a model call, between stream events, before tool execution, and before final answer persistence.
 - Multiple native tool calls execute in response order and cannot exceed the Turn tool-step budget.
 - Only text inside the final-answer protocol reaches Turn output; reasoning and tool protocol remain internal.
 
@@ -517,20 +526,248 @@ Fake, Ollama, OpenAI-compatible, and Anthropic-compatible clients retain `comple
 
 The current tool registry is deterministically projected to JSON Schema before entering `ModelRequest`. OpenAI and Anthropic adapters translate that neutral schema into their wire shapes. Tool execution remains owned by the existing executor; ToolGateway will replace this temporary projection in P3.
 
+`FallbackModelClient` is an explicit wrapper rather than hidden adapter behavior. Each failed or completed attempt records its chain index, provider, model, status, category, HTTP status, and duration. A successful switch is attached to `ModelResult.metadata` and written as `model_fallback`; an exhausted multi-provider chain raises `ProviderFallbackExhaustedError`, whose structured attempt list is written in `model_failed`. Partial streaming output disables switching so one Turn never combines content from different providers.
+
 ### Failure, Timeout, and Cancellation
 
-HTTP, connection, protocol, and timeout failures now have explicit categories and retry/fallback properties. A `ModelRequest.timeout_seconds` override reaches built-in transports. Completed wire events are mandatory, so a dropped stream is not accepted as a successful partial response. The current standard-library HTTP calls remain synchronous; cancelling the scheduler task cannot reliably abort a connection that is blocked before a response handle exists. Active-I/O cancellation remains `P2-04`, and `P1-09` stays partial.
+HTTP, connection, protocol, timeout, and cancellation outcomes now have explicit categories and retry/fallback properties. A `ModelRequest.timeout_seconds` override reaches built-in transports. `ask_async()` cancellation requests scheduler cancellation and waits for the Turn to reach a terminal state. `AgentTurnRunner` then cancels the shared token; Ollama, OpenAI-compatible, and Anthropic-compatible streams register the active response's `close()` method so blocked body iteration is interrupted. Provider cancellation writes `model_cancelled` evidence and prevents later tool execution or successful final persistence.
+
+The standard-library transport cannot expose a response handle while DNS, connection setup, or response-header receipt is still blocked, so that phase remains bounded by the configured timeout. Complete-only compatibility clients can observe cancellation only before and after their blocking call. Synchronous tool-process cancellation is owned by `P3-05`, so `P1-09` stays partial.
 
 ### Verification
 
-Focused tests cover request validation, usage-source normalization, immutable native tool calls, complete-only compatibility, invalid stream ordering, provider timeout forwarding, Ollama JSONL, OpenAI Responses SSE, Anthropic Messages SSE, tool schema translation, multi-tool execution, chunk-boundary final-answer filtering, AgentLoop correlation, and persisted provider failure evidence.
+Focused tests cover request validation, usage-source normalization, immutable native tool calls, complete-only compatibility, invalid stream ordering, provider timeout forwarding, Ollama JSONL, OpenAI Responses SSE, Anthropic Messages SSE, tool schema translation, multi-tool execution, chunk-boundary final-answer filtering, AgentLoop correlation, persisted provider failure evidence, idempotent cancellation callbacks, active-response interruption, end-to-end cancelled Turn convergence, status-based fallback classification, successful switching, non-fallback failures, partial-stream protection, cancellation protection, exhaustion evidence, and AgentLoop fallback traces.
 
 ### Tradeoffs and Follow-ups
 
 - `last_completion_metadata` remains populated as a compatibility projection, not as the orchestration source of truth.
 - Complete-only custom clients and Fake retain a terminal fallback; only the three network adapters claim wire-level streaming.
+- Pre-response connection blocking is timeout-bounded because `urllib` exposes no earlier closeable handle.
+- Provider chains are assembled programmatically in this slice; user-facing model profiles and configuration validation belong to `P2-06`.
 - Native tool calls execute serially until ToolGateway can classify safe read-only calls for bounded concurrency.
 - Final-text streaming is intentionally protocol-aware: free-form reasoning outside `<final>` is buffered/discarded rather than shown to users.
+
+## TECH-012 - Validated Model Profiles
+
+- Plan items: `P2-06`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/providers/profiles.py`
+- Integration: `repoagent/cli.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_model_profiles.py`, `tests/test_repoagent.py`, `tests/test_public_api_contract.py`
+
+### Problem
+
+Provider selection previously branched directly inside CLI assembly. Model names, endpoint URLs, timeouts, output limits, sampling values, and credential lookup order were independent strings with no common validation or inspectable runtime identity. Invalid configuration could therefore survive until an HTTP request, while adding another model path required duplicating assembly logic.
+
+### Interface
+
+- `ModelProfile` is an immutable, secret-free configuration record for one model endpoint.
+- `BUILTIN_MODEL_PROFILES` contains the `ollama`, `openai`, `anthropic`, and `deepseek` defaults.
+- `get_model_profile()` resolves a named built-in profile and fails closed on unknown names.
+- `--profile` selects the explicit profile; `--provider` remains a compatibility alias and conflicting simultaneous values are rejected.
+- CLI and environment overrides produce a new validated profile before a client is constructed.
+
+### Invariants
+
+- Profile names and provider names use a stable lowercase identifier grammar.
+- Protocol is one of `ollama`, `openai`, or `anthropic`; provider branding is independent from wire protocol, so the DeepSeek profile can use the Anthropic-compatible adapter.
+- Model identifiers are non-empty and trimmed.
+- Endpoints are absolute HTTP(S) URLs without embedded credentials, query strings, or fragments.
+- Timeout and output budgets are positive; temperature and top-p are finite and range checked.
+- Unsupported `top_p` configuration is rejected instead of silently ignored by non-Ollama adapters.
+- Credential environment-variable names may enter profile evidence; resolved credential values never enter the profile or trace.
+
+### Assembly Flow
+
+```text
+CLI args + project/user environment
+  -> select profile name
+  -> copy built-in ModelProfile
+  -> apply model/endpoint/timeout/generation overrides
+  -> validate complete profile
+  -> resolve credential value outside the profile
+  -> construct adapter by profile.protocol
+  -> attach secret-free profile provenance to model_requested trace
+```
+
+The existing precedence is preserved: explicit CLI values win, then provider-specific environment variables, then built-in defaults. `REPOAGENT_MODEL_PROFILE` is checked before the legacy-compatible `REPOAGENT_PROVIDER`. `max_new_tokens` is taken from the validated profile when constructing `RepoAgent`, so the runtime and recorded profile cannot disagree about the output reservation.
+
+### Verification
+
+Focused tests cover all built-in profiles, registry immutability, unknown profiles, malformed identifiers, empty models, unsafe or malformed URLs, invalid numeric ranges, duplicate credential sources, unsupported sampling parameters, profile/provider conflicts, environment and CLI precedence, legacy provider assembly, public exports, and trace provenance without secret values.
+
+### Tradeoffs and Follow-ups
+
+- This slice intentionally provides four built-in profiles and programmatic `ModelProfile` construction. A user-editable versioned profile file should be added only with schema migration and secret-reference rules.
+- Profile selection is deterministic; workload-aware routing remains `P7-05`.
+- Credential presence is not required at construction because local gateways may accept empty keys and offline commands must still initialize. A future `doctor --probe` should report missing credentials before a paid call.
+
+## TECH-013 - Turn Usage Source Accounting
+
+- Plan items: `P2-07`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/providers/base.py`, `repoagent/spine/runner.py`
+- Integration: `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/runtime.py`
+- Tests: `tests/test_usage_accounting.py`, `tests/test_provider_runtime.py`, `tests/test_spine_runtime.py`
+
+### Problem
+
+Every AgentLoop iteration previously replaced `last_completion_metadata`, so a multi-step Turn reported only the final model call. This undercounted input/output/cache tokens, hid missing usage rows, and allowed a later actual result to make an incomplete Turn look fully metered. Provider fallback failures and late Turn failures also discarded or obscured earlier usage.
+
+### Interface
+
+- `UsageSource` now defines `actual`, `estimated`, `missing`, and `mixed` explicitly.
+- `ModelUsageAggregate.from_usages()` sums model token/cache rows and derives one conservative source verdict.
+- Aggregate metadata carries `model_call_count`, four fixed `usage_source_counts`, and `usage_complete`.
+- Spine `Usage` persists the same totals and source fields in terminal Turn outcomes.
+- `report.json` exposes a top-level `usage` summary instead of requiring consumers to infer totals from the last prompt metadata.
+
+### Invariants
+
+- Token and cache totals are the sum of every completed model result in the Turn.
+- A single source repeated across all calls remains that source.
+- Combining different sources, or combining any source with a missing row, produces `mixed`.
+- `usage_complete` is false for zero calls, missing rows, or mixed rows; estimated-only usage can be complete while remaining clearly estimated.
+- Source counts always sum to `model_call_count`.
+- A fallback attempt that fails before returning usage is counted as missing, not silently treated as zero-cost actual usage.
+- A late provider failure preserves prior token totals and adds the failed attempt as missing in the failed Turn outcome.
+
+### Evidence Flow
+
+```text
+provider ModelResult.usage
+  -> append per-call ModelUsage row
+  -> include failed provider/fallback attempts as missing rows
+  -> ModelUsageAggregate
+      -> model_parsed.usage_aggregate trace
+      -> report.json usage
+      -> AgentTurnRunner Usage
+      -> turn.completed / turn.failed terminal payload
+```
+
+Provider adapters mark usage actual only when their wire response contains at least one recognized usage field. A terminal response object without token counters is `missing`, even if the content itself completed successfully.
+
+### Verification
+
+Focused tests cover same-source summation, actual/estimated/missing mixing, cache read/write totals, invalid aggregate rows, multi-step tool Turns, missing final usage, successful fallback with an unmetered failed attempt, and late provider failure after a metered call. Tests compare trace aggregates, top-level reports, and persisted completed/failed Turn payloads.
+
+### Tradeoffs and Follow-ups
+
+- Failed calls are conservatively marked missing because most provider error responses do not expose billable token counts.
+- Cancellation can still terminate before a provider reports usage; cancellation fault accounting belongs to `P6-07` and transport-specific live verification.
+- This slice records quantities and provenance only. Model pricing, currency, cache pricing, and unit-success normalization belong to `P2-08` and `P2-09`.
+
+## TECH-014 - Pricing and Call-Efficiency Ledger
+
+- Plan items: `P2-08`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/pricing.py`, `repoagent/call_efficiency.py`, `repoagent/run_store.py`
+- Integration: `repoagent/providers/profiles.py`, `repoagent/cli.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/runtime.py`, `repoagent/spine/runner.py`
+- Tests: `tests/test_call_efficiency.py`, `tests/test_run_store.py`, `tests/test_public_api_contract.py`
+
+### Problem
+
+Turn-level token totals alone cannot answer how many provider attempts occurred, which pricing assumptions were used, or whether a displayed cost excludes failed and unmetered calls. Applying a current vendor price implicitly would also misprice compatible gateways and make old evidence change when a public price changes.
+
+### Interface
+
+- `ModelPricing` is an immutable USD rate snapshot with a deterministic `pricing_id` and human-readable source.
+- CLI flags or provider-specific environment variables may attach one complete input/output pricing pair to a validated `ModelProfile`.
+- `CallEfficiencyEntry` records one completed, failed, or cancelled provider attempt with correlation IDs, attempt indexes, identity, latency, usage, pricing snapshot, and cost status.
+- `RunStore` appends each entry to the run-local `calls.jsonl` ledger and AgentLoop mirrors the row as `model_call_accounted` trace evidence.
+- `CallEfficiencySummary` is projected into `report.json` and completed/failed terminal Turn outcomes.
+
+### Invariants
+
+- Runtime code never fetches prices from the network and never assumes that an official vendor rate applies to a proxy or custom endpoint.
+- Input and output rates must be configured together, be finite and non-negative, and identify their source.
+- Missing or mixed usage produces `incomplete_usage`; absent pricing produces `unpriced`.
+- Cache read/write usage requires explicit cache rates and unambiguous input-token semantics.
+- Partial priced cost remains visible, but `cost_complete` is true only when every attempt is priced.
+- `cost_per_successful_turn_usd` exists only for a successful Turn with complete cost evidence.
+- Failed fallback attempts receive their own ledger rows and cannot disappear behind the successful provider result.
+- Malformed third-party fallback metadata is ignored as fallback evidence and the valid completed call is still accounted once.
+
+### Evidence Flow
+
+```text
+ModelProfile.pricing snapshot + ModelResult.usage
+  -> one CallEfficiencyEntry per provider attempt
+      -> calls.jsonl durable row
+      -> model_call_accounted trace row
+  -> CallEfficiencySummary
+      -> report.json call_efficiency
+      -> turn.completed / turn.failed terminal payload
+```
+
+`provider_call_id` is deterministically derived from request ID, AgentLoop attempt, and provider-chain attempt. Ledger writes use the existing locked and flushed JSONL path, so later aggregate claims remain traceable to individual calls.
+
+### Verification
+
+Focused tests cover price validation and stable identity, actual and estimated usage pricing, missing usage, absent pricing, cache deferral, complete and incomplete unit-cost summaries, CLI and environment configuration, end-to-end ledger/trace/report/terminal consistency, fallback partial cost, failed Turn evidence, malformed fallback metadata, public exports, and direct RunStore append behavior.
+
+### Tradeoffs and Follow-ups
+
+- Pricing is intentionally user supplied. A future profile catalog may ship versioned rates, but it must preserve the exact snapshot in every ledger row.
+- Failed and cancelled calls are usually unmetered by provider responses, so their cost remains incomplete rather than guessed.
+- Cache reads/writes and compaction calls use the accounting rules recorded in TECH-015.
+- Cancellation records a call ledger row and trace event; transport-specific billing verification remains part of `P6-07` live fault campaigns.
+
+## TECH-015 - Cache and Compaction Accounting
+
+- Plan items: `P2-09`
+- Status: implemented accounting contract; model compactor integration remains owned by `P4-04`
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/providers/base.py`, `repoagent/pricing.py`, `repoagent/call_efficiency.py`
+- Integration: `repoagent/providers/clients.py`, `repoagent/cli.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/spine/runner.py`
+- Tests: `tests/test_call_efficiency.py`, `tests/test_provider_runtime.py`, `tests/test_repoagent.py`, `tests/test_usage_accounting.py`
+
+### Problem
+
+Provider usage schemas disagree on whether input tokens include cached tokens. Charging a cache rate without recording that semantic can double count OpenAI-style totals or undercount Anthropic-style fresh input. Context compaction can also become a hidden model call unless the ledger distinguishes it from ordinary AgentLoop generation.
+
+### Interface
+
+- `InputTokenSemantics` classifies each usage row as `fresh`, `total`, or `ambiguous`.
+- OpenAI-compatible adapters mark cached input totals as `total`; Anthropic-compatible adapters mark their input counter as `fresh`.
+- `ModelPricing` optionally carries independent cache-read and cache-write rates in the same immutable snapshot.
+- CLI flags and provider-specific environment variables configure those cache rates without remote lookup.
+- `ModelRequest.call_kind` and `CallEfficiencyEntry.call_kind` distinguish `agent` from `compaction`; summaries preserve both counts.
+
+### Invariants
+
+- Fresh input is charged once at the ordinary input rate.
+- For `total` semantics, cache-read and cache-write tokens are subtracted before the fresh-input charge, then charged at their explicit cache rates.
+- For `fresh` semantics, the input counter is not reduced; cache tokens are charged separately.
+- Cached usage with ambiguous semantics produces `ambiguous_cache_usage`, not a numeric estimate.
+- Cache tokens exceeding a total-input counter produce `invalid_cache_usage`.
+- A used cache dimension without its corresponding rate produces `cache_pricing_required`.
+- Local deterministic context trimming is not a provider call and does not increment the compaction bucket.
+- Any model-backed compactor added by `P4-04` must issue `call_kind=compaction` through this ledger; compaction cost contributes to total successful-Turn cost.
+
+### Evidence Flow
+
+```text
+provider raw usage
+  -> adapter declares fresh/total input semantics
+  -> ModelUsage + explicit cache rates
+  -> normalize fresh input and price each token dimension once
+  -> CallEfficiencyEntry(call_kind=agent|compaction)
+  -> per-kind counts and total Turn cost
+```
+
+### Verification
+
+Focused tests prove that equivalent fresh-input and total-input rows produce the same cache-aware cost, missing rates and ambiguous semantics fail closed, impossible cache totals are rejected, pricing snapshots retain cache rates, OpenAI-compatible usage declares total semantics, and compaction calls remain separately countable.
+
+### Tradeoffs and Follow-ups
+
+- The current context reducer is local and deterministic, so production runs correctly report zero compaction model calls today.
+- Anthropic-compatible gateways are assumed to preserve Anthropic usage semantics. Live-provider fixtures in `P2-10` must verify this for each supported route.
+- P4 must reuse this accounting boundary when it introduces model-based summarization; a direct unmetered provider call would violate the contract.
 
 ## 5. Decision Index
 

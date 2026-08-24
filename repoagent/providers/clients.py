@@ -12,10 +12,12 @@ import urllib.error
 import urllib.request
 
 from .base import (
+    CancellationToken,
     ModelEvent,
     ModelRequest,
     ModelResult,
     ModelUsage,
+    ProviderCancelledError,
     ProviderConnectionError,
     ProviderError,
     ProviderProtocolError,
@@ -26,11 +28,34 @@ from .base import (
 OPENAI_COMPATIBLE_USER_AGENT = "repoagent/0.1"
 
 
+def _usage_source(values, *keys):
+    return (
+        "actual"
+        if any(values.get(key) is not None for key in keys)
+        else "missing"
+    )
+
+
+def _raise_if_cancelled(token: CancellationToken | None, provider: str) -> None:
+    if token is not None:
+        token.raise_if_cancelled(provider=provider)
+
+
+def _cancelled_during_io(
+    token: CancellationToken | None, provider: str, exc: BaseException
+) -> None:
+    if token is not None and token.cancelled:
+        raise ProviderCancelledError(
+            "model request was cancelled", provider=provider
+        ) from exc
+
+
 class _TypedModelClient:
     """Expose the typed provider contract while preserving complete()."""
 
     def generate(self, request: ModelRequest) -> ModelResult:
         started_at = time.monotonic()
+        _raise_if_cancelled(request.cancellation_token, type(self).__name__)
         try:
             text = self.complete(
                 request.prompt,
@@ -39,12 +64,14 @@ class _TypedModelClient:
                 prompt_cache_retention=request.prompt_cache_retention,
                 timeout=request.timeout_seconds,
                 tools=request.tools,
+                cancellation_token=request.cancellation_token,
             )
         except TimeoutError as exc:
             raise ProviderTimeoutError(
                 f"{type(self).__name__} request timed out",
                 provider=type(self).__name__,
             ) from exc
+        _raise_if_cancelled(request.cancellation_token, type(self).__name__)
         metadata = dict(getattr(self, "last_completion_metadata", {}) or {})
         return ModelResult(
             text=str(text),
@@ -58,6 +85,7 @@ class _TypedModelClient:
         )
 
     def stream(self, request: ModelRequest):
+        _raise_if_cancelled(request.cancellation_token, type(self).__name__)
         result = self.generate(request)
         if result.text:
             yield ModelEvent(kind="text_delta", text=result.text)
@@ -68,12 +96,26 @@ class _TypedModelClient:
 
 def _http_provider_error(provider, label, exc, body):
     status = int(exc.code)
+    if status == 429:
+        category, retryable, should_fallback = "rate_limit", True, True
+    elif status >= 500:
+        category, retryable, should_fallback = "server", True, True
+    elif status == 408:
+        category, retryable, should_fallback = "timeout", True, True
+    elif status == 402:
+        category, retryable, should_fallback = "billing", False, True
+    elif status == 404:
+        category, retryable, should_fallback = "model_unavailable", False, True
+    elif status in {401, 403}:
+        category, retryable, should_fallback = "auth", False, False
+    else:
+        category, retryable, should_fallback = "request", False, False
     return ProviderError(
         f"{label} request failed with HTTP {status}: {body}",
-        category=("rate_limit" if status == 429 else "server" if status >= 500 else "request"),
+        category=category,
         provider=provider,
-        retryable=status == 429 or status >= 500,
-        should_fallback=status == 429 or status >= 500,
+        retryable=retryable,
+        should_fallback=should_fallback,
         status_code=status,
     )
 
@@ -193,32 +235,44 @@ class OllamaModelClient(_TypedModelClient):
         )
         parts = []
         final_data = {}
+        token = request.cancellation_token
+        _raise_if_cancelled(token, type(self).__name__)
         try:
             with urllib.request.urlopen(
                 http_request, timeout=request.timeout_seconds or self.timeout
             ) as response:
-                for raw_line in response:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if data.get("error"):
-                        raise ProviderProtocolError(
-                            f"Ollama error: {data['error']}",
-                            provider=type(self).__name__,
-                        )
-                    text = data.get("response") or ""
-                    if text:
-                        parts.append(text)
-                        yield ModelEvent(kind="text_delta", text=text)
-                    if data.get("done"):
-                        final_data = data
+                remove_cancel = (
+                    token.add_callback(response.close) if token is not None else None
+                )
+                try:
+                    _raise_if_cancelled(token, type(self).__name__)
+                    for raw_line in response:
+                        _raise_if_cancelled(token, type(self).__name__)
+                        line = raw_line.decode("utf-8").strip()
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        if data.get("error"):
+                            raise ProviderProtocolError(
+                                f"Ollama error: {data['error']}",
+                                provider=type(self).__name__,
+                            )
+                        text = data.get("response") or ""
+                        if text:
+                            parts.append(text)
+                            yield ModelEvent(kind="text_delta", text=text)
+                        if data.get("done"):
+                            final_data = data
+                finally:
+                    if remove_cancel is not None:
+                        remove_cancel()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise _http_provider_error(
                 type(self).__name__, "Ollama", exc, body
             ) from exc
         except urllib.error.URLError as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
             raise ProviderConnectionError(
                 f"Could not reach Ollama at {self.host}",
                 provider=type(self).__name__,
@@ -228,6 +282,10 @@ class OllamaModelClient(_TypedModelClient):
                 "Ollama stream contained invalid JSON",
                 provider=type(self).__name__,
             ) from exc
+        except (OSError, ValueError) as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
+            raise
+        _raise_if_cancelled(token, type(self).__name__)
         if not final_data:
             raise ProviderProtocolError(
                 "Ollama stream ended without a done event",
@@ -240,7 +298,9 @@ class OllamaModelClient(_TypedModelClient):
                 int(final_data.get("prompt_eval_count") or 0)
                 + int(final_data.get("eval_count") or 0)
             ),
-            "usage_source": "actual" if final_data else "missing",
+            "usage_source": _usage_source(
+                final_data, "prompt_eval_count", "eval_count"
+            ),
         }
         result = ModelResult(
             text="".join(parts),
@@ -447,7 +507,15 @@ def _extract_usage_cache_details(data):
         "total_tokens": usage.get("total_tokens"),
         "cached_tokens": cached_tokens,
         "cache_hit": cached_tokens > 0,
-        "usage_source": "actual" if usage else "missing",
+        "input_token_semantics": "total",
+        "usage_source": _usage_source(
+            usage,
+            "input_tokens",
+            "prompt_tokens",
+            "output_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ),
     }
 
 
@@ -473,6 +541,7 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         prompt_cache_retention=None,
         timeout=None,
         tools=(),
+        cancellation_token=None,
     ):
         """向 OpenAI-compatible `/responses` 接口发起一次模型调用。
 
@@ -493,6 +562,7 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         self.last_completion_metadata = {}
         self.last_tool_calls = ()
         self.last_finish_reason = "stop"
+        _raise_if_cancelled(cancellation_token, type(self).__name__)
         payload = {
             "model": self.model,
             "input": [
@@ -578,6 +648,8 @@ class OpenAICompatibleModelClient(_TypedModelClient):
                     "OpenAI-compatible request timed out",
                     provider=type(self).__name__,
                 ) from exc
+
+        _raise_if_cancelled(cancellation_token, type(self).__name__)
 
         # 有些兼容后端返回普通 JSON，有些返回 SSE。
         # 这里两种都接住，并尽量统一抽取文本和 usage/cache 元数据。
@@ -677,41 +749,54 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         )
         parts = []
         final_data = None
+        token = request.cancellation_token
+        _raise_if_cancelled(token, type(self).__name__)
         try:
             with urllib.request.urlopen(
                 http_request, timeout=request.timeout_seconds or self.timeout
             ) as response:
-                content_type = (getattr(response, "headers", {}) or {}).get(
-                    "Content-Type", ""
+                remove_cancel = (
+                    token.add_callback(response.close) if token is not None else None
                 )
-                if not content_type.startswith("text/event-stream"):
-                    data = json.loads(response.read().decode("utf-8"))
-                    yield from self._events_from_openai_response(
-                        data, request, started_at
+                try:
+                    _raise_if_cancelled(token, type(self).__name__)
+                    content_type = (getattr(response, "headers", {}) or {}).get(
+                        "Content-Type", ""
                     )
-                    return
-                for raw_line in response:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    encoded = line[len("data:") :].strip()
-                    if not encoded or encoded == "[DONE]":
-                        continue
-                    event = json.loads(encoded)
-                    event_type = event.get("type")
-                    if event_type == "response.output_text.delta":
-                        text = event.get("delta") or ""
-                        if text:
-                            parts.append(text)
-                            yield ModelEvent(kind="text_delta", text=text)
-                    elif event_type == "response.completed":
-                        final_data = event.get("response") or {}
+                    if not content_type.startswith("text/event-stream"):
+                        data = json.loads(response.read().decode("utf-8"))
+                        _raise_if_cancelled(token, type(self).__name__)
+                        yield from self._events_from_openai_response(
+                            data, request, started_at
+                        )
+                        return
+                    for raw_line in response:
+                        _raise_if_cancelled(token, type(self).__name__)
+                        line = raw_line.decode("utf-8").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        encoded = line[len("data:") :].strip()
+                        if not encoded or encoded == "[DONE]":
+                            continue
+                        event = json.loads(encoded)
+                        event_type = event.get("type")
+                        if event_type == "response.output_text.delta":
+                            text = event.get("delta") or ""
+                            if text:
+                                parts.append(text)
+                                yield ModelEvent(kind="text_delta", text=text)
+                        elif event_type == "response.completed":
+                            final_data = event.get("response") or {}
+                finally:
+                    if remove_cancel is not None:
+                        remove_cancel()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise _http_provider_error(
                 type(self).__name__, "OpenAI-compatible", exc, body
             ) from exc
         except (urllib.error.URLError, RemoteDisconnected) as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
             raise ProviderConnectionError(
                 f"Could not reach the OpenAI-compatible backend at {self.base_url}",
                 provider=type(self).__name__,
@@ -721,6 +806,11 @@ class OpenAICompatibleModelClient(_TypedModelClient):
                 "OpenAI-compatible stream contained invalid JSON",
                 provider=type(self).__name__,
             ) from exc
+        except (OSError, ValueError) as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
+            raise
+
+        _raise_if_cancelled(token, type(self).__name__)
 
         if final_data is None:
             raise ProviderProtocolError(
@@ -835,6 +925,7 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         prompt_cache_retention=None,
         timeout=None,
         tools=(),
+        cancellation_token=None,
     ):
         # 为了保持统一接口，runtime 仍然会传缓存参数进来；
         # 这里只是显式丢弃，因为当前 Anthropic-compatible 路径没有接缓存复用。
@@ -842,6 +933,7 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         self.last_completion_metadata = {}
         self.last_tool_calls = ()
         self.last_finish_reason = "stop"
+        _raise_if_cancelled(cancellation_token, type(self).__name__)
         payload = {
             "model": self.model,
             "messages": [
@@ -917,6 +1009,8 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
                     provider=type(self).__name__,
                 ) from exc
 
+        _raise_if_cancelled(cancellation_token, type(self).__name__)
+
         try:
             data = json.loads(body_text)
         except json.JSONDecodeError as exc:
@@ -939,7 +1033,14 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
             ),
             "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
             "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
-            "usage_source": "actual" if usage else "missing",
+            "input_token_semantics": "fresh",
+            "usage_source": _usage_source(
+                usage,
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            ),
         }
         self.last_tool_calls = _extract_anthropic_tool_calls(
             data, provider=type(self).__name__
@@ -996,74 +1097,93 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         usage = {}
         finish_reason = "stop"
         saw_stop = False
+        token = request.cancellation_token
+        _raise_if_cancelled(token, type(self).__name__)
         try:
             with urllib.request.urlopen(
                 http_request, timeout=request.timeout_seconds or self.timeout
             ) as response:
-                content_type = (getattr(response, "headers", {}) or {}).get(
-                    "Content-Type", ""
+                remove_cancel = (
+                    token.add_callback(response.close) if token is not None else None
                 )
-                if not content_type.startswith("text/event-stream"):
-                    data = json.loads(response.read().decode("utf-8"))
-                    yield from self._events_from_anthropic_response(
-                        data, started_at
+                try:
+                    _raise_if_cancelled(token, type(self).__name__)
+                    content_type = (getattr(response, "headers", {}) or {}).get(
+                        "Content-Type", ""
                     )
-                    return
-                for raw_line in response:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    encoded = line[len("data:") :].strip()
-                    if not encoded:
-                        continue
-                    event = json.loads(encoded)
-                    event_type = event.get("type")
-                    if event_type == "message_start":
-                        usage.update((event.get("message") or {}).get("usage") or {})
-                    elif event_type == "content_block_start":
-                        block = event.get("content_block") or {}
-                        index = int(event.get("index") or 0)
-                        if block.get("type") == "tool_use":
-                            blocks[index] = {
-                                "id": block.get("id"),
-                                "name": block.get("name"),
-                                "arguments": "",
-                            }
-                        elif block.get("type") == "text" and block.get("text"):
-                            text = str(block["text"])
-                            parts.append(text)
-                            yield ModelEvent(kind="text_delta", text=text)
-                    elif event_type == "content_block_delta":
-                        delta = event.get("delta") or {}
-                        index = int(event.get("index") or 0)
-                        if delta.get("type") == "text_delta":
-                            text = str(delta.get("text") or "")
-                            if text:
+                    if not content_type.startswith("text/event-stream"):
+                        data = json.loads(response.read().decode("utf-8"))
+                        _raise_if_cancelled(token, type(self).__name__)
+                        yield from self._events_from_anthropic_response(
+                            data, started_at
+                        )
+                        return
+                    for raw_line in response:
+                        _raise_if_cancelled(token, type(self).__name__)
+                        line = raw_line.decode("utf-8").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        encoded = line[len("data:") :].strip()
+                        if not encoded:
+                            continue
+                        event = json.loads(encoded)
+                        event_type = event.get("type")
+                        if event_type == "message_start":
+                            usage.update(
+                                (event.get("message") or {}).get("usage") or {}
+                            )
+                        elif event_type == "content_block_start":
+                            block = event.get("content_block") or {}
+                            index = int(event.get("index") or 0)
+                            if block.get("type") == "tool_use":
+                                blocks[index] = {
+                                    "id": block.get("id"),
+                                    "name": block.get("name"),
+                                    "arguments": "",
+                                }
+                            elif block.get("type") == "text" and block.get("text"):
+                                text = str(block["text"])
                                 parts.append(text)
                                 yield ModelEvent(kind="text_delta", text=text)
-                        elif delta.get("type") == "input_json_delta":
-                            block = blocks.setdefault(
-                                index, {"id": "", "name": "", "arguments": ""}
+                        elif event_type == "content_block_delta":
+                            delta = event.get("delta") or {}
+                            index = int(event.get("index") or 0)
+                            if delta.get("type") == "text_delta":
+                                text = str(delta.get("text") or "")
+                                if text:
+                                    parts.append(text)
+                                    yield ModelEvent(kind="text_delta", text=text)
+                            elif delta.get("type") == "input_json_delta":
+                                block = blocks.setdefault(
+                                    index,
+                                    {"id": "", "name": "", "arguments": ""},
+                                )
+                                block["arguments"] += delta.get("partial_json") or ""
+                        elif event_type == "message_delta":
+                            delta = event.get("delta") or {}
+                            finish_reason = str(
+                                delta.get("stop_reason") or finish_reason
                             )
-                            block["arguments"] += delta.get("partial_json") or ""
-                    elif event_type == "message_delta":
-                        delta = event.get("delta") or {}
-                        finish_reason = str(delta.get("stop_reason") or finish_reason)
-                        usage.update(event.get("usage") or {})
-                    elif event_type == "message_stop":
-                        saw_stop = True
-                    elif event_type == "error":
-                        error = event.get("error") or {}
-                        raise ProviderProtocolError(
-                            f"Anthropic-compatible stream error: {error.get('type', 'unknown')}",
-                            provider=type(self).__name__,
-                        )
+                            usage.update(event.get("usage") or {})
+                        elif event_type == "message_stop":
+                            saw_stop = True
+                        elif event_type == "error":
+                            error = event.get("error") or {}
+                            raise ProviderProtocolError(
+                                "Anthropic-compatible stream error: "
+                                + str(error.get("type", "unknown")),
+                                provider=type(self).__name__,
+                            )
+                finally:
+                    if remove_cancel is not None:
+                        remove_cancel()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise _http_provider_error(
                 type(self).__name__, "Anthropic-compatible", exc, body
             ) from exc
         except (urllib.error.URLError, RemoteDisconnected) as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
             raise ProviderConnectionError(
                 f"Could not reach the Anthropic-compatible backend at {self.base_url}",
                 provider=type(self).__name__,
@@ -1073,6 +1193,10 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
                 "Anthropic-compatible stream contained invalid JSON",
                 provider=type(self).__name__,
             ) from exc
+        except (OSError, ValueError) as exc:
+            _cancelled_during_io(token, type(self).__name__, exc)
+            raise
+        _raise_if_cancelled(token, type(self).__name__)
         if not saw_stop:
             raise ProviderProtocolError(
                 "Anthropic-compatible stream ended without message_stop",
@@ -1098,7 +1222,14 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
             ),
             "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
             "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
-            "usage_source": "actual" if usage else "missing",
+            "input_token_semantics": "fresh",
+            "usage_source": _usage_source(
+                usage,
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            ),
         }
         result = ModelResult(
             text="".join(parts),
@@ -1137,7 +1268,14 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
             ),
             "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
             "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
-            "usage_source": "actual" if usage else "missing",
+            "input_token_semantics": "fresh",
+            "usage_source": _usage_source(
+                usage,
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            ),
         }
         if text:
             yield ModelEvent(kind="text_delta", text=text)

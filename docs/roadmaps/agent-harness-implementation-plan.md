@@ -179,12 +179,12 @@ Goal: make provider differences explicit behind a typed model interface.
 - [x] `P2-01` Define typed `ModelRequest`, `ModelEvent`, `ModelResult`, `Usage`, and provider errors.
 - [x] `P2-02` Implement adapters for Fake, Ollama, OpenAI-compatible, and Anthropic-compatible providers.
 - [x] `P2-03` Support streaming text and native tool calls without leaking provider event types.
-- [ ] `P2-04` Add timeout and cancellation propagation.
-- [ ] `P2-05` Implement provider fallback with explicit failure classification.
-- [ ] `P2-06` Add model profiles and per-model configuration validation.
-- [ ] `P2-07` Record actual, estimated, missing, and mixed usage separately.
-- [ ] `P2-08` Implement a pricing and call-efficiency ledger.
-- [ ] `P2-09` Account for cache reads/writes and compaction calls.
+- [x] `P2-04` Add timeout and cancellation propagation.
+- [x] `P2-05` Implement provider fallback with explicit failure classification.
+- [x] `P2-06` Add model profiles and per-model configuration validation.
+- [x] `P2-07` Record actual, estimated, missing, and mixed usage separately.
+- [x] `P2-08` Implement a pricing and call-efficiency ledger.
+- [x] `P2-09` Account for cache reads/writes and compaction calls.
 - [ ] `P2-10` Add deterministic replay tests and opt-in live-provider tests.
 
 Gate:
@@ -381,4 +381,4 @@ The completed implementation slice is `P1-01` through `P1-05`:
 - preserve `RepoAgent.ask()` as the compatibility facade;
 - document the design and verify terminal outcomes.
 
-The provider contract and streaming slice `P2-01` through `P2-03` is complete: AgentLoop consumes normalized streaming events, network providers parse their real wire streams, native tool schemas/calls remain provider-neutral, and final text crosses chunk boundaries without exposing protocol or reasoning text. `P2-04` is next and remains incomplete until scheduler cancellation can interrupt active provider I/O rather than only bound it with a timeout.
+The provider runtime slice `P2-01` through `P2-09` is complete. AgentLoop consumes normalized streaming events, scheduler cancellation closes active built-in HTTP responses, fallback is classification-driven and protected against partial-stream mixing, and validated model profiles keep credential values outside configuration evidence. `ModelUsageAggregate` now sums every completed call in a Turn, accounts failed fallback/provider attempts as missing, and preserves actual/estimated/missing/mixed counts in trace, report, and terminal Turn evidence. Explicit pricing snapshots and a per-attempt `calls.jsonl` ledger expose partial cost while withholding unit-success cost when evidence is incomplete. Cache pricing distinguishes fresh and total input-token semantics, and call-kind counts reserve a visible compaction bucket for the model compactor introduced in P4. Connection setup before a response handle exists remains timeout-bounded, and tool-process cancellation remains `P3-05`; therefore `P1-09` is still partial. The next slice is `P2-10`, deterministic replay and opt-in live-provider tests.

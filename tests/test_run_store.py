@@ -49,6 +49,27 @@ def test_run_store_appends_trace_jsonl(tmp_path):
     assert json.loads(lines[2])["event"] == "run_finished"
 
 
+def test_run_store_appends_model_call_ledger(tmp_path):
+    store = RunStore(tmp_path / ".repoagent" / "runs")
+    state = TaskState.create(
+        run_id="run_calls",
+        task_id="task_calls",
+        user_request="Account for model calls.",
+    )
+    store.start_run(state)
+
+    store.append_model_call(
+        state,
+        {"provider_call_id": "task_calls:1:0", "status": "completed"},
+    )
+
+    rows = store.call_ledger_path(state).read_text(encoding="utf-8").splitlines()
+    assert json.loads(rows[0]) == {
+        "provider_call_id": "task_calls:1:0",
+        "status": "completed",
+    }
+
+
 def test_run_store_writes_report_json(tmp_path):
     store = RunStore(tmp_path / ".repoagent" / "runs")
     state = TaskState.create(run_id="run_003", task_id="task_003", user_request="Report the run.")
