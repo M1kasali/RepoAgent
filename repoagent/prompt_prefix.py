@@ -5,6 +5,7 @@ import json
 import textwrap
 from dataclasses import dataclass
 
+from .tool_contracts import ToolDefinition
 from .workspace import now
 
 
@@ -23,23 +24,32 @@ def tool_signature(tools):
     payload = []
     for name in sorted(tools):
         tool = tools[name]
-        payload.append(
-            {
-                "name": name,
-                "schema": tool["schema"],
-                "risky": tool["risky"],
-                "description": tool["description"],
-            }
-        )
+        definition = tool["definition"]
+        if not isinstance(definition, ToolDefinition):
+            raise ValueError(f"tool registry entry {name!r} has no ToolDefinition")
+        payload.append(definition.to_dict())
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def build_prompt_prefix(workspace, tools, built_at=None):
     tool_lines = []
     for name, tool in tools.items():
-        fields = ", ".join(f"{key}: {value}" for key, value in tool["schema"].items())
-        risk = "approval required" if tool["risky"] else "safe"
-        tool_lines.append(f"- {name}({fields}) [{risk}] {tool['description']}")
+        definition = tool["definition"]
+        schema = definition.to_dict()["parameters"]
+        required = set(schema["required"])
+        fields = []
+        for key, property_schema in schema["properties"].items():
+            declaration = property_schema["type"]
+            if key not in required and "default" in property_schema:
+                declaration += f"={property_schema['default']!r}"
+            fields.append(f"{key}: {declaration}")
+        risk = (
+            "approval required" if definition.requires_approval else "safe"
+        )
+        tool_lines.append(
+            f"- {name}({', '.join(fields)}) [{risk}] "
+            f"{definition.description}"
+        )
     tool_text = "\n".join(tool_lines)
     examples = "\n".join(
         [

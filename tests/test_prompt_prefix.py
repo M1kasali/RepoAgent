@@ -1,4 +1,5 @@
 from repoagent.prompt_prefix import build_prompt_prefix, tool_signature
+from repoagent.tool_contracts import ToolDefinition, ToolEffect
 from repoagent.tools import build_tool_registry
 from repoagent.workspace import WorkspaceContext
 
@@ -12,9 +13,29 @@ class _Agent:
 
 
 def test_tool_signature_is_stable_across_registry_insertion_order(tmp_path):
+    def definition(name, description, effect):
+        return ToolDefinition(
+            name=name,
+            description=description,
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+            effect=effect,
+            requires_approval=effect is not ToolEffect.READ,
+        )
+
     tools = {
-        "b": {"schema": {"path": "str"}, "risky": False, "description": "B", "run": object()},
-        "a": {"schema": {"command": "str"}, "risky": True, "description": "A", "run": object()},
+        "b": {
+            "definition": definition("b", "B", ToolEffect.READ),
+            "run": object(),
+        },
+        "a": {
+            "definition": definition("a", "A", ToolEffect.EXECUTE),
+            "run": object(),
+        },
     }
     reordered = {"a": tools["a"], "b": tools["b"]}
 

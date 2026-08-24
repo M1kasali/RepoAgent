@@ -9,50 +9,139 @@ import subprocess
 import textwrap
 from functools import partial
 
+from .tool_contracts import (
+    ToolDefinition,
+    ToolEffect,
+    validate_tool_arguments,
+)
 from .workspace import IGNORED_PATH_NAMES
 
-BASE_TOOL_SPECS = {
-    "list_files": {
-        "schema": {"path": "str='.'"},
-        "risky": False,
-        "description": "List files in the workspace.",
-    },
-    "read_file": {
-        "schema": {"path": "str", "start": "int=1", "end": "int=200"},
-        "risky": False,
-        "description": "Read a UTF-8 file by line range.",
-    },
-    "search": {
-        "schema": {"pattern": "str", "path": "str='.'"},
-        "risky": False,
-        "description": "Search the workspace with rg or a simple fallback.",
-    },
-    "run_shell": {
-        "schema": {"command": "str", "timeout": "int=20"},
-        "risky": True,
-        "description": "Run a shell command in the repo root.",
-    },
-    "write_file": {
-        "schema": {"path": "str", "content": "str"},
-        "risky": True,
-        "description": "Write a text file.",
-    },
-    "patch_file": {
-        "schema": {"path": "str", "old_text": "str", "new_text": "str"},
-        "risky": True,
-        "description": "Replace one exact text block in a file.",
-    },
+def _object_schema(properties, required):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+BASE_TOOL_DEFINITIONS = {
+    "list_files": ToolDefinition(
+        name="list_files",
+        description="List files in the workspace.",
+        parameters=_object_schema(
+            {"path": {"type": "string", "default": "."}}, []
+        ),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "read_file": ToolDefinition(
+        name="read_file",
+        description="Read a UTF-8 file by line range.",
+        parameters=_object_schema(
+            {
+                "path": {"type": "string", "minLength": 1},
+                "start": {"type": "integer", "minimum": 1, "default": 1},
+                "end": {"type": "integer", "minimum": 1, "default": 200},
+            },
+            ["path"],
+        ),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "search": ToolDefinition(
+        name="search",
+        description="Search the workspace with rg or a simple fallback.",
+        parameters=_object_schema(
+            {
+                "pattern": {"type": "string", "minLength": 1},
+                "path": {"type": "string", "default": "."},
+            },
+            ["pattern"],
+        ),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "run_shell": ToolDefinition(
+        name="run_shell",
+        description="Run a shell command in the repo root.",
+        parameters=_object_schema(
+            {
+                "command": {"type": "string", "minLength": 1},
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 120,
+                    "default": 20,
+                },
+            },
+            ["command"],
+        ),
+        effect=ToolEffect.EXECUTE,
+        requires_approval=True,
+    ),
+    "write_file": ToolDefinition(
+        name="write_file",
+        description="Write a text file.",
+        parameters=_object_schema(
+            {
+                "path": {"type": "string", "minLength": 1},
+                "content": {"type": "string"},
+            },
+            ["path", "content"],
+        ),
+        effect=ToolEffect.WRITE,
+        requires_approval=True,
+    ),
+    "patch_file": ToolDefinition(
+        name="patch_file",
+        description="Replace one exact text block in a file.",
+        parameters=_object_schema(
+            {
+                "path": {"type": "string", "minLength": 1},
+                "old_text": {"type": "string", "minLength": 1},
+                "new_text": {"type": "string"},
+            },
+            ["path", "old_text", "new_text"],
+        ),
+        effect=ToolEffect.WRITE,
+        requires_approval=True,
+    ),
 }
 
-DELEGATE_TOOL_SPEC = {
-    "schema": {"task": "str", "max_steps": "int=3"},
-    "risky": False,
-    "description": "Ask a bounded read-only child agent to investigate.",
-}
+DELEGATE_TOOL_DEFINITION = ToolDefinition(
+    name="delegate",
+    description="Ask a bounded read-only child agent to investigate.",
+    parameters=_object_schema(
+        {
+            "task": {"type": "string", "minLength": 1},
+            "max_steps": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 3,
+            },
+        },
+        ["task"],
+    ),
+    effect=ToolEffect.READ,
+)
 
 
 def legal_tool_names():
-    return set(BASE_TOOL_SPECS) | {"delegate"}
+    return set(BASE_TOOL_DEFINITIONS) | {"delegate"}
+
+
+def tool_definition(name):
+    if name == "delegate":
+        return DELEGATE_TOOL_DEFINITION
+    return BASE_TOOL_DEFINITIONS.get(name)
+
+
+def normalize_tool_arguments(name, args):
+    definition = tool_definition(name)
+    if definition is None:
+        raise ValueError(f"unknown tool: {name}")
+    return validate_tool_arguments(definition, args or {})
 
 TOOL_EXAMPLES = {
     "list_files": '<tool>{"name":"list_files","args":{"path":"."}}</tool>',
@@ -69,13 +158,19 @@ def build_tool_registry(context):
     # 工具不是动态发现的，而是显式注册的。
     # 这样模型看到的是一个有边界、可审计的动作集合。
     tools = {
-        name: {**spec, "run": partial(_TOOL_RUNNERS[name], context)}
-        for name, spec in BASE_TOOL_SPECS.items()
+        name: {
+            "definition": definition,
+            "run": partial(_TOOL_RUNNERS[name], context),
+        }
+        for name, definition in BASE_TOOL_DEFINITIONS.items()
     }
     # 子 agent 是刻意做成受限能力的：一旦深度耗尽，
     # 就连 delegate 这个工具都不再暴露给模型。
     if context.depth < context.max_depth:
-        tools["delegate"] = {**DELEGATE_TOOL_SPEC, "run": partial(tool_delegate, context)}
+        tools["delegate"] = {
+            "definition": DELEGATE_TOOL_DEFINITION,
+            "run": partial(tool_delegate, context),
+        }
     return tools
 
 
@@ -84,13 +179,13 @@ def tool_example(name):
 
 
 def validate_tool(context, name, args):
-    args = args or {}
+    args = normalize_tool_arguments(name, args)
 
     if name == "list_files":
         path = context.path(args.get("path", "."))
         if not path.is_dir():
             raise ValueError("path is not a directory")
-        return
+        return args
 
     if name == "read_file":
         path = context.path(args["path"])
@@ -100,14 +195,14 @@ def validate_tool(context, name, args):
         end = int(args.get("end", 200))
         if start < 1 or end < start:
             raise ValueError("invalid line range")
-        return
+        return args
 
     if name == "search":
         pattern = str(args.get("pattern", "")).strip()
         if not pattern:
             raise ValueError("pattern must not be empty")
         context.path(args.get("path", "."))
-        return
+        return args
 
     if name == "run_shell":
         command = str(args.get("command", "")).strip()
@@ -116,15 +211,13 @@ def validate_tool(context, name, args):
         timeout = int(args.get("timeout", 20))
         if timeout < 1 or timeout > 120:
             raise ValueError("timeout must be in [1, 120]")
-        return
+        return args
 
     if name == "write_file":
         path = context.path(args["path"])
         if path.exists() and path.is_dir():
             raise ValueError("path is a directory")
-        if "content" not in args:
-            raise ValueError("missing content")
-        return
+        return args
 
     if name == "patch_file":
         # patch_file 故意做得很严格：old_text 必须精确命中且只能出现一次，
@@ -135,13 +228,11 @@ def validate_tool(context, name, args):
         old_text = str(args.get("old_text", ""))
         if not old_text:
             raise ValueError("old_text must not be empty")
-        if "new_text" not in args:
-            raise ValueError("missing new_text")
         text = path.read_text(encoding="utf-8")
         count = text.count(old_text)
         if count != 1:
             raise ValueError(f"old_text must occur exactly once, found {count}")
-        return
+        return args
 
     if name == "delegate":
         task = str(args.get("task", "")).strip()
@@ -149,7 +240,7 @@ def validate_tool(context, name, args):
             raise ValueError("task must not be empty")
         if context.depth >= context.max_depth:
             raise ValueError("delegate depth exceeded")
-        return
+        return args
 
 
 def tool_list_files(context, args):

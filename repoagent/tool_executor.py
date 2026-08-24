@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import re
 
+from .tool_contracts import ToolEffect
 from .workspace import clip
 
 
@@ -67,8 +68,15 @@ class ToolExecutor:
                 ),
             )
 
+        definition = tool["definition"]
+        requires_approval = definition.requires_approval
+        read_only = definition.effect is ToolEffect.READ
+        captures_workspace = definition.effect in {
+            ToolEffect.WRITE,
+            ToolEffect.EXECUTE,
+        }
         try:
-            agent.validate_tool(name, args)
+            args = agent.validate_tool(name, args)
         except Exception as exc:
             example = agent.tool_example(name)
             message = f"error: invalid arguments for {name}: {exc}"
@@ -81,8 +89,8 @@ class ToolExecutor:
                     "rejected",
                     tool_error_code="invalid_arguments",
                     security_event_type=security_event_type,
-                    risk_level="high" if tool["risky"] else "low",
-                    read_only=not tool["risky"],
+                    risk_level="high" if requires_approval else "low",
+                    read_only=read_only,
                 ),
             )
 
@@ -92,12 +100,12 @@ class ToolExecutor:
                 metadata=_metadata(
                     "rejected",
                     tool_error_code="repeated_identical_call",
-                    risk_level="high" if tool["risky"] else "low",
-                    read_only=not tool["risky"],
+                    risk_level="high" if requires_approval else "low",
+                    read_only=read_only,
                 ),
             )
 
-        if tool["risky"] and not agent.approve(name, args):
+        if requires_approval and not agent.approve(name, args):
             return ToolExecutionResult(
                 content=f"error: approval denied for {name}",
                 metadata=_metadata(
@@ -109,11 +117,17 @@ class ToolExecutor:
                 ),
             )
 
-        before_snapshot = agent.capture_workspace_snapshot() if tool["risky"] else {}
+        before_snapshot = (
+            agent.capture_workspace_snapshot() if captures_workspace else {}
+        )
         after_snapshot = before_snapshot
         try:
             content = clip(tool["run"](args))
-            after_snapshot = agent.capture_workspace_snapshot() if tool["risky"] else before_snapshot
+            after_snapshot = (
+                agent.capture_workspace_snapshot()
+                if captures_workspace
+                else before_snapshot
+            )
             affected_paths, diff_summary = agent.diff_workspace_snapshots(before_snapshot, after_snapshot)
             workspace_changed = bool(affected_paths)
             tool_status = "ok"
@@ -131,8 +145,8 @@ class ToolExecutor:
             metadata = _metadata(
                 tool_status,
                 tool_error_code=tool_error_code,
-                risk_level="high" if tool["risky"] else "low",
-                read_only=not tool["risky"],
+                risk_level="high" if requires_approval else "low",
+                read_only=read_only,
                 affected_paths=affected_paths,
                 workspace_changed=workspace_changed,
                 workspace_fingerprint=agent.workspace.fingerprint(),
@@ -141,7 +155,11 @@ class ToolExecutor:
             agent.record_process_note_for_tool(name, metadata)
             return ToolExecutionResult(content=content, metadata=metadata)
         except Exception as exc:
-            after_snapshot = agent.capture_workspace_snapshot() if tool["risky"] else before_snapshot
+            after_snapshot = (
+                agent.capture_workspace_snapshot()
+                if captures_workspace
+                else before_snapshot
+            )
             affected_paths, diff_summary = agent.diff_workspace_snapshots(before_snapshot, after_snapshot)
             workspace_changed = bool(affected_paths)
             security_event_type = "path_escape" if "path escapes workspace" in str(exc) else ""
@@ -149,8 +167,8 @@ class ToolExecutor:
                 "partial_success" if workspace_changed else "error",
                 tool_error_code="tool_partial_success" if workspace_changed else "tool_failed",
                 security_event_type=security_event_type,
-                risk_level="high" if tool["risky"] else "low",
-                read_only=not tool["risky"],
+                risk_level="high" if requires_approval else "low",
+                read_only=read_only,
                 affected_paths=affected_paths,
                 workspace_changed=workspace_changed,
                 workspace_fingerprint=agent.workspace.fingerprint(),

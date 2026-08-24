@@ -81,6 +81,9 @@ Copy this section for each completed capability.
 | Usage accounting | `repoagent/providers/base.py`, `repoagent/agent_loop.py`, `repoagent/spine/runner.py` | multi-call totals and source completeness implemented | TECH-013 |
 | Call efficiency | `repoagent/pricing.py`, `repoagent/call_efficiency.py`, `repoagent/run_store.py` | explicit price snapshots and per-attempt cost evidence implemented | TECH-014 |
 | Cache and compaction accounting | `repoagent/providers/base.py`, `repoagent/pricing.py`, `repoagent/call_efficiency.py` | provider-aware cache cost and compaction call classification implemented | TECH-015 |
+| Provider replay and live acceptance | `repoagent/call_replay.py`, `live_tests/test_live_providers.py` | deterministic offline verification and explicit live opt-in implemented | TECH-016 |
+| Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
+| Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Evaluation | `repoagent/evaluation/` | partial | TECH-007 |
 | Naming and compatibility | `repoagent/config.py`, `repoagent/paths.py` | implemented | TECH-001 |
 | Runtime Spine | `repoagent/spine/`, `repoagent/agent_turn_runner.py` | implemented single-Turn lifecycle | TECH-008 |
@@ -768,6 +771,180 @@ Focused tests prove that equivalent fresh-input and total-input rows produce the
 - The current context reducer is local and deterministic, so production runs correctly report zero compaction model calls today.
 - Anthropic-compatible gateways are assumed to preserve Anthropic usage semantics. Live-provider fixtures in `P2-10` must verify this for each supported route.
 - P4 must reuse this accounting boundary when it introduces model-based summarization; a direct unmetered provider call would violate the contract.
+
+## TECH-016 - Deterministic Call Replay and Live Acceptance
+
+- Plan items: `P2-10`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/call_replay.py`
+- Integration: `scripts/replay_call_ledger.py`, `live_tests/test_live_providers.py`
+- Tests: `tests/test_call_replay.py`, `tests/test_provider_phase_gate.py`, `tests/test_public_api_contract.py`
+
+### Problem
+
+Re-running a model request is not deterministic and can silently apply a new model revision or price. Historical call evidence therefore needs an offline replay path that recomputes normalized rows from the exact persisted usage and pricing snapshot. Real-provider tests are still necessary for wire compatibility, but they must never run accidentally during ordinary local or CI tests.
+
+### Interface
+
+- `replay_call_ledger()` loads a `calls.jsonl`, reconstructs every typed call entry, recomputes cost evidence, and binds the result to a caller-supplied source digest.
+- `file_digest()` produces the `sha256:<hex>` identity expected by replay.
+- `scripts/replay_call_ledger.py` writes a deterministic replay report and exits non-zero when equivalence fails.
+- `live_tests/test_live_providers.py` accepts a comma-separated profile list only when `REPOAGENT_RUN_LIVE_PROVIDER_TESTS=1` is set.
+
+### Invariants
+
+- Replay performs no network access and contains no timestamps or mutable catalog lookup.
+- A source digest must be supplied externally; a digest stored only inside the source would not establish lineage.
+- Frozen `pricing_id`, normalized usage, estimated cost, cost status, and every other call field must rebuild exactly.
+- Duplicate `provider_call_id` values make replay non-equivalent.
+- Malformed JSON, unsupported schema versions, incomplete rows, and pricing identity mismatch fail closed.
+- Replay output cannot overwrite its source ledger.
+- Default pytest discovers only `tests/`; live acceptance is invoked by its explicit path.
+- Enabling live acceptance without profiles or required credentials fails instead of silently skipping.
+
+### Replay Flow
+
+```text
+externally recorded source digest + calls.jsonl
+  -> verify source bytes
+  -> reconstruct ModelUsage and ModelPricing
+  -> rebuild CallEfficiencyEntry.to_dict()
+  -> compare each frozen row
+  -> emit deterministic replay report and digest
+```
+
+Example offline command:
+
+```bash
+python scripts/replay_call_ledger.py \
+  --source .repoagent/runs/<turn-id>/calls.jsonl \
+  --expected-source-digest sha256:<hex> \
+  --output /tmp/repoagent-call-replay.json
+```
+
+Explicit live acceptance command:
+
+```bash
+REPOAGENT_RUN_LIVE_PROVIDER_TESTS=1 \
+REPOAGENT_LIVE_PROFILES=deepseek \
+pytest -q live_tests/test_live_providers.py
+```
+
+### Verification
+
+Focused tests cover byte-stable repeated replay, cost tampering, external digest mismatch, pricing identity tampering, duplicate call IDs, malformed ledgers, overwrite protection, CLI exit behavior, public exports, AgentLoop provider-neutral imports, and separation of live tests from the default suite. The live test entry was collected but not executed during this implementation because no real-provider run was requested.
+
+### Tradeoffs and Follow-ups
+
+- Replay proves internal equivalence to frozen evidence; it does not prove that a provider invoice was correct.
+- Live acceptance currently verifies typed result and non-missing usage. P6 will turn live rows into release-bound evaluation artifacts with provider error denominators.
+- Provider endpoints can change independently of the repository, so live evidence must always record its execution date and exact commit when used for a release claim.
+
+## TECH-017 - Typed Tool Gateway Contracts
+
+- Plan items: `P3-01`
+- Status: implemented contract; execution routing remains legacy until `P3-03`
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tool_contracts.py`
+- Tests: `tests/test_tool_contracts.py`, `tests/test_public_api_contract.py`
+
+### Problem
+
+The current tool registry represents schemas as compact strings, risk as a boolean, requests as loose `(name, args)` pairs, and results as content plus an open metadata dictionary. Approval, concurrency, MCP, sandbox, and tracing would each need to reinterpret those shapes. A stable seam is required before those policies can have one owner.
+
+### Interface
+
+- `ToolEffect` classifies environment interaction as `unknown`, `read`, `write`, `execute`, or `external`.
+- `ToolDefinition` carries one stable name, description, object JSON Schema, effect, concurrency verdict, and approval declaration.
+- `ToolRequest` carries immutable JSON arguments plus call, Turn, request, session, origin, and parent-call correlation.
+- `ToolResult` carries structured status, effect, content, duration, error code, affected paths, workspace-change verdict, and immutable metadata.
+
+### Invariants
+
+- Tool names follow one lowercase stable identifier grammar.
+- Definitions require closed object schemas: declared properties, an explicit required list, and `additionalProperties=false`.
+- Definitions have deterministic SHA256 identities derived from their complete public behavior declaration.
+- Contract mappings are copied and recursively frozen; only finite JSON-compatible values and string object keys are accepted.
+- Only read-effect tools may declare bounded concurrency safety. A read tool may still require approval when it exposes sensitive information.
+- Requests cannot be their own parent and preserve optional correlation without inventing placeholder IDs.
+- Successful results cannot carry error codes; every non-success result must carry one.
+- A result cannot claim affected paths without a workspace change, or claim a workspace change for read/external/unknown effects.
+
+### Contract Flow
+
+```text
+ToolDefinition
+  -> model-facing schema and runtime validator (P3-02)
+  -> ToolRequest correlation envelope
+  -> authorization / sandbox / execution (P3-03 through P3-05)
+  -> ToolResult structured evidence
+```
+
+The module intentionally contains no handler callable and performs no execution. This keeps the external interface small: implementations and adapters can vary behind the future Tool Gateway without exposing their internal dependencies to AgentLoop.
+
+### Verification
+
+Focused tests cover recursive immutability, stable definition identities, closed schema validation, effect/concurrency coherence, JSON compatibility, nested argument copies, request correlation, parent-call rejection, structured success, workspace effects, failure codes, duration validation, and public exports. Existing tool and provider tests remain green, confirming the new contracts do not change the legacy execution path.
+
+### Tradeoffs and Follow-ups
+
+- `BASE_TOOL_DEFINITIONS` is now the authoritative built-in registry; its projection and validation rules are recorded in TECH-018.
+- `ToolResult` is deliberately distinct from the compatibility `ToolExecutionResult`; P3-03 will adapt and then retire the loose metadata result.
+- Timeout and cancellation fields are not guessed into the definition yet. P3-05 will add them when the execution lifecycle is owned by the Gateway.
+
+## TECH-018 - Single-Source Tool Definition Projection
+
+- Plan items: `P3-02`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/tools.py`, `repoagent/tool_contracts.py`
+- Integration: `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py`, `repoagent/tool_executor.py`, `repoagent/runtime.py`
+- Tests: `tests/test_tool_definition_integration.py`, `tests/test_tool_contracts.py`, `tests/test_prompt_prefix.py`, `tests/test_repoagent.py`
+
+### Problem
+
+Built-in tools previously declared compact string schemas for the prompt, converted those strings a second time for provider-native calls, and used hand-written conditionals for basic required/type/default/range checks. Risk was a separate boolean. Those parallel representations could drift, so the model could receive a contract different from the one enforced at execution.
+
+### Interface
+
+- `BASE_TOOL_DEFINITIONS` and `DELEGATE_TOOL_DEFINITION` are the only built-in behavior declarations.
+- Registry entries contain exactly a `ToolDefinition` and a bound runner.
+- `validate_tool_arguments()` validates a JSON argument object, rejects unknown fields, and returns a new dictionary with declared defaults applied.
+- `model_tools_from_registry()` projects name, description, and the unchanged JSON Schema into provider-neutral `ModelTool` values.
+- Prompt rendering and prefix signatures consume the same definition and its deterministic identity.
+
+### Invariants
+
+- A built-in tool has one schema, description, effect, approval declaration, and concurrency verdict.
+- JSON Schema defaults must satisfy their own declared types and constraints before a definition can be constructed.
+- Runtime validation is strict: strings are not silently converted to integers, booleans, or numbers.
+- Required and unknown-field failures occur before approval or execution.
+- Defaults are applied before repeated-call detection, approval, and runner invocation.
+- Repeated-call detection normalizes both current and historical arguments, so `{}` and an explicit default object are semantically equal.
+- Filesystem existence, path containment, line-order relationships, and exact patch occurrence remain semantic validation, not duplicated schema logic.
+- Workspace snapshot behavior derives from `ToolEffect`; approval behavior derives from `requires_approval`.
+
+### Projection Flow
+
+```text
+ToolDefinition
+  -> prompt tool text and prefix signature
+  -> provider-neutral ModelTool JSON Schema
+  -> runtime argument validation and defaults
+  -> ToolExecutor effect / approval decisions
+  -> bound runner semantic checks and execution
+```
+
+### Verification
+
+Focused tests assert that registry entries have no legacy `schema`, `risky`, or `description` copies; provider schemas equal the definition projection; prompt signatures are order-stable; defaults and strict types reach runtime validation; invalid calls do not request approval; repeated default-equivalent calls are rejected; and all prior tool, safety, provider, allowlist, and AgentLoop behavior remains green.
+
+### Tradeoffs and Follow-ups
+
+- Tool-specific semantic checks remain an explicit second stage because JSON Schema cannot safely establish workspace state or patch uniqueness.
+- The existing `ToolExecutor` still owns routing and returns its compatibility result. P3-03 will introduce the Gateway implementation and adapt AgentLoop to `ToolRequest`/`ToolResult`.
+- The validator intentionally implements the JSON Schema subset used by RepoAgent tools. New schema keywords require contract tests before use.
 
 ## 5. Decision Index
 

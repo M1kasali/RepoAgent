@@ -330,7 +330,10 @@ def test_invalid_risky_tool_does_not_prompt_for_approval(tmp_path):
     with patch("builtins.input") as mock_input:
         result = agent.run_tool("write_file", {})
 
-    assert result.startswith("error: invalid arguments for write_file: 'path'")
+    assert result.startswith(
+        "error: invalid arguments for write_file: arguments for write_file "
+        "is missing required fields: path, content"
+    )
     assert 'example: <tool name="write_file"' in result
     mock_input.assert_not_called()
 

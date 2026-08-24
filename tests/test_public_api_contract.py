@@ -4,6 +4,7 @@ import repoagent
 from repoagent import (
     CallEfficiencyEntry,
     CallEfficiencySummary,
+    CallReplayError,
     FallbackModelClient,
     InputTokenSemantics,
     ModelPricing,
@@ -11,12 +12,18 @@ from repoagent import (
     ModelUsageAggregate,
     RepoAgent,
     SessionStore,
+    ToolDefinition,
+    ToolEffect,
+    ToolRequest,
+    ToolResult,
+    validate_tool_arguments,
     WorkspaceContext,
     build_agent,
     build_arg_parser,
     build_welcome,
     main,
     price_usage,
+    replay_call_ledger,
 )
 from repoagent.run_store import RunStore
 from repoagent.spine import RuntimeEvent, TurnRequest
@@ -29,15 +36,22 @@ def test_public_api_exports_current_names_only():
     assert FallbackModelClient is not None
     assert CallEfficiencyEntry is not None
     assert CallEfficiencySummary is not None
+    assert CallReplayError is not None
     assert InputTokenSemantics is not None
     assert ModelPricing is not None
     assert ModelProfile is not None
     assert ModelUsageAggregate is not None
+    assert ToolDefinition is not None
+    assert ToolEffect is not None
+    assert ToolRequest is not None
+    assert ToolResult is not None
+    assert callable(validate_tool_arguments)
     assert callable(build_agent)
     assert callable(build_arg_parser)
     assert callable(build_welcome)
     assert callable(main)
     assert callable(price_usage)
+    assert callable(replay_call_ledger)
     assert not hasattr(repoagent, "MiniAgent")
     assert "MiniAgent" not in repoagent.__all__
 

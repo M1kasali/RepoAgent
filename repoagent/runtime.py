@@ -605,7 +605,23 @@ class RepoAgent:
         if len(tool_events) < 2:
             return False
         recent = tool_events[-2:]
-        return all(item["name"] == name and item["args"] == args for item in recent)
+        try:
+            normalized_args = toolkit.normalize_tool_arguments(name, args)
+        except ValueError:
+            normalized_args = args
+
+        def same_call(item):
+            if item["name"] != name:
+                return False
+            try:
+                historical_args = toolkit.normalize_tool_arguments(
+                    name, item["args"]
+                )
+            except ValueError:
+                historical_args = item["args"]
+            return historical_args == normalized_args
+
+        return all(same_call(item) for item in recent)
 
     @staticmethod
     def new_task_id():
@@ -657,7 +673,7 @@ class RepoAgent:
 
     def validate_tool(self, name, args):
         """把通用工具校验和 runtime 级额外约束串起来。"""
-        toolkit.validate_tool(self.tool_context(), name, args)
+        return toolkit.validate_tool(self.tool_context(), name, args)
 
     def tool_context(self):
         return ToolContext(

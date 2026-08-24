@@ -185,7 +185,7 @@ Goal: make provider differences explicit behind a typed model interface.
 - [x] `P2-07` Record actual, estimated, missing, and mixed usage separately.
 - [x] `P2-08` Implement a pricing and call-efficiency ledger.
 - [x] `P2-09` Account for cache reads/writes and compaction calls.
-- [ ] `P2-10` Add deterministic replay tests and opt-in live-provider tests.
+- [x] `P2-10` Add deterministic replay tests and opt-in live-provider tests.
 
 Gate:
 
@@ -197,8 +197,8 @@ Gate:
 
 Goal: make one execution seam responsible for validation, authorization, isolation, and audit.
 
-- [ ] `P3-01` Define typed `ToolDefinition`, `ToolRequest`, `ToolEffect`, and `ToolResult`.
-- [ ] `P3-02` Generate prompt/native schemas and argument validation from one definition.
+- [x] `P3-01` Define typed `ToolDefinition`, `ToolRequest`, `ToolEffect`, and `ToolResult`.
+- [x] `P3-02` Generate prompt/native schemas and argument validation from one definition.
 - [ ] `P3-03` Route all tools, delegation, and internal calls through one `ToolGateway`.
 - [ ] `P3-04` Add effect-aware approval and capability tokens.
 - [ ] `P3-05` Implement timeout, cancellation, output limits, and structured failures.
@@ -381,4 +381,4 @@ The completed implementation slice is `P1-01` through `P1-05`:
 - preserve `RepoAgent.ask()` as the compatibility facade;
 - document the design and verify terminal outcomes.
 
-The provider runtime slice `P2-01` through `P2-09` is complete. AgentLoop consumes normalized streaming events, scheduler cancellation closes active built-in HTTP responses, fallback is classification-driven and protected against partial-stream mixing, and validated model profiles keep credential values outside configuration evidence. `ModelUsageAggregate` now sums every completed call in a Turn, accounts failed fallback/provider attempts as missing, and preserves actual/estimated/missing/mixed counts in trace, report, and terminal Turn evidence. Explicit pricing snapshots and a per-attempt `calls.jsonl` ledger expose partial cost while withholding unit-success cost when evidence is incomplete. Cache pricing distinguishes fresh and total input-token semantics, and call-kind counts reserve a visible compaction bucket for the model compactor introduced in P4. Connection setup before a response handle exists remains timeout-bounded, and tool-process cancellation remains `P3-05`; therefore `P1-09` is still partial. The next slice is `P2-10`, deterministic replay and opt-in live-provider tests.
+Provider runtime phase `P2` is complete. AgentLoop consumes normalized streaming events, classification-driven fallback, multi-call usage, cache-aware cost evidence, and digest-bound offline replay. P3 now has immutable Tool Gateway contracts, and every built-in tool is declared once as a `ToolDefinition`. Prompt rendering, provider-native schemas, default application, type/range checks, effect metadata, and approval declarations all consume that same definition; workspace-dependent semantic checks remain beside the tool implementations. The next implementation slice is `P3-03`, routing tools, delegation, and later internal/MCP calls through one Tool Gateway.
