@@ -4,6 +4,7 @@ RepoAgent 就是包在模型外面的控制循环：负责组 prompt、解析模
 校验并执行工具、写 trace、更新工作记忆，以及在合适的时候停下来。
 """
 
+import asyncio
 import json
 import hashlib
 import os
@@ -111,6 +112,7 @@ class RepoAgent:
         self.current_run_dir = None
         self.last_prompt_metadata = {}
         self.last_completion_metadata = {}
+        self.last_model_result = None
         self.last_durable_promotions = []
         self.last_durable_rejections = []
         self.last_durable_superseded = []
@@ -119,6 +121,9 @@ class RepoAgent:
             "workspace_changed": False,
             "prefix_changed": False,
         }
+        self._turn_runtime = None
+        self._scheduler = None
+        self._scheduler_loop = None
 
     @classmethod
     def from_session(cls, model_client, workspace, session_store, session_id, **kwargs):
@@ -501,9 +506,62 @@ class RepoAgent:
         return promoted, rejections, superseded
 
     def ask(self, user_message):
-        from .agent_loop import AgentLoop
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._ask_and_close(user_message))
+        raise RuntimeError("RepoAgent.ask() cannot run inside an active event loop; use await ask_async()")
 
-        return AgentLoop(self).run(user_message)
+    async def _ask_and_close(self, user_message):
+        try:
+            return await self.ask_async(user_message)
+        finally:
+            await self.aclose()
+
+    async def ask_async(self, user_message):
+        from .agent_turn_runner import AgentTurnRunner
+        from .spine import Scheduler, Text, TurnRequest, TurnRuntime, TurnState
+
+        if self._turn_runtime is None:
+            self._turn_runtime = TurnRuntime(
+                AgentTurnRunner(self), self.run_store, redactor=self.redact_artifact
+            )
+        loop = asyncio.get_running_loop()
+        if self._scheduler is None:
+            self._scheduler = Scheduler(
+                self._turn_runtime,
+                foreground_capacity=1,
+                background_capacity=1,
+            )
+            self._scheduler_loop = loop
+        elif self._scheduler_loop is not loop:
+            raise RuntimeError(
+                "RepoAgent async runtime is bound to another event loop; call aclose() before reusing it"
+            )
+        request = TurnRequest.create(
+            session_id=self.session["id"],
+            text=user_message,
+        )
+        handle = self._scheduler.submit(request)
+        outcome = await handle.result()
+        if outcome.state is TurnState.FAILED:
+            raise RuntimeError(outcome.error or "Turn failed")
+        if outcome.state is TurnState.CANCELLED:
+            raise asyncio.CancelledError(outcome.error or "Turn cancelled")
+        answers = [event.content for event in handle.events if isinstance(event, Text)]
+        return "".join(answers) if answers else outcome.final_answer
+
+    async def aclose(self, grace=5.0):
+        if self._scheduler is None:
+            return
+        if self._scheduler_loop is not asyncio.get_running_loop():
+            raise RuntimeError("RepoAgent must be closed from its scheduler event loop")
+        scheduler = self._scheduler
+        try:
+            await scheduler.shutdown(grace=grace)
+        finally:
+            self._scheduler = None
+            self._scheduler_loop = None
 
     def execute_tool(self, name, args):
         result = self.tool_executor.execute(name, args)

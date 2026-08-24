@@ -38,6 +38,15 @@ release/
 readme_intro_locked/
 assets/
 docs/
+!docs/
+docs/*
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/agent-harness-v1-overview.md
+!docs/architecture/implementation-ledger.md
+!docs/roadmaps/
+docs/roadmaps/*
+!docs/roadmaps/agent-harness-implementation-plan.md
 examples/
 
 # Local secrets and provider configuration

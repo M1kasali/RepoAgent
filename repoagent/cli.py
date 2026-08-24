@@ -14,6 +14,7 @@ import textwrap
 from .config import load_project_env, load_user_env, provider_env
 from .paths import workspace_state_root
 from .providers.clients import AnthropicCompatibleModelClient, OllamaModelClient, OpenAICompatibleModelClient
+from .run_store import RunStore
 from .runtime import RepoAgent, SessionStore
 from .workspace import WorkspaceContext, middle
 
@@ -246,31 +247,39 @@ def build_agent(args):
     load_user_env()
     load_project_env(workspace.repo_root)
     configured_secret_names = _configured_secret_names(args)
-    store = SessionStore(workspace_state_root(workspace.repo_root) / "sessions")
+    state_root = workspace_state_root(workspace.repo_root)
+    store = SessionStore(state_root / "sessions")
+    run_store = RunStore(state_root / "runs")
+    recovered_turn_ids = run_store.recover_incomplete_turns()
     model = _build_model_client(args)
     session_id = args.resume
     if session_id == "latest":
         session_id = store.latest()
     if session_id:
-        return RepoAgent.from_session(
+        agent = RepoAgent.from_session(
             model_client=model,
             workspace=workspace,
             session_store=store,
+            run_store=run_store,
             session_id=session_id,
             approval_policy=args.approval,
             max_steps=args.max_steps,
             max_new_tokens=args.max_new_tokens,
             secret_env_names=configured_secret_names,
         )
-    return RepoAgent(
-        model_client=model,
-        workspace=workspace,
-        session_store=store,
-        approval_policy=args.approval,
-        max_steps=args.max_steps,
-        max_new_tokens=args.max_new_tokens,
-        secret_env_names=configured_secret_names,
-    )
+    else:
+        agent = RepoAgent(
+            model_client=model,
+            workspace=workspace,
+            session_store=store,
+            run_store=run_store,
+            approval_policy=args.approval,
+            max_steps=args.max_steps,
+            max_new_tokens=args.max_new_tokens,
+            secret_env_names=configured_secret_names,
+        )
+    agent.recovered_turn_ids = tuple(recovered_turn_ids)
+    return agent
 
 
 def build_arg_parser():

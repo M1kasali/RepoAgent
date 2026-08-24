@@ -11,15 +11,81 @@ from http.client import RemoteDisconnected
 import urllib.error
 import urllib.request
 
+from .base import (
+    ModelEvent,
+    ModelRequest,
+    ModelResult,
+    ModelUsage,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderProtocolError,
+    ProviderTimeoutError,
+    ToolCall,
+)
+
 OPENAI_COMPATIBLE_USER_AGENT = "repoagent/0.1"
 
 
-class FakeModelClient:
+class _TypedModelClient:
+    """Expose the typed provider contract while preserving complete()."""
+
+    def generate(self, request: ModelRequest) -> ModelResult:
+        started_at = time.monotonic()
+        try:
+            text = self.complete(
+                request.prompt,
+                request.max_output_tokens,
+                prompt_cache_key=request.prompt_cache_key,
+                prompt_cache_retention=request.prompt_cache_retention,
+                timeout=request.timeout_seconds,
+                tools=request.tools,
+            )
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(
+                f"{type(self).__name__} request timed out",
+                provider=type(self).__name__,
+            ) from exc
+        metadata = dict(getattr(self, "last_completion_metadata", {}) or {})
+        return ModelResult(
+            text=str(text),
+            tool_calls=tuple(getattr(self, "last_tool_calls", ()) or ()),
+            finish_reason=str(getattr(self, "last_finish_reason", "stop")),
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=str(getattr(self, "model", "")),
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+
+    def stream(self, request: ModelRequest):
+        result = self.generate(request)
+        if result.text:
+            yield ModelEvent(kind="text_delta", text=result.text)
+        for tool_call in result.tool_calls:
+            yield ModelEvent(kind="tool_call", tool_call=tool_call)
+        yield ModelEvent(kind="completed", result=result)
+
+
+def _http_provider_error(provider, label, exc, body):
+    status = int(exc.code)
+    return ProviderError(
+        f"{label} request failed with HTTP {status}: {body}",
+        category=("rate_limit" if status == 429 else "server" if status >= 500 else "request"),
+        provider=provider,
+        retryable=status == 429 or status >= 500,
+        should_fallback=status == 429 or status >= 500,
+        status_code=status,
+    )
+
+
+class FakeModelClient(_TypedModelClient):
     def __init__(self, outputs):
         self.outputs = list(outputs)
         self.prompts = []
         self.supports_prompt_cache = False
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
 
     def complete(self, prompt, max_new_tokens, **kwargs):
         self.prompts.append(prompt)
@@ -30,7 +96,7 @@ class FakeModelClient:
         return self.outputs.pop(0)
 
 
-class OllamaModelClient:
+class OllamaModelClient(_TypedModelClient):
     def __init__(self, model, host, temperature, top_p, timeout):
         self.model = model
         self.host = host.rstrip("/")
@@ -39,11 +105,15 @@ class OllamaModelClient:
         self.timeout = timeout
         self.supports_prompt_cache = False
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
 
-    def complete(self, prompt, max_new_tokens, **kwargs):
+    def complete(self, prompt, max_new_tokens, timeout=None, **kwargs):
         # Ollama 当前不支持我们这里接入的 prompt cache 语义，
         # 所以 runtime 传下来的缓存参数会被忽略。
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
         payload = {
             "model": self.model,
             "prompt": prompt,
@@ -63,22 +133,125 @@ class OllamaModelClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(
+                request, timeout=timeout or self.timeout
+            ) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Ollama request failed with HTTP {exc.code}: {body}") from exc
+            raise _http_provider_error(
+                type(self).__name__, "Ollama", exc, body
+            ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(
+            raise ProviderConnectionError(
                 "Could not reach Ollama.\n"
                 "Make sure `ollama serve` is running and the model is available.\n"
                 f"Host: {self.host}\n"
-                f"Model: {self.model}"
+                f"Model: {self.model}",
+                provider=type(self).__name__,
             ) from exc
 
         if data.get("error"):
-            raise RuntimeError(f"Ollama error: {data['error']}")
+            raise ProviderProtocolError(
+                f"Ollama error: {data['error']}", provider=type(self).__name__
+            )
+        self.last_completion_metadata = {
+            "input_tokens": data.get("prompt_eval_count"),
+            "output_tokens": data.get("eval_count"),
+            "total_tokens": (
+                int(data.get("prompt_eval_count") or 0)
+                + int(data.get("eval_count") or 0)
+            ),
+            "usage_source": (
+                "actual"
+                if data.get("prompt_eval_count") is not None
+                or data.get("eval_count") is not None
+                else "missing"
+            ),
+        }
         return data.get("response", "")
+
+    def stream(self, request: ModelRequest):
+        started_at = time.monotonic()
+        payload = {
+            "model": self.model,
+            "prompt": request.prompt,
+            "stream": True,
+            "raw": False,
+            "think": False,
+            "options": {
+                "num_predict": request.max_output_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+            },
+        }
+        http_request = urllib.request.Request(
+            self.host + "/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        parts = []
+        final_data = {}
+        try:
+            with urllib.request.urlopen(
+                http_request, timeout=request.timeout_seconds or self.timeout
+            ) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("error"):
+                        raise ProviderProtocolError(
+                            f"Ollama error: {data['error']}",
+                            provider=type(self).__name__,
+                        )
+                    text = data.get("response") or ""
+                    if text:
+                        parts.append(text)
+                        yield ModelEvent(kind="text_delta", text=text)
+                    if data.get("done"):
+                        final_data = data
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise _http_provider_error(
+                type(self).__name__, "Ollama", exc, body
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderConnectionError(
+                f"Could not reach Ollama at {self.host}",
+                provider=type(self).__name__,
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise ProviderProtocolError(
+                "Ollama stream contained invalid JSON",
+                provider=type(self).__name__,
+            ) from exc
+        if not final_data:
+            raise ProviderProtocolError(
+                "Ollama stream ended without a done event",
+                provider=type(self).__name__,
+            )
+        metadata = {
+            "input_tokens": final_data.get("prompt_eval_count"),
+            "output_tokens": final_data.get("eval_count"),
+            "total_tokens": (
+                int(final_data.get("prompt_eval_count") or 0)
+                + int(final_data.get("eval_count") or 0)
+            ),
+            "usage_source": "actual" if final_data else "missing",
+        }
+        result = ModelResult(
+            text="".join(parts),
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=self.model,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+        self.last_completion_metadata = metadata
+        yield ModelEvent(kind="completed", result=result)
 
 
 def _normalize_versioned_base_url(base_url):
@@ -113,6 +286,60 @@ def _extract_openai_text(data):
                         return text
 
     return ""
+
+
+def _decode_tool_arguments(value, *, provider):
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        raise ProviderProtocolError(
+            "native tool arguments must be a JSON object",
+            provider=provider,
+        )
+    try:
+        arguments = json.loads(value or "{}")
+    except json.JSONDecodeError as exc:
+        raise ProviderProtocolError(
+            "native tool arguments are not valid JSON",
+            provider=provider,
+        ) from exc
+    if not isinstance(arguments, dict):
+        raise ProviderProtocolError(
+            "native tool arguments must decode to an object",
+            provider=provider,
+        )
+    return arguments
+
+
+def _extract_openai_tool_calls(data, *, provider):
+    calls = []
+    for item in data.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        calls.append(
+            ToolCall(
+                id=str(item.get("call_id") or item.get("id") or ""),
+                name=str(item.get("name") or ""),
+                arguments=_decode_tool_arguments(
+                    item.get("arguments", "{}"), provider=provider
+                ),
+            )
+        )
+    choices = data.get("choices") or []
+    if choices:
+        message = choices[0].get("message") or {}
+        for item in message.get("tool_calls") or []:
+            function = item.get("function") or {}
+            calls.append(
+                ToolCall(
+                    id=str(item.get("id") or ""),
+                    name=str(function.get("name") or ""),
+                    arguments=_decode_tool_arguments(
+                        function.get("arguments", "{}"), provider=provider
+                    ),
+                )
+            )
+    return tuple(calls)
 
 
 def _extract_openai_text_from_sse(body_text):
@@ -220,10 +447,11 @@ def _extract_usage_cache_details(data):
         "total_tokens": usage.get("total_tokens"),
         "cached_tokens": cached_tokens,
         "cache_hit": cached_tokens > 0,
+        "usage_source": "actual" if usage else "missing",
     }
 
 
-class OpenAICompatibleModelClient:
+class OpenAICompatibleModelClient(_TypedModelClient):
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model
         self.base_url = _normalize_versioned_base_url(base_url)
@@ -234,8 +462,18 @@ class OpenAICompatibleModelClient:
         # 避免对不支持的后端传一个“看起来统一、其实没意义”的伪参数。
         self.supports_prompt_cache = any(host in self.base_url for host in ("openai.com", "right.codes"))
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
 
-    def complete(self, prompt, max_new_tokens, prompt_cache_key=None, prompt_cache_retention=None):
+    def complete(
+        self,
+        prompt,
+        max_new_tokens,
+        prompt_cache_key=None,
+        prompt_cache_retention=None,
+        timeout=None,
+        tools=(),
+    ):
         """向 OpenAI-compatible `/responses` 接口发起一次模型调用。
 
         为什么存在：
@@ -253,6 +491,8 @@ class OpenAICompatibleModelClient:
         落到 provider API 的地方。
         """
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
         payload = {
             "model": self.model,
             "input": [
@@ -271,6 +511,16 @@ class OpenAICompatibleModelClient:
         }
         if self.temperature is not None:
             payload["temperature"] = self.temperature
+        if tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": dict(tool.parameters),
+                }
+                for tool in tools
+            ]
         # runtime 传入的是“稳定前缀”的签名，而不是整段 prompt 的签名。
         # 这样缓存复用针对的是稳定段，不会因为动态 history 每轮变化而失效。
         if self.supports_prompt_cache and prompt_cache_key:
@@ -295,7 +545,9 @@ class OpenAICompatibleModelClient:
         attempts = 3
         for attempt in range(attempts):
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with urllib.request.urlopen(
+                    request, timeout=timeout or self.timeout
+                ) as response:
                     body_text = response.read().decode("utf-8")
                     headers = getattr(response, "headers", {}) or {}
                     content_type = headers.get("Content-Type", "")
@@ -305,15 +557,26 @@ class OpenAICompatibleModelClient:
                 if exc.code >= 500 and attempt < attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(f"OpenAI-compatible request failed with HTTP {exc.code}: {body}") from exc
+                raise _http_provider_error(
+                    type(self).__name__, "OpenAI-compatible", exc, body
+                ) from exc
             except (urllib.error.URLError, RemoteDisconnected) as exc:
                 if attempt < attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
+                raise ProviderConnectionError(
                     "Could not reach the OpenAI-compatible backend.\n"
                     f"Base URL: {self.base_url}\n"
-                    f"Model: {self.model}"
+                    f"Model: {self.model}",
+                    provider=type(self).__name__,
+                ) from exc
+            except TimeoutError as exc:
+                if attempt < attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise ProviderTimeoutError(
+                    "OpenAI-compatible request timed out",
+                    provider=type(self).__name__,
                 ) from exc
 
         # 有些兼容后端返回普通 JSON，有些返回 SSE。
@@ -329,25 +592,204 @@ class OpenAICompatibleModelClient:
                     "prompt_cache_retention": prompt_cache_retention,
                     **_extract_usage_cache_details(response_data),
                 }
-            if text:
+                self.last_tool_calls = _extract_openai_tool_calls(
+                    response_data, provider=type(self).__name__
+                )
+                self.last_finish_reason = (
+                    "tool_calls" if self.last_tool_calls else "stop"
+                )
+            if text or self.last_tool_calls:
                 return text
-            raise RuntimeError("OpenAI-compatible error: could not extract text from event stream response")
+            raise ProviderProtocolError(
+                "OpenAI-compatible error: could not extract text from event stream response",
+                provider=type(self).__name__,
+            )
 
         try:
             data = json.loads(body_text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "OpenAI-compatible error: backend returned non-JSON content that could not be parsed"
+            raise ProviderProtocolError(
+                "OpenAI-compatible error: backend returned non-JSON content that could not be parsed",
+                provider=type(self).__name__,
             ) from exc
         if data.get("error"):
-            raise RuntimeError(f"OpenAI-compatible error: {data['error']}")
+            raise ProviderProtocolError(
+                f"OpenAI-compatible error: {data['error']}",
+                provider=type(self).__name__,
+            )
         self.last_completion_metadata = {
             "prompt_cache_supported": self.supports_prompt_cache,
             "prompt_cache_key": prompt_cache_key,
             "prompt_cache_retention": prompt_cache_retention,
             **_extract_usage_cache_details(data),
         }
+        self.last_tool_calls = _extract_openai_tool_calls(
+            data, provider=type(self).__name__
+        )
+        choices = data.get("choices") or []
+        self.last_finish_reason = str(
+            (choices[0].get("finish_reason") if choices else None)
+            or ("tool_calls" if self.last_tool_calls else "stop")
+        )
         return _extract_openai_text(data)
+
+    def stream(self, request: ModelRequest):
+        started_at = time.monotonic()
+        payload = {
+            "model": self.model,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": request.prompt}],
+                }
+            ],
+            "max_output_tokens": request.max_output_tokens,
+            "stream": True,
+        }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
+        if self.supports_prompt_cache and request.prompt_cache_key:
+            payload["prompt_cache_key"] = request.prompt_cache_key
+        if self.supports_prompt_cache and request.prompt_cache_retention:
+            payload["prompt_cache_retention"] = request.prompt_cache_retention
+        if request.tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": dict(tool.parameters),
+                }
+                for tool in request.tools
+            ]
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": OPENAI_COMPATIBLE_USER_AGENT,
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        http_request = urllib.request.Request(
+            self.base_url + "/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        parts = []
+        final_data = None
+        try:
+            with urllib.request.urlopen(
+                http_request, timeout=request.timeout_seconds or self.timeout
+            ) as response:
+                content_type = (getattr(response, "headers", {}) or {}).get(
+                    "Content-Type", ""
+                )
+                if not content_type.startswith("text/event-stream"):
+                    data = json.loads(response.read().decode("utf-8"))
+                    yield from self._events_from_openai_response(
+                        data, request, started_at
+                    )
+                    return
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    encoded = line[len("data:") :].strip()
+                    if not encoded or encoded == "[DONE]":
+                        continue
+                    event = json.loads(encoded)
+                    event_type = event.get("type")
+                    if event_type == "response.output_text.delta":
+                        text = event.get("delta") or ""
+                        if text:
+                            parts.append(text)
+                            yield ModelEvent(kind="text_delta", text=text)
+                    elif event_type == "response.completed":
+                        final_data = event.get("response") or {}
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise _http_provider_error(
+                type(self).__name__, "OpenAI-compatible", exc, body
+            ) from exc
+        except (urllib.error.URLError, RemoteDisconnected) as exc:
+            raise ProviderConnectionError(
+                f"Could not reach the OpenAI-compatible backend at {self.base_url}",
+                provider=type(self).__name__,
+            ) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProviderProtocolError(
+                "OpenAI-compatible stream contained invalid JSON",
+                provider=type(self).__name__,
+            ) from exc
+
+        if final_data is None:
+            raise ProviderProtocolError(
+                "OpenAI-compatible stream ended without response.completed",
+                provider=type(self).__name__,
+            )
+        if final_data is not None:
+            tool_calls = _extract_openai_tool_calls(
+                final_data, provider=type(self).__name__
+            )
+            usage_payload = final_data
+            final_text = _extract_openai_text(final_data) or "".join(parts)
+        metadata = {
+            "prompt_cache_supported": self.supports_prompt_cache,
+            "prompt_cache_key": request.prompt_cache_key,
+            "prompt_cache_retention": request.prompt_cache_retention,
+            **_extract_usage_cache_details(usage_payload),
+        }
+        result = ModelResult(
+            text=final_text,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=self.model,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+        self.last_completion_metadata = metadata
+        self.last_tool_calls = tool_calls
+        self.last_finish_reason = result.finish_reason
+        for tool_call in tool_calls:
+            yield ModelEvent(kind="tool_call", tool_call=tool_call)
+        yield ModelEvent(kind="completed", result=result)
+
+    def _events_from_openai_response(self, data, request, started_at):
+        if data.get("error"):
+            raise ProviderProtocolError(
+                f"OpenAI-compatible error: {data['error']}",
+                provider=type(self).__name__,
+            )
+        text = _extract_openai_text(data)
+        tool_calls = _extract_openai_tool_calls(
+            data, provider=type(self).__name__
+        )
+        metadata = {
+            "prompt_cache_supported": self.supports_prompt_cache,
+            "prompt_cache_key": request.prompt_cache_key,
+            "prompt_cache_retention": request.prompt_cache_retention,
+            **_extract_usage_cache_details(data),
+        }
+        if text:
+            yield ModelEvent(kind="text_delta", text=text)
+        for tool_call in tool_calls:
+            yield ModelEvent(kind="tool_call", tool_call=tool_call)
+        result = ModelResult(
+            text=text,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=self.model,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+        self.last_completion_metadata = metadata
+        self.last_tool_calls = tool_calls
+        self.last_finish_reason = result.finish_reason
+        yield ModelEvent(kind="completed", result=result)
 
 
 def _extract_anthropic_text(data):
@@ -359,7 +801,21 @@ def _extract_anthropic_text(data):
     return ""
 
 
-class AnthropicCompatibleModelClient:
+def _extract_anthropic_tool_calls(data, *, provider):
+    return tuple(
+        ToolCall(
+            id=str(item.get("id") or ""),
+            name=str(item.get("name") or ""),
+            arguments=_decode_tool_arguments(
+                item.get("input") or {}, provider=provider
+            ),
+        )
+        for item in data.get("content", [])
+        if isinstance(item, dict) and item.get("type") == "tool_use"
+    )
+
+
+class AnthropicCompatibleModelClient(_TypedModelClient):
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model
         self.base_url = _normalize_versioned_base_url(base_url)
@@ -368,12 +824,24 @@ class AnthropicCompatibleModelClient:
         self.timeout = timeout
         self.supports_prompt_cache = False
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
 
-    def complete(self, prompt, max_new_tokens, prompt_cache_key=None, prompt_cache_retention=None):
+    def complete(
+        self,
+        prompt,
+        max_new_tokens,
+        prompt_cache_key=None,
+        prompt_cache_retention=None,
+        timeout=None,
+        tools=(),
+    ):
         # 为了保持统一接口，runtime 仍然会传缓存参数进来；
         # 这里只是显式丢弃，因为当前 Anthropic-compatible 路径没有接缓存复用。
         del prompt_cache_key, prompt_cache_retention
         self.last_completion_metadata = {}
+        self.last_tool_calls = ()
+        self.last_finish_reason = "stop"
         payload = {
             "model": self.model,
             "messages": [
@@ -392,6 +860,15 @@ class AnthropicCompatibleModelClient:
         }
         if self.temperature is not None:
             payload["temperature"] = self.temperature
+        if tools:
+            payload["tools"] = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": dict(tool.parameters),
+                }
+                for tool in tools
+            ]
 
         headers = {
             "Content-Type": "application/json",
@@ -408,7 +885,9 @@ class AnthropicCompatibleModelClient:
         attempts = 3
         for attempt in range(attempts):
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with urllib.request.urlopen(
+                    request, timeout=timeout or self.timeout
+                ) as response:
                     body_text = response.read().decode("utf-8")
                 break
             except urllib.error.HTTPError as exc:
@@ -416,26 +895,269 @@ class AnthropicCompatibleModelClient:
                 if exc.code >= 500 and attempt < attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(f"Anthropic-compatible request failed with HTTP {exc.code}: {body}") from exc
+                raise _http_provider_error(
+                    type(self).__name__, "Anthropic-compatible", exc, body
+                ) from exc
             except (urllib.error.URLError, RemoteDisconnected) as exc:
                 if attempt < attempts - 1:
                     time.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
+                raise ProviderConnectionError(
                     "Could not reach the Anthropic-compatible backend.\n"
                     f"Base URL: {self.base_url}\n"
-                    f"Model: {self.model}"
+                    f"Model: {self.model}",
+                    provider=type(self).__name__,
+                ) from exc
+            except TimeoutError as exc:
+                if attempt < attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise ProviderTimeoutError(
+                    "Anthropic-compatible request timed out",
+                    provider=type(self).__name__,
                 ) from exc
 
         try:
             data = json.loads(body_text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "Anthropic-compatible error: backend returned non-JSON content that could not be parsed"
+            raise ProviderProtocolError(
+                "Anthropic-compatible error: backend returned non-JSON content that could not be parsed",
+                provider=type(self).__name__,
             ) from exc
         if data.get("error"):
-            raise RuntimeError(f"Anthropic-compatible error: {data['error']}")
+            raise ProviderProtocolError(
+                f"Anthropic-compatible error: {data['error']}",
+                provider=type(self).__name__,
+            )
+        usage = data.get("usage") or {}
+        self.last_completion_metadata = {
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "total_tokens": (
+                int(usage.get("input_tokens") or 0)
+                + int(usage.get("output_tokens") or 0)
+            ),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
+            "usage_source": "actual" if usage else "missing",
+        }
+        self.last_tool_calls = _extract_anthropic_tool_calls(
+            data, provider=type(self).__name__
+        )
+        self.last_finish_reason = str(
+            data.get("stop_reason")
+            or ("tool_calls" if self.last_tool_calls else "stop")
+        )
         text = _extract_anthropic_text(data)
-        if text:
+        if text or self.last_tool_calls:
             return text
-        raise RuntimeError("Anthropic-compatible error: could not extract text from response")
+        raise ProviderProtocolError(
+            "Anthropic-compatible error: could not extract text from response",
+            provider=type(self).__name__,
+        )
+
+    def stream(self, request: ModelRequest):
+        started_at = time.monotonic()
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": request.prompt}],
+                }
+            ],
+            "max_tokens": request.max_output_tokens,
+            "stream": True,
+        }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
+        if request.tools:
+            payload["tools"] = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": dict(tool.parameters),
+                }
+                for tool in request.tools
+            ]
+        http_request = urllib.request.Request(
+            self.base_url + "/messages",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        parts = []
+        blocks = {}
+        usage = {}
+        finish_reason = "stop"
+        saw_stop = False
+        try:
+            with urllib.request.urlopen(
+                http_request, timeout=request.timeout_seconds or self.timeout
+            ) as response:
+                content_type = (getattr(response, "headers", {}) or {}).get(
+                    "Content-Type", ""
+                )
+                if not content_type.startswith("text/event-stream"):
+                    data = json.loads(response.read().decode("utf-8"))
+                    yield from self._events_from_anthropic_response(
+                        data, started_at
+                    )
+                    return
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    encoded = line[len("data:") :].strip()
+                    if not encoded:
+                        continue
+                    event = json.loads(encoded)
+                    event_type = event.get("type")
+                    if event_type == "message_start":
+                        usage.update((event.get("message") or {}).get("usage") or {})
+                    elif event_type == "content_block_start":
+                        block = event.get("content_block") or {}
+                        index = int(event.get("index") or 0)
+                        if block.get("type") == "tool_use":
+                            blocks[index] = {
+                                "id": block.get("id"),
+                                "name": block.get("name"),
+                                "arguments": "",
+                            }
+                        elif block.get("type") == "text" and block.get("text"):
+                            text = str(block["text"])
+                            parts.append(text)
+                            yield ModelEvent(kind="text_delta", text=text)
+                    elif event_type == "content_block_delta":
+                        delta = event.get("delta") or {}
+                        index = int(event.get("index") or 0)
+                        if delta.get("type") == "text_delta":
+                            text = str(delta.get("text") or "")
+                            if text:
+                                parts.append(text)
+                                yield ModelEvent(kind="text_delta", text=text)
+                        elif delta.get("type") == "input_json_delta":
+                            block = blocks.setdefault(
+                                index, {"id": "", "name": "", "arguments": ""}
+                            )
+                            block["arguments"] += delta.get("partial_json") or ""
+                    elif event_type == "message_delta":
+                        delta = event.get("delta") or {}
+                        finish_reason = str(delta.get("stop_reason") or finish_reason)
+                        usage.update(event.get("usage") or {})
+                    elif event_type == "message_stop":
+                        saw_stop = True
+                    elif event_type == "error":
+                        error = event.get("error") or {}
+                        raise ProviderProtocolError(
+                            f"Anthropic-compatible stream error: {error.get('type', 'unknown')}",
+                            provider=type(self).__name__,
+                        )
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise _http_provider_error(
+                type(self).__name__, "Anthropic-compatible", exc, body
+            ) from exc
+        except (urllib.error.URLError, RemoteDisconnected) as exc:
+            raise ProviderConnectionError(
+                f"Could not reach the Anthropic-compatible backend at {self.base_url}",
+                provider=type(self).__name__,
+            ) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProviderProtocolError(
+                "Anthropic-compatible stream contained invalid JSON",
+                provider=type(self).__name__,
+            ) from exc
+        if not saw_stop:
+            raise ProviderProtocolError(
+                "Anthropic-compatible stream ended without message_stop",
+                provider=type(self).__name__,
+            )
+        tool_calls = tuple(
+            ToolCall(
+                id=str(block.get("id") or ""),
+                name=str(block.get("name") or ""),
+                arguments=_decode_tool_arguments(
+                    block.get("arguments") or "{}",
+                    provider=type(self).__name__,
+                ),
+            )
+            for block in blocks.values()
+        )
+        metadata = {
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "total_tokens": (
+                int(usage.get("input_tokens") or 0)
+                + int(usage.get("output_tokens") or 0)
+            ),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
+            "usage_source": "actual" if usage else "missing",
+        }
+        result = ModelResult(
+            text="".join(parts),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=self.model,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+        self.last_completion_metadata = metadata
+        self.last_tool_calls = tool_calls
+        self.last_finish_reason = finish_reason
+        for tool_call in tool_calls:
+            yield ModelEvent(kind="tool_call", tool_call=tool_call)
+        yield ModelEvent(kind="completed", result=result)
+
+    def _events_from_anthropic_response(self, data, started_at):
+        if data.get("error"):
+            raise ProviderProtocolError(
+                f"Anthropic-compatible error: {data['error']}",
+                provider=type(self).__name__,
+            )
+        text = _extract_anthropic_text(data)
+        tool_calls = _extract_anthropic_tool_calls(
+            data, provider=type(self).__name__
+        )
+        usage = data.get("usage") or {}
+        metadata = {
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "total_tokens": (
+                int(usage.get("input_tokens") or 0)
+                + int(usage.get("output_tokens") or 0)
+            ),
+            "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+            "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
+            "usage_source": "actual" if usage else "missing",
+        }
+        if text:
+            yield ModelEvent(kind="text_delta", text=text)
+        for tool_call in tool_calls:
+            yield ModelEvent(kind="tool_call", tool_call=tool_call)
+        finish_reason = str(
+            data.get("stop_reason")
+            or ("tool_calls" if tool_calls else "stop")
+        )
+        result = ModelResult(
+            text=text,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=ModelUsage.from_metadata(metadata),
+            provider=type(self).__name__,
+            model=self.model,
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+            metadata=metadata,
+        )
+        self.last_completion_metadata = metadata
+        self.last_tool_calls = tool_calls
+        self.last_finish_reason = finish_reason
+        yield ModelEvent(kind="completed", result=result)

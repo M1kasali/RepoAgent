@@ -1,9 +1,12 @@
+import asyncio
 import os
 import json
 import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 import repoagent as pico_pkg
 from repoagent import (
@@ -51,6 +54,84 @@ def test_agent_runs_tool_then_final(tmp_path):
     assert answer == "Read the file successfully."
     assert any(item["role"] == "tool" and item["name"] == "read_file" for item in agent.session["history"])
     assert "hello.txt" in agent.session["memory"]["files"]
+
+
+def test_ask_routes_through_spine_and_persists_terminal_outcome(tmp_path):
+    agent = build_agent(tmp_path, ["<final>Finished.</final>"])
+
+    assert agent.ask("Do the task") == "Finished."
+
+    turn_path = agent.run_store.turn_path(agent.current_task_state.run_id)
+    events_path = agent.run_store.turn_events_path(agent.current_task_state.run_id)
+    turn = json.loads(turn_path.read_text(encoding="utf-8"))
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert turn["state"] == "completed"
+    assert turn["outcome"]["final_answer"] == "Finished."
+    assert [event["kind"] for event in events] == [
+        "turn.accepted",
+        "turn.started",
+        "runner.text",
+        "turn.completed",
+    ]
+
+
+def test_ask_async_uses_the_same_spine_path(tmp_path):
+    agent = build_agent(tmp_path, ["<final>Async finished.</final>"])
+
+    async def scenario():
+        answer = await agent.ask_async("Do the async task")
+        await agent.aclose()
+        return answer
+
+    answer = asyncio.run(scenario())
+
+    assert answer == "Async finished."
+    turn = json.loads(
+        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(encoding="utf-8")
+    )
+    assert turn["state"] == "completed"
+
+
+def test_concurrent_ask_async_calls_are_fifo_and_keep_answers_isolated(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        ["<final>First answer.</final>", "<final>Second answer.</final>"],
+    )
+
+    async def scenario():
+        first = asyncio.create_task(agent.ask_async("First request"))
+        second = asyncio.create_task(agent.ask_async("Second request"))
+        answers = await asyncio.gather(first, second)
+        await agent.aclose()
+        return answers
+
+    answers = asyncio.run(scenario())
+
+    assert answers == ["First answer.", "Second answer."]
+    user_messages = [
+        item["content"] for item in agent.session["history"] if item["role"] == "user"
+    ]
+    assert user_messages == ["First request", "Second request"]
+
+
+def test_ask_persists_failed_turn_before_raising(tmp_path):
+    agent = build_agent(tmp_path, [])
+
+    with pytest.raises(RuntimeError, match="fake model ran out of outputs"):
+        agent.ask("This will fail")
+
+    turn = json.loads(
+        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(encoding="utf-8")
+    )
+    events = [
+        json.loads(line)
+        for line in agent.run_store.turn_events_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert turn["state"] == "failed"
+    assert "fake model ran out of outputs" in turn["outcome"]["error"]
+    assert [event["kind"] for event in events][-1] == "turn.failed"
 
 
 def test_agent_updates_task_summary_on_each_request(tmp_path):
@@ -995,11 +1076,11 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
             tmp_path,
             [
                 '<tool>{"name":"run_shell","args":{"command":"printf \'%s\' \'sk-test-secret-123\'","timeout":20}}</tool>',
-                "<final>Masked.</final>",
+                "<final>Masked sk-test-secret-123.</final>",
             ],
         )
 
-        assert agent.ask("Mask the secret") == "Masked."
+        assert agent.ask("Mask the secret sk-test-secret-123") == "Masked sk-test-secret-123."
 
     runs_root = tmp_path / ".repoagent" / "runs"
     run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
@@ -1008,10 +1089,16 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
     run_dir = run_dirs[0]
     trace_text = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
     report_text = (run_dir / "report.json").read_text(encoding="utf-8")
+    turn_text = (run_dir / "turn.json").read_text(encoding="utf-8")
+    turn_events_text = (run_dir / "turn_events.jsonl").read_text(encoding="utf-8")
     trace_events = [json.loads(line) for line in trace_text.splitlines()]
 
     assert secret not in trace_text
     assert secret not in report_text
+    assert secret not in turn_text
+    assert secret not in turn_events_text
+    assert "<redacted>" in turn_text
+    assert "<redacted>" in turn_events_text
 
     prompt_events = [event for event in trace_events if event["event"] == "prompt_built"]
     assert prompt_events
