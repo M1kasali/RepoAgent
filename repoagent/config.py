@@ -1,4 +1,4 @@
-"""Project-local configuration helpers."""
+"""User-level and project-local configuration helpers."""
 
 import os
 import re
@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 ENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ENV_PREFIX = "REPOAGENT_"
+LEGACY_ENV_PREFIX = "PICO_"
 
 
 def _strip_quotes(value):
@@ -41,9 +43,9 @@ def find_project_env(start):
     return None
 
 
-def load_project_env(start, override=True):
-    env_path = find_project_env(start)
-    if env_path is None:
+def load_env_file(env_path, override=True):
+    env_path = Path(env_path).expanduser()
+    if not env_path.is_file():
         return {}
     loaded = {}
     for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -57,8 +59,30 @@ def load_project_env(start, override=True):
     return loaded
 
 
+def user_env_path():
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(config_home).expanduser() if config_home else Path.home() / ".config"
+    return root / "repoagent" / ".env"
+
+
+def load_user_env(override=False):
+    """Load persistent RepoAgent settings without replacing shell variables."""
+    return load_env_file(user_env_path(), override=override)
+
+
+def load_project_env(start, override=True):
+    env_path = find_project_env(start)
+    if env_path is None:
+        return {}
+    return load_env_file(env_path, override=override)
+
+
 def provider_env(name, legacy_names=(), default=""):
-    for env_name in (name, *legacy_names):
+    names = [name]
+    if name.startswith(ENV_PREFIX):
+        names.append(LEGACY_ENV_PREFIX + name[len(ENV_PREFIX):])
+    names.extend(legacy_names)
+    for env_name in names:
         value = os.environ.get(env_name)
         if value:
             return value

@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 
-from pico.evaluation.evaluator import (
+from repoagent.evaluation.evaluator import (
     BenchmarkEvaluator,
     load_benchmark,
     run_harness_regression_v2,

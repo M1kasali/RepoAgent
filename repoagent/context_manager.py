@@ -92,7 +92,7 @@ class ContextManager:
           是怎么被拼出来的。
 
         在 agent 链路里的位置：
-        它位于 `Pico.ask()` 的每轮模型调用之前，是“真正发请求给模型”
+        它位于 `RepoAgent.ask()` 的每轮模型调用之前，是“真正发请求给模型”
         的最后一道组装工序。`WorkspaceContext` 提供稳定前缀，`LayeredMemory`
         提供工作记忆，这个函数则把它们和当前请求合成一份可控大小的 prompt。
         """

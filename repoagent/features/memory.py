@@ -10,6 +10,7 @@ from datetime import datetime
 import re
 from pathlib import Path
 
+from ..paths import workspace_state_root
 from ..workspace import clip, now
 
 WORKING_FILE_LIMIT = 8
@@ -418,7 +419,7 @@ def normalize_memory_state(state, workspace_root=None):
     state["task"] = working["task_summary"]
     state["files"] = list(working["recent_files"])
     state["notes"] = [note["text"] for note in episodic_notes]
-    durable_root = Path(workspace_root) / ".pico" / "memory" if workspace_root is not None else None
+    durable_root = workspace_state_root(workspace_root) / "memory" if workspace_root is not None else None
     durable_store = DurableMemoryStore(durable_root) if durable_root is not None else None
     state["durable_topics"] = durable_store.topic_slugs() if durable_store is not None else []
     return state
@@ -534,7 +535,7 @@ def retrieval_candidates(state, query, limit=3, workspace_root=None):
         ranked.append(((exact_tag_match, keyword_overlap, recency, note_index), note))
 
     if workspace_root is not None:
-        durable_store = DurableMemoryStore(Path(workspace_root) / ".pico" / "memory")
+        durable_store = DurableMemoryStore(workspace_state_root(workspace_root) / "memory")
         for note in durable_store.retrieval_candidates(query, limit=limit):
             note_tags = {tag.lower() for tag in note.get("tags", [])}
             note_tokens = _tokenize(note.get("text", "")) | _tokenize(note.get("source", "")) | note_tags
@@ -600,7 +601,7 @@ class LayeredMemory:
     def __init__(self, state=None, workspace_root=None):
         self.workspace_root = workspace_root
         self.state = normalize_memory_state(state, workspace_root)
-        self.durable_store = DurableMemoryStore(Path(workspace_root) / ".pico" / "memory") if workspace_root is not None else None
+        self.durable_store = DurableMemoryStore(workspace_state_root(workspace_root) / "memory") if workspace_root is not None else None
 
     def to_dict(self):
         self.state = normalize_memory_state(self.state, self.workspace_root)

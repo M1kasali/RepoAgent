@@ -11,7 +11,7 @@ from http.client import RemoteDisconnected
 import urllib.error
 import urllib.request
 
-OPENAI_COMPATIBLE_USER_AGENT = "pico/0.1"
+OPENAI_COMPATIBLE_USER_AGENT = "repoagent/0.1"
 
 
 class FakeModelClient:
@@ -249,7 +249,7 @@ class OpenAICompatibleModelClient:
           `self.last_completion_metadata`
 
         在 agent 链路里的位置：
-        它位于 `Pico.ask()` 的模型调用阶段，是稳定前缀缓存复用链路真正
+        它位于 `RepoAgent.ask()` 的模型调用阶段，是稳定前缀缓存复用链路真正
         落到 provider API 的地方。
         """
         self.last_completion_metadata = {}

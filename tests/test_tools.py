@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from pico.tool_context import ToolContext
-from pico.tools import build_tool_registry, tool_delegate, tool_read_file
+from repoagent.tool_context import ToolContext
+from repoagent.tools import build_tool_registry, tool_delegate, tool_read_file
 
 
 def test_tool_context_supports_file_tools_without_full_pico(tmp_path):

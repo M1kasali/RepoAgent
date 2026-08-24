@@ -1,6 +1,6 @@
 """Agent 运行时核心逻辑。
 
-Pico 就是包在模型外面的控制循环：负责组 prompt、解析模型输出、
+RepoAgent 就是包在模型外面的控制循环：负责组 prompt、解析模型输出、
 校验并执行工具、写 trace、更新工作记忆，以及在合适的时候停下来。
 """
 
@@ -18,6 +18,7 @@ from . import security as securitylib
 from .context_manager import ContextManager
 from .checkpoint import CHECKPOINT_NONE_STATUS
 from .prompt_prefix import build_prompt_prefix, tool_signature
+from .paths import workspace_state_root
 from .run_store import RunStore
 from .security import REDACTED_VALUE
 from .session_store import SessionStore
@@ -47,10 +48,10 @@ DURABLE_MEMORY_LINE_PATTERNS = (
 )
 SECRET_SHAPED_TEXT_PATTERN = re.compile(r"(?i)(\b(api[_ -]?key|token|secret|password)\b|sk-[A-Za-z0-9_-]{6,})")
 
-__all__ = ["Pico", "SessionStore"]
+__all__ = ["RepoAgent", "SessionStore"]
 
 
-class Pico:
+class RepoAgent:
     def __init__(
         self,
         model_client,
@@ -59,8 +60,8 @@ class Pico:
         session=None,
         run_store=None,
         approval_policy="ask",
-        max_steps=6,
-        max_new_tokens=512,
+        max_steps=20,
+        max_new_tokens=4096,
         depth=0,
         max_depth=1,
         read_only=False,
@@ -85,7 +86,7 @@ class Pico:
         if feature_flags:
             self.feature_flags.update({str(key): bool(value) for key, value in feature_flags.items()})
         self.allowed_tools = self._normalize_allowed_tools(allowed_tools)
-        self.run_store = run_store or RunStore(Path(workspace.repo_root) / ".pico" / "runs")
+        self.run_store = run_store or RunStore(workspace_state_root(workspace.repo_root) / "runs")
         self.session = session or {
             "id": datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
             "created_at": now(),
@@ -587,7 +588,7 @@ class Pico:
 
     def spawn_delegate(self, args):
         task = str(args.get("task", "")).strip()
-        child = Pico(
+        child = RepoAgent(
             model_client=self.model_client,
             workspace=self.workspace,
             session_store=self.session_store,
@@ -663,35 +664,35 @@ class Pico:
         # 1. <tool>...</tool> 里包 JSON，适合简短调用
         # 2. XML 风格属性/子标签，适合写文件这类多行内容
         if "<tool>" in raw and ("<final>" not in raw or raw.find("<tool>") < raw.find("<final>")):
-            body = Pico.extract(raw, "tool")
+            body = RepoAgent.extract(raw, "tool")
             try:
                 payload = json.loads(body)
             except Exception:
-                return "retry", Pico.retry_notice("model returned malformed tool JSON")
+                return "retry", RepoAgent.retry_notice("model returned malformed tool JSON")
             if not isinstance(payload, dict):
-                return "retry", Pico.retry_notice("tool payload must be a JSON object")
+                return "retry", RepoAgent.retry_notice("tool payload must be a JSON object")
             if not str(payload.get("name", "")).strip():
-                return "retry", Pico.retry_notice("tool payload is missing a tool name")
+                return "retry", RepoAgent.retry_notice("tool payload is missing a tool name")
             args = payload.get("args", {})
             if args is None:
                 payload["args"] = {}
             elif not isinstance(args, dict):
-                return "retry", Pico.retry_notice()
+                return "retry", RepoAgent.retry_notice()
             return "tool", payload
         if "<tool" in raw and ("<final>" not in raw or raw.find("<tool") < raw.find("<final>")):
-            payload = Pico.parse_xml_tool(raw)
+            payload = RepoAgent.parse_xml_tool(raw)
             if payload is not None:
                 return "tool", payload
-            return "retry", Pico.retry_notice()
+            return "retry", RepoAgent.retry_notice()
         if "<final>" in raw:
-            final = Pico.extract(raw, "final").strip()
+            final = RepoAgent.extract(raw, "final").strip()
             if final:
                 return "final", final
-            return "retry", Pico.retry_notice("model returned an empty <final> answer")
+            return "retry", RepoAgent.retry_notice("model returned an empty <final> answer")
         raw = raw.strip()
         if raw:
             return "final", raw
-        return "retry", Pico.retry_notice("model returned an empty response")
+        return "retry", RepoAgent.retry_notice("model returned an empty response")
 
     @staticmethod
     def retry_notice(problem=None):
@@ -710,7 +711,7 @@ class Pico:
         match = re.search(r"<tool(?P<attrs>[^>]*)>(?P<body>.*?)</tool>", raw, re.S)
         if not match:
             return None
-        attrs = Pico.parse_attrs(match.group("attrs"))
+        attrs = RepoAgent.parse_attrs(match.group("attrs"))
         name = str(attrs.pop("name", "")).strip()
         if not name:
             return None
@@ -719,7 +720,7 @@ class Pico:
         args = dict(attrs)
         for key in ("content", "old_text", "new_text", "command", "task", "pattern", "path"):
             if f"<{key}>" in body:
-                args[key] = Pico.extract_raw(body, key)
+                args[key] = RepoAgent.extract_raw(body, key)
 
         body_text = body.strip("\n")
         if name == "write_file" and "content" not in args and body_text:

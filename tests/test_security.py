@@ -1,4 +1,4 @@
-from pico.security import (
+from repoagent.security import (
     REDACTED_VALUE,
     detected_secret_env_items,
     looks_sensitive_env_name,

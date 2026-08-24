@@ -30,6 +30,7 @@ htmlcov/
 # Local scratch space
 tmp/
 .worktrees/
+.repoagent/
 .pico/
 .mini-pico/
 artifacts/
@@ -48,4 +49,5 @@ examples/
 .DS_Store
 
 # Packaging metadata
+repoagent.egg-info/
 pico.egg-info/

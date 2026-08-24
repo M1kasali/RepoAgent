@@ -1,6 +1,6 @@
-from pico.prompt_prefix import build_prompt_prefix, tool_signature
-from pico.tools import build_tool_registry
-from pico.workspace import WorkspaceContext
+from repoagent.prompt_prefix import build_prompt_prefix, tool_signature
+from repoagent.tools import build_tool_registry
+from repoagent.workspace import WorkspaceContext
 
 
 class _Agent:
@@ -28,7 +28,7 @@ def test_build_prompt_prefix_renders_tools_and_workspace_metadata(tmp_path):
 
     prefix = build_prompt_prefix(workspace=workspace, tools=tools, built_at="2026-06-02T00:00:00+08:00")
 
-    assert "You are pico" in prefix.text
+    assert "You are repoagent" in prefix.text
     assert "Tools:" in prefix.text
     assert "- read_file(" in prefix.text
     assert "Workspace:" in prefix.text
