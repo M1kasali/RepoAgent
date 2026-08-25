@@ -98,6 +98,7 @@ def test_candidate_worktree_is_detached_and_parent_workspace_is_unchanged(tmp_pa
     _git(root, "add", ".")
     _git(root, "commit", "-m", "base")
     base_commit = _git(root, "rev-parse", "HEAD")
+    _git(root, "config", "core.autocrlf", "true")
 
     proposal = _proposal(base_commit)
     with GitCandidateWorkspace(root, proposal) as workspace:

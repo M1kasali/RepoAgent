@@ -42,6 +42,8 @@ class GitCandidateWorkspace:
         self.root = Path(self._temporary.name) / "worktree"
         _git(
             self.repo_root,
+            "-c",
+            "core.autocrlf=false",
             "worktree",
             "add",
             "--detach",
