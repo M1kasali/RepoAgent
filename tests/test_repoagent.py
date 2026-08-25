@@ -2104,22 +2104,20 @@ def test_public_api_exports_resolve_through_package_path():
     assert Path(pico_pkg.__file__).as_posix().endswith("/repoagent/__init__.py")
 
 
-def test_reviewer_skeleton_docs_exist():
-    review_pack = Path("docs/review-pack/README.md")
-    architecture = Path("docs/architecture/agent-harness-v1-overview.md")
+def test_public_architecture_and_release_docs_exist():
+    architecture = Path("docs/architecture/current-architecture.md")
+    release = Path("docs/release.md")
 
-    assert review_pack.exists()
     assert architecture.exists()
-
-    review_text = review_pack.read_text(encoding="utf-8")
-    assert "Project pitch" in review_text
-    assert "Architecture map" in review_text
-    assert "Benchmark evidence" in review_text
-    assert "Sample run artifact list" in review_text
+    assert release.exists()
 
     architecture_text = architecture.read_text(encoding="utf-8")
-    assert "Agent Harness v1" in architecture_text
-    assert "task state" in architecture_text.lower()
+    assert "RepoAgent Architecture" in architecture_text
+    assert "Request Lifecycle" in architecture_text
+
+    release_text = release.read_text(encoding="utf-8")
+    assert "Supported Matrix" in release_text
+    assert "Evaluation Evidence" in release_text
 
 
 def test_package_import_surface_includes_cli_entrypoints():

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repoagent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Small local coding agent for repository-grounded engineering tasks"
 requires-python = ">=3.10"
 dependencies = [
