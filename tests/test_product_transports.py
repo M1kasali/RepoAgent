@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+import repoagent.gateway as gateway_module
 from repoagent import FakeModelClient, RepoAgent, SessionStore, WorkspaceContext
 from repoagent.channels import (
     ChannelIntake,
@@ -85,6 +86,22 @@ def test_gateway_lease_enforces_single_instance(tmp_path):
     assert first.release() is True
     assert second.acquire()["running"] is True
     second.release()
+
+
+def test_pid_probe_avoids_os_kill_on_windows(monkeypatch):
+    calls = []
+    monkeypatch.setattr(gateway_module.os, "name", "nt")
+    monkeypatch.setattr(
+        gateway_module, "_windows_pid_alive", lambda pid: calls.append(pid) or True
+    )
+    monkeypatch.setattr(
+        gateway_module.os,
+        "kill",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("os.kill must not run")),
+    )
+
+    assert gateway_module._pid_alive(42) is True
+    assert calls == [42]
 
 
 def test_directory_channel_runs_through_gateway_and_delivers(tmp_path):
