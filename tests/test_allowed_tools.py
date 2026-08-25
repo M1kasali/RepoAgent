@@ -59,6 +59,30 @@ def test_validate_benchmark_rejects_unknown_allowed_tool(tmp_path):
         validate_benchmark(benchmark, repo_root=tmp_path)
 
 
+def test_validate_benchmark_rejects_shell_verifier(tmp_path):
+    fixture = tmp_path / "bench_repo_readme"
+    fixture.mkdir()
+    (fixture / "README.md").write_text("demo\n", encoding="utf-8")
+    benchmark = {
+        "schema_version": 1,
+        "tasks": [
+            {
+                "id": "unsafe_verifier",
+                "prompt": "Inspect README.",
+                "fixture_repo": "bench_repo_readme",
+                "allowed_tools": ["read_file"],
+                "step_budget": 1,
+                "expected_artifact": "README.md",
+                "verifier": "echo unsafe",
+                "category": "contract",
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="Python -c"):
+        validate_benchmark(benchmark, repo_root=tmp_path)
+
+
 def test_benchmark_evaluator_applies_allowed_tools_to_runtime_prompt(tmp_path):
     fixture = tmp_path / "bench_repo_readme"
     fixture.mkdir()

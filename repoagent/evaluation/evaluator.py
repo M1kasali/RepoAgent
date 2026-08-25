@@ -1,7 +1,7 @@
 import hashlib
 import json
 import locale as locale_module
-import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -132,6 +132,17 @@ def _now_in_timezone(timezone_name):
     return datetime.now(ZoneInfo(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+def _verifier_argv(command):
+    argv = shlex.split(command, posix=True)
+    if (
+        len(argv) < 3
+        or Path(argv[0]).stem.lower() not in {"python", "python3"}
+        or argv[1] != "-c"
+    ):
+        raise ValueError("benchmark verifier must be a Python -c command")
+    return [sys.executable, *argv[1:]]
+
+
 def _artifact_path_for_task(task):
     fixture_repo_name = Path(str(task["fixture_repo"])).name
     if fixture_repo_name not in TASK_FIXTURE_ARTIFACTS:
@@ -227,6 +238,7 @@ def validate_benchmark(data, repo_root=None):
         normalized_task["step_budget"] = step_budget
         normalized_task["expected_artifact"] = str(task["expected_artifact"]).strip()
         normalized_task["verifier"] = str(task["verifier"]).strip()
+        _verifier_argv(normalized_task["verifier"])
         normalized_task["category"] = str(task["category"]).strip()
         normalized_tasks.append(normalized_task)
 
@@ -499,17 +511,11 @@ class BenchmarkEvaluator:
         expected_artifact_exists = artifact_file.exists()
         artifact_digest = _digest_file(artifact_file) if expected_artifact_exists else ""
 
-        verifier_env = os.environ.copy()
-        verifier_env["PATH"] = os.pathsep.join(
-            (str(Path(sys.executable).parent), verifier_env.get("PATH", ""))
-        )
         verifier = subprocess.run(
-            task["verifier"],
+            _verifier_argv(task["verifier"]),
             cwd=fixture_copy_root,
-            shell=True,
             capture_output=True,
             text=True,
-            env=verifier_env,
         )
 
         within_budget = task_state.tool_steps <= int(task["step_budget"])

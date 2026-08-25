@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -64,7 +65,13 @@ class GitCandidateWorkspace:
                     raise CandidateWorkspaceError(
                         f"candidate mutation path contains symlink: {mutation.path}"
                     )
-            if self.root not in target.resolve(strict=False).parents:
+            root_path = os.path.normcase(str(self.root.resolve()))
+            target_path = os.path.normcase(str(target.resolve(strict=False)))
+            try:
+                contained = os.path.commonpath((root_path, target_path)) == root_path
+            except ValueError:
+                contained = False
+            if not contained or target_path == root_path:
                 raise CandidateWorkspaceError(
                     f"candidate mutation escapes worktree: {mutation.path}"
                 )
