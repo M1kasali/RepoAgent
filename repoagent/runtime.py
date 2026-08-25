@@ -57,6 +57,7 @@ from . import tools as toolkit
 from .workspace import IGNORED_PATH_NAMES, MAX_HISTORY, WorkspaceContext, clip, now
 
 DEFAULT_SHELL_ENV_ALLOWLIST = (
+    "ComSpec",
     "HOME",
     "LANG",
     "LC_ALL",
@@ -70,6 +71,8 @@ DEFAULT_SHELL_ENV_ALLOWLIST = (
     "TMP",
     "TEMP",
     "USER",
+    "SystemRoot",
+    "WINDIR",
 )
 DEFAULT_FEATURE_FLAGS = {
     "memory": True,

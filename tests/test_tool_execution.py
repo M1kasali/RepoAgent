@@ -59,7 +59,12 @@ def test_timeout_reaps_the_complete_process_group(tmp_path):
     time.sleep(0.7)
 
     assert outcome.status == "timeout"
-    assert outcome.termination_signal in {"sigterm", "sigkill"}
+    assert outcome.termination_signal in {
+        "sigterm",
+        "sigkill",
+        "taskkill",
+        "taskkill_force",
+    }
     assert not marker.exists()
 
 
@@ -94,7 +99,12 @@ def test_cancellation_reaps_the_complete_process_group(tmp_path):
 
     assert not worker.is_alive()
     assert values[0].status == "cancelled"
-    assert values[0].termination_signal in {"sigkill", "sigterm"}
+    assert values[0].termination_signal in {
+        "sigkill",
+        "sigterm",
+        "taskkill",
+        "taskkill_force",
+    }
     assert not marker.exists()
 
 

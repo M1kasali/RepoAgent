@@ -167,7 +167,12 @@ def test_gateway_maps_timeout_and_output_limit_to_structured_results(tmp_path):
     assert timeout.status == "timeout"
     assert timeout.error_code == "tool_timeout"
     assert timeout.metadata["execution_status"] == "timeout"
-    assert timeout.metadata["termination_signal"] in {"sigterm", "sigkill"}
+    assert timeout.metadata["termination_signal"] in {
+        "sigterm",
+        "sigkill",
+        "taskkill",
+        "taskkill_force",
+    }
     assert truncated.status == "partial_success"
     assert truncated.error_code == "tool_output_truncated"
     assert truncated.metadata["output_truncated"] is True

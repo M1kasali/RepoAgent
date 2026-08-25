@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -1221,11 +1222,17 @@ def test_successful_run_persists_run_artifacts_and_stop_reason(tmp_path):
 
 def test_trace_and_report_redact_secret_env_values(tmp_path):
     secret = "sk-test-secret-123"
-    with patch.dict(os.environ, {"OPENAI_API_KEY": secret}, clear=True):
+    argv = [sys.executable, "-c", f"print({secret!r})"]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    with patch.dict(os.environ, {"OPENAI_API_KEY": secret}, clear=False):
         agent = build_agent(
             tmp_path,
             [
-                '<tool>{"name":"run_shell","args":{"command":"printf \'%s\' \'sk-test-secret-123\'","timeout":20}}</tool>',
+                "<tool>"
+                + json.dumps(
+                    {"name": "run_shell", "args": {"command": command, "timeout": 20}}
+                )
+                + "</tool>",
                 "<final>Masked sk-test-secret-123.</final>",
             ],
         )

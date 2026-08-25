@@ -129,6 +129,15 @@ class AgentTurnRunner:
                 worker.add_done_callback(_consume_background_result)
             except Exception:
                 pass
+            task_state = self._agent.current_task_state
+            if task_state is not None and task_state.status == "running":
+                task_state.stop_tool_cancelled("Turn execution cancelled.")
+                self._agent.run_store.write_task_state(task_state)
+                self._agent.emit_trace(
+                    task_state,
+                    "tool_cancelled",
+                    {"reason": "turn_cancelled", "status": "cancelled"},
+                )
             self._agent.backend_memory_hits = []
             raise
         except Exception as exc:
