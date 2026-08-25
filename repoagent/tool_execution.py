@@ -149,7 +149,7 @@ def _signal_process_tree(process: subprocess.Popen, *, force: bool) -> str:
 
 
 def _reap_process(process: subprocess.Popen, *, grace_seconds: float = 0.5) -> str:
-    signal_name = _signal_process_tree(process, force=False)
+    signal_name = _signal_process_tree(process, force=os.name == "nt")
     try:
         process.wait(timeout=grace_seconds)
         return signal_name
@@ -177,10 +177,15 @@ def run_bounded_process(
         creation["start_new_session"] = True
     elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
         creation["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    process_env = dict(env or {})
+    if os.name == "nt":
+        for name in ("ComSpec", "SystemRoot", "WINDIR"):
+            if name not in process_env and os.environ.get(name):
+                process_env[name] = os.environ[name]
     process = subprocess.Popen(
         command,
         cwd=cwd,
-        env=env,
+        env=process_env,
         shell=shell,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

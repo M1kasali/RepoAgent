@@ -306,6 +306,7 @@ class SkillChangeWatcher:
                 snapshot[(source, relative)] = (
                     stat.st_mtime_ns,
                     stat.st_size,
+                    hashlib.sha256(path.read_bytes()).digest(),
                 )
         return snapshot
 
