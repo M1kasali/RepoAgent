@@ -103,7 +103,7 @@ No TODO is complete merely because code exists. Completion requires:
 | CLI/TUI/Gateway | Complete | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
 | Channels/Cron | Complete | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
 | Evolver | Missing | isolated candidates, sealed gates, activation, rollback | P9 |
-| Release engineering | PARTIAL | clean-head evidence bundle, CI gates, migration docs | P10 |
+| Release engineering | Complete | clean-head evidence bundle, CI gates, migration docs | P10 |
 
 ## 6. Dependency Order
 
@@ -349,7 +349,7 @@ Goal: publish a reproducible, installable, interview-ready project.
 - [x] `P10-02` Track a dependency lock and supported Python/OS matrix.
 - [x] `P10-03` Add migration documentation for state, config, and schemas.
 - [x] `P10-04` Add security model, threat model, and responsible disclosure policy.
-- [ ] `P10-05` Publish self-contained evaluation bundles bound to release tags. (Publishing workflow is implemented; first authorized tag is pending.)
+- [x] `P10-05` Publish self-contained evaluation bundles bound to release tags. (`v0.1.1` workflow artifact independently reverified.)
 - [x] `P10-06` Add a concise architecture document and end-to-end demo.
 - [x] `P10-07` Generate resume metrics only from release evidence.
 
@@ -381,4 +381,4 @@ The completed implementation slice is `P1-01` through `P1-05`:
 - preserve `RepoAgent.ask()` as the compatibility facade;
 - document the design and verify terminal outcomes.
 
-Provider runtime phase `P2`, tool execution/security phase `P3`, context/memory/Skill phase `P4`, tracing/evidence phase `P5`, evaluation-platform phase `P6`, bounded-specialization phase `P7`, product-surface phase `P8`, and controlled-evolution phase `P9` are complete. P10 implementation is complete except for the external publication action in `P10-05`: CI/package smokes, tracked locking, migration/security/architecture documentation, tagged evidence construction, offline demo, and release-only resume claims are ready. The next slice is the `v0.1.1` release tag and verification of its uploaded bundle; `v0.1.0` exposed a clean-checkout documentation-test dependency before producing release evidence.
+Provider runtime phase `P2`, tool execution/security phase `P3`, context/memory/Skill phase `P4`, tracing/evidence phase `P5`, evaluation-platform phase `P6`, bounded-specialization phase `P7`, product-surface phase `P8`, controlled-evolution phase `P9`, and release-hardening phase `P10` are complete. Release `v0.1.1` is bound to commit `49e016a4c27361ff5f7613edd723620d730da837`; its workflow artifact contains the installable distributions, 12-task contract results, 12 self-contained evidence directories, a checksummed release manifest, and release-only resume claims. The earlier `v0.1.0` attempt remains immutable evidence of the clean-checkout documentation-test failure that was corrected before `v0.1.1`.

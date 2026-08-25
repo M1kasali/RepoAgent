@@ -1969,14 +1969,16 @@ The migration guide documents legacy `.pico` state selection, explicit stop/back
 ## TECH-060 - Tagged Evidence and Release-only Claims
 
 - Plan items: `P10-05`, `P10-07`
-- Status: implementation complete; first authorized tag publication pending
+- Status: published and independently verified
 - Implemented: 2026-08-25
 - Owning modules: `repoagent/evaluation/release.py`, `repoagent/evaluation/resume.py`, `scripts/collect_resume_metrics.py`
 - Tests: `tests/test_release_hardening.py`
 
 A tagged bundle must bind a syntactically valid release tag to the evaluation commit and current clean repository HEAD. It includes results, the exact benchmark definition, every per-task evidence file, and a manifest containing tag, commit, benchmark digest, run kind, denominators, file sizes, and SHA-256 values. Verification recomputes every checksum, validates the unified result, verifies nested Turn evidence manifests, and rejects dirty or mismatched provenance. Tagged publication cannot use the development-only dirty override.
 
-The former resume collector no longer accepts arbitrary benchmark/run paths. It consumes only a verified tagged bundle and emits workload ID/digest, unique-task and run denominators, model/run kind, commit/tag, metrics, and limitations together. This prevents a synthetic local run from silently becoming a public claim. `P10-05` remains open until the owner authorizes, creates, and pushes the first tag and the workflow artifact is downloaded and reverified.
+The former resume collector no longer accepts arbitrary benchmark/run paths. It consumes only a verified tagged bundle and emits workload ID/digest, unique-task and run denominators, model/run kind, commit/tag, metrics, and limitations together. This prevents a synthetic local run from silently becoming a public claim.
+
+Annotated tag `v0.1.1` resolves to commit `49e016a4c27361ff5f7613edd723620d730da837`. GitHub Actions run `32827010946` completed successfully and published artifact `repoagent-v0.1.1`. The downloaded bundle was independently passed through `verify_release_bundle(require_tag=True)`: it reported schema `repoagent.evaluation-release/v1`, 12 unique tasks, 12 runs, 86 checksummed payload files, and benchmark digest `sha256:18cc5ae299ddb56e08d3d426b320e5ba20bfe6efd3f54f7ac107ff252bb306e7`.
 
 ## TECH-061 - Current Architecture and Offline Demo
 
@@ -1990,7 +1992,7 @@ The current architecture document presents the unified ingress, Scheduler/Turn r
 
 ### P10 Release Readiness Verification
 
-Full verification passed 486 tests. The focused release/evaluation/public-API suite passed 21 tests, and the offline end-to-end demo passed 12/12 contracts with 12 verified evidence bundles. Ruff and whitespace checks passed. The package built successfully and its wheel installed into an independent virtual environment; `repoagent`, `repoagent-eval`, `repoagent-release-check`, and `repoagent-demo` help smokes all exited zero. The clean/tag preflight is covered in temporary Git repositories because the current implementation worktree is intentionally uncommitted. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+Full local verification passed 488 tests. The final main-branch CI run `32825640141` passed Ruff and the full suite on Python 3.10, 3.11, and 3.12 across Ubuntu and Windows, plus the independent wheel-install smoke job. Release run `32827010946` repeated the clean-tag preflight, Ruff, full tests, build, 12-task offline contract campaign, bundle construction, and release-only claim generation. The downloaded artifact was reverified against all manifest checksums. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
 
 ## 5. Decision Index
 
