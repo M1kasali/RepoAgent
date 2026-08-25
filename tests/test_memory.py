@@ -90,6 +90,59 @@ def test_process_notes_keep_kind_and_latest_duplicate_wins():
     assert notes[0]["created_at"] == "2026-04-07T10:01:00+00:00"
 
 
+def test_epistemic_note_metadata_tracks_supersession_and_conflicts():
+    memory = LayeredMemory()
+    memory.append_note(
+        "deploy color is red",
+        source="config",
+        created_at="2026-04-07T10:00:00+00:00",
+        confidence=0.8,
+    )
+    memory.append_note(
+        "deploy color is blue",
+        source="config",
+        created_at="2026-04-07T10:01:00+00:00",
+        confidence=0.9,
+    )
+    memory.append_note(
+        "release branch is main",
+        source="git",
+        created_at="2026-04-07T10:02:00+00:00",
+        confidence=0.7,
+    )
+    memory.append_note(
+        "release branch is stable",
+        source="docs",
+        created_at="2026-04-07T10:02:00+00:00",
+        confidence=0.7,
+    )
+
+    notes = memory.to_dict()["episodic_notes"]
+    assert notes[0]["freshness"] == "superseded"
+    assert notes[0]["superseded_by"] == notes[1]["note_index"]
+    assert notes[1]["confidence"] == 0.9
+    assert notes[1]["source"] == "config"
+    assert notes[2]["conflicts_with"] == [notes[3]["note_index"]]
+    assert notes[3]["conflicts_with"] == [notes[2]["note_index"]]
+    recalled = memory.retrieval_candidates("deploy color", limit=5)
+    assert [note["text"] for note in recalled] == ["deploy color is blue"]
+
+
+def test_file_summary_metadata_records_source_confidence_and_superseded_digest(tmp_path):
+    path = tmp_path / "sample.txt"
+    path.write_text("one\n", encoding="utf-8")
+    memory = LayeredMemory(workspace_root=tmp_path)
+    memory.set_file_summary("sample.txt", "first")
+    first_freshness = memory.to_dict()["file_summaries"]["sample.txt"]["freshness"]
+    path.write_text("two\n", encoding="utf-8")
+    memory.set_file_summary("sample.txt", "second")
+
+    summary = memory.to_dict()["file_summaries"]["sample.txt"]
+    assert summary["source"] == "sample.txt"
+    assert summary["confidence"] == 1.0
+    assert summary["supersedes_digest"] == first_freshness
+
+
 def test_durable_memory_index_and_topic_notes_are_loaded_and_retrieved(tmp_path):
     memory_root = tmp_path / ".repoagent" / "memory"
     topics_dir = memory_root / "topics"

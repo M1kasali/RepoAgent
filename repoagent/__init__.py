@@ -1,7 +1,107 @@
-from .cli import build_agent, build_arg_parser, build_welcome, main
+from .cli import (
+    build_agent,
+    build_arg_parser,
+    build_product_parser,
+    build_welcome,
+    main,
+    run_product_command,
+)
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary, price_usage
 from .call_replay import CallReplayError, file_digest, replay_call_ledger
+from .context_manager import (
+    CONTEXT_SEGMENT_DEFINITIONS,
+    ContextBudgetExceededError,
+    ContextManager,
+    ContextSegment,
+    ContextSegmentDefinition,
+)
+from .compaction import (
+    CompactionRecord,
+    DeterministicHistoryCompactor,
+    HISTORY_COMPACTION_STRATEGY,
+    HistoryCompactionResult,
+)
+from .context_window import (
+    ContextWindowAdmission,
+    ContextWindowBudget,
+    ContextWindowConfigurationError,
+    ContextWindowExceededError,
+)
+from .cron import CronJob, CronSchedule, CronService, CronStore
+from .evaluation.paired import (
+    EvaluationCase,
+    EvaluationInput,
+    Grade,
+    PairedEvaluator,
+    TrialOutput,
+)
+from .evaluation.campaigns import RuntimeContractCampaign
+from .evaluation.faults import FaultInjector, FaultPlan, InjectedFault
+from .evaluation.red_team import RedTeamCampaign, RedTeamCase, RedTeamObservation
+from .evaluation.release import (
+    ReleaseEvidenceBuilder,
+    compare_results,
+    verify_release_bundle,
+)
+from .evaluation.resume import render_resume_claims_markdown, resume_claims_from_release
+from .release_check import ReleaseCheckError, inspect_release_source
+from .evaluation.schema import EVALUATION_RESULT_SCHEMA, EvaluationResult, EvaluationRow
+from .evaluation.swebench import SWEBenchAdapter
+from .evaluation.subagents import SubagentRoleEvaluator
+from .evaluation.tracing import TRACING_EXPERIMENT_SCHEMA, measure_tracing_overhead
+from .evidence import (
+    EVIDENCE_BUNDLE_FORMAT,
+    EvidenceBundleBuilder,
+    IncompleteEvidenceError,
+    verify_evidence_bundle,
+)
+from .evolver import (
+    ActivationError,
+    ActivationRegistry,
+    ActiveStrategy,
+    ApprovalBroker as EvolutionApprovalBroker,
+    CandidateBudget,
+    CandidateGenerator,
+    CandidateManifest,
+    CandidateMutation,
+    CandidateProposal,
+    CandidateWorkspaceError,
+    ControlledEvolver,
+    DeterministicGatePipeline,
+    EvolutionLabel,
+    EvolutionLedger,
+    FailureEvidence,
+    GateDecision,
+    GateObservation,
+    GitCandidateWorkspace,
+    LedgerIntegrityError,
+    PairedPromotionGate,
+    SealedBoundaryError,
+    SealedEvaluationVault,
+    SealedReceipt,
+    TerminationTracker,
+)
+from .approval import ApprovalDecision, EffectApprovalPolicy
+from .capabilities import (
+    CapabilityAuthority,
+    CapabilityClaims,
+    CapabilityDecision,
+    capability_token_digest,
+)
 from .pricing import ModelPricing
+from .mcp import MCPManager, MCPRegistrationError, MCPToolRegistration
+from .memory_backend import (
+    InMemoryMemoryBackend,
+    MemoryBackend,
+    MemoryBackendNotStartedError,
+    MemoryHit,
+)
+from .memory_consolidation import (
+    ConsolidationCandidate,
+    ConsolidationRejection,
+    ConsolidationResult,
+    MemoryConsolidator,
+)
 from .providers.base import (
     CancellationToken,
     InputTokenSemantics,
@@ -17,10 +117,45 @@ from .providers.base import (
     ToolCall,
     UsageSource,
 )
-from .providers.clients import AnthropicCompatibleModelClient, FakeModelClient, OllamaModelClient, OpenAICompatibleModelClient
-from .providers.fallback import FallbackModelClient, ProviderAttempt, ProviderFallbackExhaustedError
+from .providers.clients import (
+    AnthropicCompatibleModelClient,
+    FakeModelClient,
+    OllamaModelClient,
+    OpenAICompatibleModelClient,
+)
+from .providers.fallback import (
+    FallbackModelClient,
+    ProviderAttempt,
+    ProviderFallbackExhaustedError,
+)
 from .providers.profiles import BUILTIN_MODEL_PROFILES, ModelProfile, get_model_profile
 from .runtime import RepoAgent, SessionStore
+from .runtime_assembly import RuntimeAssembly, assemble_runtime
+from .plugins import PluginCatalog, PluginManager, PluginManifest, PluginManifestError
+from .routing import DeterministicRouter, RouteRequest, RoutedModelClient, RoutingProfile
+from .subagents import (
+    IsolatedSubagentWorkspace,
+    ROLE_PROFILES,
+    SubagentBudget,
+    SubagentMessage,
+    SubagentOutcome,
+    SubagentRequest,
+)
+from .security import NetworkPolicy, NetworkPolicyError
+from .sandbox import (
+    DirectSandboxAdapter,
+    IsolatedSandboxAdapter,
+    SandboxAdapter,
+    SandboxConfigurationError,
+)
+from .skills import (
+    ActivatedSkill,
+    LocalSkillPool,
+    SkillCatalog,
+    SkillChangeWatcher,
+    SkillManifest,
+    SkillManifestError,
+)
 from .tool_contracts import (
     ToolDefinition,
     ToolEffect,
@@ -28,18 +163,114 @@ from .tool_contracts import (
     ToolResult,
     validate_tool_arguments,
 )
+from .tool_gateway import ToolGateway
+from .tool_execution import ToolExecutionControl, ToolRunnerOutput
+from .tool_scheduling import MutationConflictPolicy, ToolBatch, ToolBatchMode
+from .tokenization import (
+    CallableTokenCounter,
+    TokenCounter,
+    TokenCountSource,
+    Utf8TokenEstimator,
+    resolve_token_counter,
+)
+from .tracing import (
+    SEMANTIC_EVENTS,
+    TRACE_STAGES,
+    EventDefinition,
+    TraceContext,
+    validate_semantic_event,
+)
 from .workspace import WorkspaceContext
+from .channels import (
+    ChannelIntake,
+    ChannelMessage,
+    DeliveryResult,
+    DirectoryChannel,
+    MediaAttachment,
+    normalize_media,
+    save_media_bytes,
+)
+from .gateway import GatewayAlreadyRunningError, GatewayLease, LocalGateway
+from .runtime_host import RuntimeHost
+from .tui import ConfirmationBroker, TUITransport, run_tui
 
 __all__ = [
     "AnthropicCompatibleModelClient",
+    "ActivationError",
+    "ActivationRegistry",
+    "ActivatedSkill",
+    "ActiveStrategy",
+    "ApprovalDecision",
     "BUILTIN_MODEL_PROFILES",
     "CallEfficiencyEntry",
     "CallEfficiencySummary",
     "CallReplayError",
+    "CallableTokenCounter",
+    "CapabilityAuthority",
+    "CapabilityClaims",
+    "CapabilityDecision",
     "CancellationToken",
+    "CandidateBudget",
+    "CandidateGenerator",
+    "CandidateManifest",
+    "CandidateMutation",
+    "CandidateProposal",
+    "CandidateWorkspaceError",
+    "CONTEXT_SEGMENT_DEFINITIONS",
+    "ContextBudgetExceededError",
+    "ContextManager",
+    "ContextSegment",
+    "ContextSegmentDefinition",
+    "ContextWindowAdmission",
+    "ContextWindowBudget",
+    "ContextWindowConfigurationError",
+    "ContextWindowExceededError",
+    "CronJob",
+    "CronSchedule",
+    "CronService",
+    "CronStore",
+    "ConsolidationCandidate",
+    "ConsolidationRejection",
+    "ConsolidationResult",
+    "CompactionRecord",
+    "ControlledEvolver",
+    "DeterministicGatePipeline",
+    "DeterministicHistoryCompactor",
     "FakeModelClient",
+    "EffectApprovalPolicy",
+    "EvolutionApprovalBroker",
+    "EvolutionLabel",
+    "EvolutionLedger",
+    "EVALUATION_RESULT_SCHEMA",
+    "EVIDENCE_BUNDLE_FORMAT",
+    "EvidenceBundleBuilder",
+    "EventDefinition",
+    "EvaluationCase",
+    "EvaluationInput",
+    "EvaluationResult",
+    "EvaluationRow",
+    "DirectSandboxAdapter",
+    "DirectoryChannel",
+    "DeliveryResult",
     "FallbackModelClient",
+    "FaultInjector",
+    "FaultPlan",
+    "FailureEvidence",
     "InputTokenSemantics",
+    "IncompleteEvidenceError",
+    "InjectedFault",
+    "InMemoryMemoryBackend",
+    "HISTORY_COMPACTION_STRATEGY",
+    "HistoryCompactionResult",
+    "Grade",
+    "GatewayAlreadyRunningError",
+    "GatewayLease",
+    "GateDecision",
+    "GateObservation",
+    "GitCandidateWorkspace",
+    "IsolatedSandboxAdapter",
+    "LocalGateway",
+    "LocalSkillPool",
     "ModelEvent",
     "ModelProfile",
     "ModelPricing",
@@ -49,28 +280,109 @@ __all__ = [
     "ModelTool",
     "ModelUsage",
     "ModelUsageAggregate",
+    "MCPManager",
+    "MCPRegistrationError",
+    "MCPToolRegistration",
+    "MemoryBackend",
+    "MemoryBackendNotStartedError",
+    "MemoryHit",
+    "LedgerIntegrityError",
+    "MediaAttachment",
+    "MemoryConsolidator",
+    "MutationConflictPolicy",
+    "NetworkPolicy",
+    "NetworkPolicyError",
     "ProviderError",
+    "PairedEvaluator",
+    "PairedPromotionGate",
     "ProviderAttempt",
     "ProviderFallbackExhaustedError",
     "ProviderCancelledError",
     "RepoAgent",
+    "ROLE_PROFILES",
+    "RedTeamCampaign",
+    "RedTeamCase",
+    "RedTeamObservation",
+    "ReleaseEvidenceBuilder",
+    "ReleaseCheckError",
+    "RuntimeContractCampaign",
+    "RuntimeAssembly",
+    "RuntimeHost",
+    "SEMANTIC_EVENTS",
+    "SealedBoundaryError",
+    "SealedEvaluationVault",
+    "SealedReceipt",
+    "TRACE_STAGES",
+    "TRACING_EXPERIMENT_SCHEMA",
+    "TraceContext",
     "build_agent",
     "build_arg_parser",
+    "build_product_parser",
     "build_welcome",
+    "capability_token_digest",
+    "compare_results",
+    "inspect_release_source",
     "file_digest",
     "main",
+    "run_product_command",
+    "render_resume_claims_markdown",
+    "resume_claims_from_release",
+    "assemble_runtime",
+    "measure_tracing_overhead",
     "price_usage",
     "replay_call_ledger",
     "get_model_profile",
     "OllamaModelClient",
     "OpenAICompatibleModelClient",
     "SessionStore",
+    "SWEBenchAdapter",
+    "SubagentBudget",
+    "SubagentMessage",
+    "SubagentOutcome",
+    "SubagentRequest",
+    "SubagentRoleEvaluator",
+    "IsolatedSubagentWorkspace",
+    "PluginCatalog",
+    "PluginManager",
+    "PluginManifest",
+    "PluginManifestError",
+    "DeterministicRouter",
+    "RouteRequest",
+    "RoutedModelClient",
+    "RoutingProfile",
+    "SkillCatalog",
+    "SkillChangeWatcher",
+    "SkillManifest",
+    "SkillManifestError",
+    "SandboxAdapter",
+    "SandboxConfigurationError",
     "ToolCall",
+    "TUITransport",
+    "ToolBatch",
+    "ToolBatchMode",
     "ToolDefinition",
     "ToolEffect",
+    "ToolExecutionControl",
     "ToolRequest",
     "ToolResult",
+    "ToolRunnerOutput",
+    "TrialOutput",
+    "ToolGateway",
+    "TokenCounter",
+    "TokenCountSource",
+    "TerminationTracker",
+    "Utf8TokenEstimator",
     "validate_tool_arguments",
+    "validate_semantic_event",
+    "verify_evidence_bundle",
+    "verify_release_bundle",
     "UsageSource",
+    "ChannelIntake",
+    "ChannelMessage",
+    "ConfirmationBroker",
+    "normalize_media",
+    "save_media_bytes",
+    "run_tui",
+    "resolve_token_counter",
     "WorkspaceContext",
 ]

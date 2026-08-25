@@ -9,45 +9,75 @@ import json
 import hashlib
 import os
 import re
+import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from . import checkpoint as checkpointlib
 from .features import memory as memorylib
+from .mcp import MCPManager
+from .memory_backend import MemoryBackend
+from .memory_consolidation import MemoryConsolidator
 from . import security as securitylib
-from .context_manager import ContextManager
+from .approval import EffectApprovalPolicy
+from .capabilities import CapabilityAuthority, capability_token_digest
+from .context_manager import ContextManager, DEFAULT_TOTAL_TOKEN_BUDGET
+from .context_window import ContextWindowBudget, DEFAULT_CONTEXT_WINDOW_TOKENS
 from .checkpoint import CHECKPOINT_NONE_STATUS
 from .prompt_prefix import build_prompt_prefix, tool_signature
+from .providers.base import ProviderCancelledError
 from .paths import workspace_state_root
 from .run_store import RunStore
-from .security import REDACTED_VALUE
+from .sandbox import DirectSandboxAdapter
 from .session_store import SessionStore
+from .subagents import (
+    IsolatedSubagentWorkspace,
+    ROLE_PROFILES,
+    SubagentBudget,
+    SubagentMessage,
+    SubagentOutcome,
+    SubagentRequest,
+    persist_subagent_evidence,
+)
+from .skills import LocalSkillPool, SkillCatalog, SkillChangeWatcher
 from .tool_context import ToolContext
+from .tool_contracts import ToolEffect, ToolRequest, validate_tool_arguments
 from .tool_executor import ToolExecutor
+from .tool_gateway import ToolGateway, compatibility_metadata
+from .tool_scheduling import MutationConflictPolicy
+from .tracing import (
+    current_trace_context,
+    infer_trace_stage,
+    trace_attributes,
+    validate_semantic_event,
+)
 from . import tools as toolkit
 from .workspace import IGNORED_PATH_NAMES, MAX_HISTORY, WorkspaceContext, clip, now
 
-DEFAULT_SHELL_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER")
+DEFAULT_SHELL_ENV_ALLOWLIST = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOGNAME",
+    "PATH",
+    "PWD",
+    "SHELL",
+    "TERM",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "USER",
+)
 DEFAULT_FEATURE_FLAGS = {
     "memory": True,
     "relevant_memory": True,
     "context_reduction": True,
     "prompt_cache": True,
+    "skills": True,
 }
-DURABLE_MEMORY_INTENT_PATTERN = re.compile(r"(?i)\b(capture|remember|save|store|persist|note)\b")
-DURABLE_MEMORY_INTENT_ZH_PATTERN = re.compile(r"(记住|保存|记录|沉淀|长期记忆|持久记忆)")
-DURABLE_MEMORY_LINE_PATTERNS = (
-    ("project-conventions", re.compile(r"(?i)^Project convention:\s*(.+)$")),
-    ("key-decisions", re.compile(r"(?i)^Decision:\s*(.+)$")),
-    ("dependency-facts", re.compile(r"(?i)^Dependency:\s*(.+)$")),
-    ("user-preferences", re.compile(r"(?i)^Preference:\s*(.+)$")),
-    ("project-conventions", re.compile(r"^项目约定：\s*(.+)$")),
-    ("key-decisions", re.compile(r"^决策：\s*(.+)$")),
-    ("dependency-facts", re.compile(r"^依赖：\s*(.+)$")),
-    ("user-preferences", re.compile(r"^偏好：\s*(.+)$")),
-)
-SECRET_SHAPED_TEXT_PATTERN = re.compile(r"(?i)(\b(api[_ -]?key|token|secret|password)\b|sk-[A-Za-z0-9_-]{6,})")
 
 __all__ = ["RepoAgent", "SessionStore"]
 
@@ -62,6 +92,8 @@ class RepoAgent:
         run_store=None,
         approval_policy="ask",
         max_steps=20,
+        max_parallel_tools=ToolGateway.DEFAULT_MAX_PARALLEL,
+        mutation_conflict_policy=MutationConflictPolicy.SERIAL.value,
         max_new_tokens=4096,
         depth=0,
         max_depth=1,
@@ -70,6 +102,20 @@ class RepoAgent:
         secret_env_names=None,
         feature_flags=None,
         allowed_tools=None,
+        capability_authority=None,
+        parent_capability_token="",
+        mcp_servers=None,
+        sandbox_adapter=None,
+        require_isolation=False,
+        network_policy=None,
+        context_token_budget=None,
+        segment_token_budgets=None,
+        token_counter=None,
+        context_window_tokens=None,
+        context_window_source=None,
+        memory_backend=None,
+        skill_roots=None,
+        plugin_manager=None,
     ):
         self.model_client = model_client
         self.workspace = workspace
@@ -77,17 +123,40 @@ class RepoAgent:
         self.session_store = session_store
         self.approval_policy = approval_policy
         self.max_steps = max_steps
+        if (
+            isinstance(max_parallel_tools, bool)
+            or not isinstance(max_parallel_tools, int)
+            or max_parallel_tools < 1
+        ):
+            raise ValueError("max_parallel_tools must be a positive integer")
+        self.max_parallel_tools = max_parallel_tools
+        try:
+            self.mutation_conflict_policy = MutationConflictPolicy(
+                mutation_conflict_policy
+            ).value
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unsupported mutation conflict policy") from exc
         self.max_new_tokens = max_new_tokens
         self.depth = depth
         self.max_depth = max_depth
         self.read_only = read_only
-        self.shell_env_allowlist = tuple(shell_env_allowlist or DEFAULT_SHELL_ENV_ALLOWLIST)
+        self.sandbox_adapter = sandbox_adapter or DirectSandboxAdapter()
+        self.require_isolation = bool(require_isolation)
+        self.shell_env_allowlist = tuple(
+            shell_env_allowlist or DEFAULT_SHELL_ENV_ALLOWLIST
+        )
         self.secret_env_names = {str(name).upper() for name in (secret_env_names or ())}
+        self.memory_consolidator = MemoryConsolidator(self.redact_text)
         self.feature_flags = dict(DEFAULT_FEATURE_FLAGS)
         if feature_flags:
-            self.feature_flags.update({str(key): bool(value) for key, value in feature_flags.items()})
+            self.feature_flags.update(
+                {str(key): bool(value) for key, value in feature_flags.items()}
+            )
         self.allowed_tools = self._normalize_allowed_tools(allowed_tools)
-        self.run_store = run_store or RunStore(workspace_state_root(workspace.repo_root) / "runs")
+        self.run_store = run_store or RunStore(
+            workspace_state_root(workspace.repo_root) / "runs"
+        )
+        self.run_store.set_redactor(self.redact_artifact)
         self.session = session or {
             "id": datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
             "created_at": now(),
@@ -101,11 +170,106 @@ class RepoAgent:
             workspace_root=self.root,
         )
         self.session["memory"] = self.memory.to_dict()
-        self.tools = self._apply_tool_allowlist(self.build_tools())
+        self.memory_backend = memory_backend or self.memory
+        if not isinstance(self.memory_backend, MemoryBackend):
+            raise TypeError("memory_backend must implement MemoryBackend")
+        self._memory_backend_started = False
+        self.backend_memory_hits = []
+        self.last_memory_backend_metadata = {
+            "backend": type(self.memory_backend).__name__,
+            "recall_status": "not_run",
+            "store_status": "not_run",
+            "recalled_count": 0,
+            "stored_message_count": 0,
+            "rejected_secret_hits": 0,
+        }
+        self.skill_roots = dict(
+            skill_roots
+            or {
+                "workspace": self.root / "skills",
+                "local": workspace_state_root(self.root) / "skills",
+            }
+        )
+        self.skill_catalog = SkillCatalog(self.skill_roots)
+        self.skill_pool = LocalSkillPool(self.skill_catalog)
+        self.skill_watcher = SkillChangeWatcher(self.skill_catalog)
+        self.active_skills = ()
+        self.plugin_manager = plugin_manager
+        self.network_policy = network_policy or securitylib.NetworkPolicy()
+        self.mcp_manager = MCPManager(
+            mcp_servers, network_policy=self.network_policy
+        )
+        self.tools = self.build_tools()
+        discovered_mcp_tools = self.mcp_manager.discover(self.tools)
+        self.tools.update(discovered_mcp_tools)
+        if self.plugin_manager is not None:
+            self.tools = self.plugin_manager.register_tools(self.tools)
+            self.plugin_manager.start()
+        self.tools = self._apply_tool_allowlist(self.tools)
+        self.approval_engine = EffectApprovalPolicy(
+            approval_policy,
+            read_only=read_only,
+            prompt=self._prompt_for_approval,
+        )
+        self.capability_authority = capability_authority or CapabilityAuthority()
+        self.capability_subject_id = self.session["id"]
+        granted_tools = {
+            name: entry["definition"]
+            for name, entry in self.tools.items()
+            if not read_only or entry["definition"].effect is ToolEffect.READ
+        }
+        self.capability_token = self.capability_authority.issue(
+            subject_id=self.capability_subject_id,
+            session_id=self.session["id"],
+            effects=tuple(
+                dict.fromkeys(
+                    definition.effect for definition in granted_tools.values()
+                )
+            ),
+            tools=tuple(granted_tools),
+            parent_token=parent_capability_token,
+        )
+        self.tool_gateway = ToolGateway(
+            self,
+            max_parallel=max_parallel_tools,
+            mutation_conflict_policy=self.mutation_conflict_policy,
+        )
         self.tool_executor = ToolExecutor(self)
         self.prefix_state = self.build_prefix()
         self.prefix = self.prefix_state.text
-        self.context_manager = ContextManager(self)
+        profile = getattr(self.model_client, "profile", None)
+        configured_window = (
+            context_window_tokens
+            if context_window_tokens is not None
+            else getattr(profile, "context_window_tokens", None)
+            or DEFAULT_CONTEXT_WINDOW_TOKENS
+        )
+        configured_input = (
+            context_token_budget
+            if context_token_budget is not None
+            else DEFAULT_TOTAL_TOKEN_BUDGET
+        )
+        configured_window_source = (
+            context_window_source
+            or (
+                "runtime-argument"
+                if context_window_tokens is not None
+                else getattr(profile, "context_window_source", None)
+                or "runtime-default"
+            )
+        )
+        self.context_window_budget = ContextWindowBudget(
+            context_window_tokens=int(configured_window),
+            configured_input_tokens=int(configured_input),
+            reserved_output_tokens=int(self.max_new_tokens),
+            window_source=str(configured_window_source),
+        )
+        self.context_manager = ContextManager(
+            self,
+            total_token_budget=self.context_window_budget.effective_input_tokens,
+            segment_token_budgets=segment_token_budgets,
+            token_counter=token_counter,
+        )
         self.resume_state = self.evaluate_resume_state()
         self.session_path = self.session_store.save(self.session)
         self.current_task_state = None
@@ -117,7 +281,10 @@ class RepoAgent:
         self.last_durable_promotions = []
         self.last_durable_rejections = []
         self.last_durable_superseded = []
+        self.last_memory_consolidation = {}
+        self.last_subagent_records = []
         self._last_tool_result_metadata = {}
+        self._tool_call_sequence = 0
         self._last_prefix_refresh = {
             "workspace_changed": False,
             "prefix_changed": False,
@@ -196,16 +363,11 @@ class RepoAgent:
     def _apply_tool_allowlist(self, tools):
         if self.allowed_tools is None:
             return tools
-        legal_names = toolkit.legal_tool_names()
-        unknown = [name for name in self.allowed_tools if name not in legal_names]
+        unknown = [name for name in self.allowed_tools if name not in tools]
         if unknown:
             raise ValueError(f"unknown allowed tool: {', '.join(unknown)}")
         allowed = set(self.allowed_tools)
-        return {
-            name: tool
-            for name, tool in tools.items()
-            if name in allowed
-        }
+        return {name: tool for name, tool in tools.items() if name in allowed}
 
     def tool_signature(self):
         return tool_signature(self.tools)
@@ -219,17 +381,25 @@ class RepoAgent:
 
     def refresh_prefix(self, force=False):
         previous_hash = getattr(getattr(self, "prefix_state", None), "hash", None)
-        previous_workspace_fingerprint = getattr(getattr(self, "prefix_state", None), "workspace_fingerprint", None)
+        previous_workspace_fingerprint = getattr(
+            getattr(self, "prefix_state", None), "workspace_fingerprint", None
+        )
 
         # 工作区事实相对稳定，所以这里按整体刷新；
         # 只有这些事实真的变化了，才重建完整 prefix。
         refreshed_workspace = WorkspaceContext.build(self.root)
         refreshed_workspace_fingerprint = refreshed_workspace.fingerprint()
-        workspace_changed = force or refreshed_workspace_fingerprint != previous_workspace_fingerprint
+        workspace_changed = (
+            force or refreshed_workspace_fingerprint != previous_workspace_fingerprint
+        )
         if workspace_changed:
             self.workspace = refreshed_workspace
 
-        prefix_state = self.build_prefix() if workspace_changed or force or previous_hash is None else self.prefix_state
+        prefix_state = (
+            self.build_prefix()
+            if workspace_changed or force or previous_hash is None
+            else self.prefix_state
+        )
         prefix_changed = force or previous_hash != prefix_state.hash
         if prefix_changed:
             self._apply_prefix_state(prefix_state)
@@ -242,6 +412,19 @@ class RepoAgent:
 
     def memory_text(self):
         return self.memory.render_memory_text()
+
+    def skill_text(self):
+        if not self.active_skills:
+            return ""
+        lines = ["Skills:"]
+        for skill in self.active_skills:
+            lines.extend(
+                [
+                    f"## {skill.manifest.name} [{skill.qualified_id}]",
+                    skill.content,
+                ]
+            )
+        return "\n".join(lines)
 
     def history_text(self):
         history = self.session["history"]
@@ -261,7 +444,9 @@ class RepoAgent:
 
             if item["role"] == "tool":
                 limit = 900 if recent else 180
-                lines.append(f"[tool:{item['name']}] {json.dumps(item['args'], sort_keys=True)}")
+                lines.append(
+                    f"[tool:{item['name']}] {json.dumps(item['args'], sort_keys=True)}"
+                )
                 lines.append(clip(item["content"], limit))
             else:
                 limit = 900 if recent else 220
@@ -285,25 +470,35 @@ class RepoAgent:
         return securitylib.looks_sensitive_env_name(name)
 
     def is_secret_env_name(self, name):
-        return securitylib.is_secret_env_name(name, secret_env_names=self.secret_env_names)
+        return securitylib.is_secret_env_name(
+            name, secret_env_names=self.secret_env_names
+        )
 
     def configured_secret_env_items(self):
-        return securitylib.configured_secret_env_items(secret_env_names=self.secret_env_names)
+        return securitylib.configured_secret_env_items(
+            secret_env_names=self.secret_env_names
+        )
 
     def detected_secret_env_items(self):
-        return securitylib.detected_secret_env_items(secret_env_names=self.secret_env_names)
+        return securitylib.detected_secret_env_items(
+            secret_env_names=self.secret_env_names
+        )
 
     def secret_env_summary(self):
         return securitylib.secret_env_summary(secret_env_names=self.secret_env_names)
 
     def detected_secret_env_summary(self):
-        return securitylib.detected_secret_env_summary(secret_env_names=self.secret_env_names)
+        return securitylib.detected_secret_env_summary(
+            secret_env_names=self.secret_env_names
+        )
 
     def redact_text(self, text):
         return securitylib.redact_text(text, secret_env_names=self.secret_env_names)
 
     def redact_artifact(self, value, key=None):
-        return securitylib.redact_artifact(value, key=key, secret_env_names=self.secret_env_names)
+        return securitylib.redact_artifact(
+            value, key=key, secret_env_names=self.secret_env_names
+        )
 
     def shell_env(self):
         return securitylib.shell_env(allowlist=self.shell_env_allowlist, root=self.root)
@@ -312,10 +507,31 @@ class RepoAgent:
         _, metadata = self._build_prompt_and_metadata(user_message)
         return metadata
 
+    def configure_context_budget(self, token_budget, segment_token_budgets=None):
+        self.context_window_budget = ContextWindowBudget(
+            context_window_tokens=self.context_window_budget.context_window_tokens,
+            configured_input_tokens=int(token_budget),
+            reserved_output_tokens=self.context_window_budget.reserved_output_tokens,
+            window_source=self.context_window_budget.window_source,
+        )
+        self.context_manager.total_token_budget = (
+            self.context_window_budget.effective_input_tokens
+        )
+        if segment_token_budgets is not None:
+            self.context_manager.section_budgets = segment_token_budgets
+        return self.context_window_budget.to_dict()
+
     def _build_prompt_and_metadata(self, user_message):
         refresh = self.refresh_prefix()
+        self.skill_watcher.poll()
+        self.active_skills = (
+            self.skill_pool.search(user_message, top_k=3)
+            if self.feature_enabled("skills")
+            else ()
+        )
         self.resume_state = self.evaluate_resume_state()
         prompt, metadata = self.context_manager.build(user_message)
+        admission = self.context_window_budget.admit(metadata["prompt_tokens"])
         # 这里把“这轮 prompt 是怎么拼出来的”连同缓存相关状态一起记下来，
         # 后面 trace/report 才能解释清楚：为什么这一轮 prefix 变了、缓存有没有命中。
         metadata.update(
@@ -325,6 +541,15 @@ class RepoAgent:
                 "memory_chars": len(self.memory_text()),
                 "history_chars": len(self.history_text()),
                 "request_chars": len(user_message),
+                "context_window": admission.to_dict(),
+                "context_window_tokens": admission.context_window_tokens,
+                "context_window_source": self.context_window_budget.window_source,
+                "configured_input_token_budget": admission.configured_input_tokens,
+                "effective_input_token_budget": admission.effective_input_tokens,
+                "reserved_output_tokens": admission.reserved_output_tokens,
+                "request_admission_tokens": admission.total_reserved_tokens,
+                "context_window_headroom_tokens": admission.headroom_tokens,
+                "context_window_admitted": admission.admitted,
                 "tool_count": len(self.tools),
                 "workspace_docs": len(self.workspace.project_docs),
                 "recent_commits": len(self.workspace.recent_commits),
@@ -334,11 +559,19 @@ class RepoAgent:
                 "tool_signature": self.prefix_state.tool_signature,
                 "workspace_changed": refresh["workspace_changed"],
                 "prefix_changed": refresh["prefix_changed"],
-                "prompt_cache_supported": bool(getattr(self.model_client, "supports_prompt_cache", False)),
-                "resume_status": self.resume_state.get("status", CHECKPOINT_NONE_STATUS),
-                "stale_summary_invalidations": int(self.resume_state.get("stale_summary_invalidations", 0)),
+                "prompt_cache_supported": bool(
+                    getattr(self.model_client, "supports_prompt_cache", False)
+                ),
+                "resume_status": self.resume_state.get(
+                    "status", CHECKPOINT_NONE_STATUS
+                ),
+                "stale_summary_invalidations": int(
+                    self.resume_state.get("stale_summary_invalidations", 0)
+                ),
                 "stale_paths": list(self.resume_state.get("stale_paths", [])),
-                "runtime_identity_mismatch_fields": list(self.resume_state.get("runtime_identity_mismatch_fields", [])),
+                "runtime_identity_mismatch_fields": list(
+                    self.resume_state.get("runtime_identity_mismatch_fields", [])
+                ),
             }
         )
         metadata.update(self.detected_secret_env_summary())
@@ -346,8 +579,18 @@ class RepoAgent:
 
     def emit_trace(self, task_state, event, payload=None):
         payload = self.redact_artifact(payload or {})
+        if payload.get("semantic_event"):
+            validate_semantic_event(payload["semantic_event"], payload)
         payload["event"] = event
         payload["created_at"] = now()
+        context = current_trace_context()
+        if context is not None:
+            context = context.for_stage(infer_trace_stage(event))
+        for key, value in trace_attributes(context).items():
+            payload.setdefault(key, value)
+        payload.setdefault("turn_id", task_state.run_id)
+        payload.setdefault("request_id", task_state.task_id)
+        payload.setdefault("session_id", self.session["id"])
         # trace 是运行中的逐事件时间线，适合回答“这一轮 agent 到底做了什么”。
         self.run_store.append_trace(task_state, payload)
         return payload
@@ -364,7 +607,9 @@ class RepoAgent:
             if not path.is_file():
                 continue
             try:
-                snapshot[path.relative_to(self.root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+                snapshot[path.relative_to(self.root).as_posix()] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
             except Exception:
                 continue
         return snapshot
@@ -422,7 +667,9 @@ class RepoAgent:
         if name == "read_file":
             summary = memorylib.summarize_read_result(result)
             self.memory.set_file_summary(canonical_path, summary)
-            self.memory.append_note(summary, tags=(canonical_path,), source=canonical_path)
+            self.memory.append_note(
+                summary, tags=(canonical_path,), source=canonical_path
+            )
         elif name in {"write_file", "patch_file"}:
             self.memory.invalidate_file_summary(canonical_path)
 
@@ -431,14 +678,31 @@ class RepoAgent:
 
     def record_process_note_for_tool(self, name, metadata):
         status = str(metadata.get("tool_status", "")).strip()
-        if status not in {"partial_success", "error", "rejected"}:
+        if status not in {
+            "partial_success",
+            "error",
+            "rejected",
+            "cancelled",
+            "timeout",
+        }:
             return
-        affected_paths = [str(path).strip() for path in metadata.get("affected_paths", []) if str(path).strip()]
+        affected_paths = [
+            str(path).strip()
+            for path in metadata.get("affected_paths", [])
+            if str(path).strip()
+        ]
         path_text = ", ".join(affected_paths) or "workspace"
         if status == "partial_success":
-            text = f"{name} partial_success on {path_text}; inspect diff before retry"
+            if metadata.get("tool_error_code") == "tool_output_truncated":
+                text = f"{name} output truncated; narrow the request before retry"
+            else:
+                text = f"{name} partial_success on {path_text}; inspect diff before retry"
         elif status == "error":
             text = f"{name} error on {path_text}; check the failure before retry"
+        elif status == "cancelled":
+            text = f"{name} cancelled on {path_text}; verify cleanup before retry"
+        elif status == "timeout":
+            text = f"{name} timeout on {path_text}; inspect partial effects before retry"
         else:
             text = f"{name} rejected; choose a different action before retry"
         tags = ["process", status, *affected_paths]
@@ -446,59 +710,22 @@ class RepoAgent:
         self.session["memory"] = self.memory.to_dict()
 
     def reject_durable_reason(self, note_text):
-        text = str(note_text or "").strip()
-        lowered = text.lower()
-        if not text:
-            return "empty"
-        if REDACTED_VALUE in text or SECRET_SHAPED_TEXT_PATTERN.search(text):
-            return "secret_shaped"
-        checkpoint_like_prefixes = (
-            "current goal",
-            "current blocker",
-            "next step",
-            "current phase",
-            "key files",
-            "freshness",
-            "当前目标",
-            "当前卡点",
-            "下一步",
-            "当前阶段",
-            "关键文件",
-            "已完成",
-            "已排除",
-        )
-        if any(lowered.startswith(prefix) for prefix in checkpoint_like_prefixes):
-            return "transient_task_state"
-        if re.search(r"(?i)\b(stdout|stderr|traceback|exit_code)\b", text) or len(text) > 220:
-            return "noisy_output"
-        return ""
+        return self.memory_consolidator.reject_reason(note_text)
 
     def extract_durable_promotions(self, user_message, final_answer):
-        user_text = str(user_message or "")
-        if not (DURABLE_MEMORY_INTENT_PATTERN.search(user_text) or DURABLE_MEMORY_INTENT_ZH_PATTERN.search(user_text)):
-            return [], []
-        promotions = []
-        rejections = []
-        for line in str(final_answer or "").splitlines():
-            text = line.strip()
-            if not text or REDACTED_VALUE in text:
-                continue
-            for topic, pattern in DURABLE_MEMORY_LINE_PATTERNS:
-                match = pattern.match(text)
-                if not match:
-                    continue
-                note_text = match.group(1).strip()
-                if note_text:
-                    reason = self.reject_durable_reason(note_text)
-                    if reason:
-                        rejections.append(f"{topic}:{reason}")
-                        break
-                    promotions.append((topic, note_text))
-                break
-        return promotions, rejections
+        result = self.memory_consolidator.consolidate(
+            user_message, final_answer
+        )
+        self.last_memory_consolidation = result.to_dict()
+        return (
+            [(item.topic, item.text) for item in result.candidates],
+            [f"{item.topic}:{item.reason}" for item in result.rejections],
+        )
 
     def promote_durable_memory(self, user_message, final_answer):
-        promotions, rejections = self.extract_durable_promotions(user_message, final_answer)
+        promotions, rejections = self.extract_durable_promotions(
+            user_message, final_answer
+        )
         promoted, superseded = self.memory.promote_durable(promotions)
         self.session["memory"] = self.memory.to_dict()
         self.last_durable_promotions = promoted
@@ -511,7 +738,9 @@ class RepoAgent:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self._ask_and_close(user_message))
-        raise RuntimeError("RepoAgent.ask() cannot run inside an active event loop; use await ask_async()")
+        raise RuntimeError(
+            "RepoAgent.ask() cannot run inside an active event loop; use await ask_async()"
+        )
 
     async def _ask_and_close(self, user_message):
         try:
@@ -523,6 +752,10 @@ class RepoAgent:
         from .agent_turn_runner import AgentTurnRunner
         from .spine import Scheduler, Text, TurnRequest, TurnRuntime, TurnState
 
+        if not self._memory_backend_started:
+            await self.memory_backend.start()
+            self._memory_backend_started = True
+            self.skill_watcher.start()
         if self._turn_runtime is None:
             self._turn_runtime = TurnRuntime(
                 AgentTurnRunner(self), self.run_store, redactor=self.redact_artifact
@@ -561,21 +794,106 @@ class RepoAgent:
         return "".join(answers) if answers else outcome.final_answer
 
     async def aclose(self, grace=5.0):
-        if self._scheduler is None:
-            return
-        if self._scheduler_loop is not asyncio.get_running_loop():
-            raise RuntimeError("RepoAgent must be closed from its scheduler event loop")
-        scheduler = self._scheduler
         try:
-            await scheduler.shutdown(grace=grace)
+            if self._scheduler is not None:
+                if self._scheduler_loop is not asyncio.get_running_loop():
+                    raise RuntimeError(
+                        "RepoAgent must be closed from its scheduler event loop"
+                    )
+                await self._scheduler.shutdown(grace=grace)
         finally:
             self._scheduler = None
             self._scheduler_loop = None
+            if self._memory_backend_started:
+                await self.memory_backend.stop()
+                self._memory_backend_started = False
+            self.skill_watcher.stop()
+            if self.plugin_manager is not None:
+                self.plugin_manager.stop()
 
-    def execute_tool(self, name, args):
-        result = self.tool_executor.execute(name, args)
-        self._last_tool_result_metadata = dict(result.metadata)
+    def next_tool_call_id(self):
+        self._tool_call_sequence += 1
+        state = self.current_task_state
+        scope = state.task_id if state is not None else self.session["id"]
+        return f"{scope}:tool:{self._tool_call_sequence}"
+
+    def build_tool_request(
+        self,
+        name,
+        args,
+        *,
+        call_id="",
+        origin="internal",
+        parent_call_id="",
+        timeout_seconds=None,
+        max_output_chars=None,
+    ):
+        state = self.current_task_state
+        return ToolRequest(
+            call_id=call_id or self.next_tool_call_id(),
+            name=str(name),
+            arguments=args,
+            turn_id=state.run_id if state is not None else "",
+            request_id=state.task_id if state is not None else "",
+            session_id=self.session["id"],
+            origin=origin,
+            parent_call_id=parent_call_id,
+            capability_token=self.capability_token,
+            timeout_seconds=timeout_seconds,
+            max_output_chars=max_output_chars,
+        )
+
+    def capability_scope(self):
+        claims = self.capability_authority.verify(self.capability_token)
+        if claims is None:
+            return {
+                "token_digest": capability_token_digest(self.capability_token),
+                "effects": [],
+                "tools": [],
+                "valid": False,
+            }
+        return {
+            **claims.scope(),
+            "token_digest": capability_token_digest(self.capability_token),
+            "valid": True,
+        }
+
+    def execute_tool_request(self, request, *, cancellation_token=None):
+        result = self.tool_gateway.execute(
+            request, cancellation_token=cancellation_token
+        )
+        self._last_tool_result_metadata = compatibility_metadata(result)
         return result
+
+    def execute_tool_batch(self, requests, *, cancellation_token=None):
+        results = self.tool_gateway.execute_batch(
+            requests, cancellation_token=cancellation_token
+        )
+        if results:
+            self._last_tool_result_metadata = compatibility_metadata(results[-1])
+        return results
+
+    def execute_tool(
+        self,
+        name,
+        args,
+        *,
+        call_id="",
+        origin="internal",
+        parent_call_id="",
+        timeout_seconds=None,
+        max_output_chars=None,
+    ):
+        request = self.build_tool_request(
+            name,
+            args,
+            call_id=call_id,
+            origin=origin,
+            parent_call_id=parent_call_id,
+            timeout_seconds=timeout_seconds,
+            max_output_chars=max_output_chars,
+        )
+        return self.execute_tool_request(request)
 
     def run_tool(self, name, args):
         """执行一次工具调用，并在执行前后套上完整护栏。
@@ -601,7 +919,9 @@ class RepoAgent:
     def repeated_tool_call(self, name, args):
         # agent 很常见的一种坏循环，是在没有新信息的情况下反复发起同一调用。
         # 这里提前挡掉最简单的这种循环。
-        tool_events = [item for item in self.session["history"] if item["role"] == "tool"]
+        tool_events = [
+            item for item in self.session["history"] if item["role"] == "tool"
+        ]
         if len(tool_events) < 2:
             return False
         recent = tool_events[-2:]
@@ -614,9 +934,7 @@ class RepoAgent:
             if item["name"] != name:
                 return False
             try:
-                historical_args = toolkit.normalize_tool_arguments(
-                    name, item["args"]
-                )
+                historical_args = toolkit.normalize_tool_arguments(name, item["args"])
             except ValueError:
                 historical_args = item["args"]
             return historical_args == normalized_args
@@ -625,15 +943,26 @@ class RepoAgent:
 
     @staticmethod
     def new_task_id():
-        return "task_" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+        return (
+            "task_"
+            + datetime.now().strftime("%Y%m%d-%H%M%S")
+            + "-"
+            + uuid.uuid4().hex[:6]
+        )
 
     @staticmethod
     def new_run_id():
-        return "run_" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+        return (
+            "run_"
+            + datetime.now().strftime("%Y%m%d-%H%M%S")
+            + "-"
+            + uuid.uuid4().hex[:6]
+        )
 
     def build_report(self, task_state):
         # report 是一次运行的最终摘要；
         # 和 trace 的区别在于，trace 关注过程，report 关注结果与关键指标。
+        provider_calls = self.run_store.load_model_calls(task_state)
         return {
             "run_id": task_state.run_id,
             "task_id": task_state.task_id,
@@ -662,10 +991,43 @@ class RepoAgent:
                 )
             },
             "call_efficiency": dict(self.last_call_efficiency_summary),
+            "provider_call_ids": [
+                row.get("provider_call_id", "") for row in provider_calls
+            ],
             "durable_promotions": list(self.last_durable_promotions),
             "durable_rejections": list(self.last_durable_rejections),
             "durable_superseded": list(self.last_durable_superseded),
+            "memory_backend": dict(self.last_memory_backend_metadata),
+            "memory_consolidation": dict(self.last_memory_consolidation),
+            "subagents": list(self.last_subagent_records),
+            "subagent_summary": {
+                "count": len(self.last_subagent_records),
+                "completed": sum(
+                    row.get("outcome", {}).get("state") == "completed"
+                    for row in self.last_subagent_records
+                ),
+                "failed": sum(
+                    row.get("outcome", {}).get("state") == "failed"
+                    for row in self.last_subagent_records
+                ),
+                "cancelled": sum(
+                    row.get("outcome", {}).get("state") == "cancelled"
+                    for row in self.last_subagent_records
+                ),
+                "partial_estimated_cost_usd": sum(
+                    float(
+                        row.get("outcome", {})
+                        .get("call_efficiency", {})
+                        .get("partial_estimated_cost_usd", 0.0)
+                        or 0.0
+                    )
+                    for row in self.last_subagent_records
+                ),
+            },
             "redacted_env": self.detected_secret_env_summary(),
+            "plugins": (
+                self.plugin_manager.report() if self.plugin_manager is not None else []
+            ),
         }
 
     def tool_example(self, name):
@@ -673,6 +1035,11 @@ class RepoAgent:
 
     def validate_tool(self, name, args):
         """把通用工具校验和 runtime 级额外约束串起来。"""
+        if name not in toolkit.BASE_TOOL_DEFINITIONS and name != "delegate":
+            entry = self.tools.get(name)
+            if entry is None:
+                raise ValueError(f"unknown tool: {name}")
+            return validate_tool_arguments(entry["definition"], args)
         return toolkit.validate_tool(self.tool_context(), name, args)
 
     def tool_context(self):
@@ -683,29 +1050,170 @@ class RepoAgent:
             depth=self.depth,
             max_depth=self.max_depth,
             spawn_delegate=self.spawn_delegate,
+            sandbox_adapter=self.sandbox_adapter,
         )
 
-    def spawn_delegate(self, args):
+    def spawn_delegate(self, args, control=None):
         task = str(args.get("task", "")).strip()
-        child = RepoAgent(
-            model_client=self.model_client,
-            workspace=self.workspace,
-            session_store=self.session_store,
-            run_store=self.run_store,
-            approval_policy="never",
-            max_steps=int(args.get("max_steps", 3)),
-            max_new_tokens=self.max_new_tokens,
-            depth=self.depth + 1,
-            max_depth=self.max_depth,
-            read_only=True,
-            secret_env_names=self.secret_env_names,
-            shell_env_allowlist=self.shell_env_allowlist,
+        role = str(args.get("role", "reviewer"))
+        profile = ROLE_PROFILES[role]
+        child_allowed_tools = tuple(
+            name for name in profile["tools"] if name in self.tools and name != "delegate"
         )
-        # 委派的目标是“调查”，不是“放权执行”。
-        # 子 agent 以只读方式运行、步数更少，最后只把结论文本返回给父 agent。
-        child.session["memory"]["task"] = task
-        child.session["memory"]["notes"] = [clip(self.history_text(), 300)]
-        return "delegate_result:\n" + child.ask(task)
+        if not child_allowed_tools:
+            return "delegate_result:\nerror: no delegated read capabilities available"
+        state = self.current_task_state
+        remaining_steps = max(1, self.max_steps - int(state.tool_steps if state else 0))
+        parent_timeout = (
+            max(0.001, control.deadline - time.monotonic())
+            if control is not None and control.deadline is not None
+            else 60.0
+        )
+        parent_budget = SubagentBudget(
+            max_steps=remaining_steps,
+            max_input_tokens=self.context_window_budget.effective_input_tokens,
+            max_output_tokens=self.max_new_tokens,
+            timeout_seconds=parent_timeout,
+        )
+        budget = SubagentBudget(
+            max_steps=int(args.get("max_steps", 3)),
+            max_input_tokens=self.context_window_budget.effective_input_tokens,
+            max_output_tokens=self.max_new_tokens,
+            timeout_seconds=parent_timeout,
+        ).attenuate(parent_budget)
+        request = SubagentRequest.create(
+            parent_turn_id=state.run_id if state else "",
+            parent_request_id=state.task_id if state else "",
+            parent_session_id=self.session["id"],
+            task=task,
+            role=role,
+            budget=budget,
+            allowed_tools=child_allowed_tools,
+            messages=(
+                SubagentMessage(
+                    sender_id=state.run_id if state else self.session["id"],
+                    recipient_id="pending-subagent",
+                    kind="request",
+                    content=self.redact_text(task),
+                    sequence=1,
+                ),
+            ),
+        )
+        request = replace(
+            request,
+            messages=(replace(request.messages[0], recipient_id=request.subagent_id),),
+        )
+        if state is not None:
+            self.emit_trace(
+                state,
+                "subagent_started",
+                {
+                    "subagent_id": request.subagent_id,
+                    "role": role,
+                    "budget": budget.to_dict(),
+                },
+            )
+        child = None
+        outcome = None
+        with IsolatedSubagentWorkspace(self.root, request.subagent_id) as isolated:
+            child_workspace = WorkspaceContext.build(isolated.root)
+            child = RepoAgent(
+                model_client=self.model_client,
+                workspace=child_workspace,
+                session_store=SessionStore(isolated.root / ".repoagent" / "sessions"),
+                run_store=RunStore(isolated.root / ".repoagent" / "runs"),
+                approval_policy=("auto" if role == "implementer" else "never"),
+                max_steps=budget.max_steps,
+                max_parallel_tools=self.max_parallel_tools,
+                mutation_conflict_policy=self.mutation_conflict_policy,
+                max_new_tokens=budget.max_output_tokens,
+                depth=self.depth + 1,
+                max_depth=self.max_depth,
+                read_only=bool(profile["read_only"]),
+                secret_env_names=self.secret_env_names,
+                shell_env_allowlist=self.shell_env_allowlist,
+                allowed_tools=child_allowed_tools,
+                capability_authority=self.capability_authority,
+                parent_capability_token=self.capability_token,
+                mcp_servers=None,
+                sandbox_adapter=self.sandbox_adapter,
+                require_isolation=self.require_isolation,
+                network_policy=self.network_policy,
+                context_token_budget=budget.max_input_tokens,
+                segment_token_budgets=self.context_manager.segment_token_budgets,
+                token_counter=self.context_manager.token_counter,
+                context_window_tokens=self.context_window_budget.context_window_tokens,
+                context_window_source=self.context_window_budget.window_source,
+                skill_roots={
+                    "workspace": isolated.root / "skills",
+                    "local": isolated.root / ".repoagent" / "skills",
+                },
+            )
+            child.memory.set_task_summary(task)
+            delegated_task = f"Role: {role}\n{profile['instruction']}\n\nTask: {task}"
+            try:
+                if control is None:
+                    answer = child.ask(delegated_task)
+                else:
+                    from .agent_loop import AgentLoop
+
+                    answer = AgentLoop(child).run(
+                        delegated_task,
+                        cancellation_token=control.cancellation_token,
+                        deadline=control.deadline,
+                    )
+                outcome = SubagentOutcome(
+                    subagent_id=request.subagent_id,
+                    state="completed",
+                    answer=self.redact_text(answer),
+                    usage=child.last_completion_metadata,
+                    call_efficiency=child.last_call_efficiency_summary,
+                    tool_calls=(
+                        int(child.current_task_state.tool_steps)
+                        if child.current_task_state is not None
+                        else 0
+                    ),
+                )
+            except Exception as exc:
+                outcome = SubagentOutcome(
+                    subagent_id=request.subagent_id,
+                    state=(
+                        "cancelled"
+                        if isinstance(exc, ProviderCancelledError)
+                        else "failed"
+                    ),
+                    error=f"{type(exc).__name__}: {exc}",
+                    usage=child.last_completion_metadata,
+                    call_efficiency=child.last_call_efficiency_summary,
+                    tool_calls=(
+                        int(child.current_task_state.tool_steps)
+                        if child.current_task_state is not None
+                        else 0
+                    ),
+                )
+            if child.current_run_dir is not None and self.current_run_dir is not None:
+                evidence = persist_subagent_evidence(
+                    self.current_run_dir, request, outcome, child.current_run_dir
+                )
+                outcome = replace(outcome, evidence=evidence)
+        record = {"request": request.to_dict(), "outcome": outcome.to_dict()}
+        self.last_subagent_records.append(self.redact_artifact(record))
+        if state is not None:
+            self.emit_trace(
+                state,
+                "subagent_completed",
+                {
+                    "subagent_id": request.subagent_id,
+                    "state": outcome.state,
+                    "role": role,
+                    "usage": dict(outcome.usage),
+                    "call_efficiency": dict(outcome.call_efficiency),
+                    "evidence": dict(outcome.evidence),
+                },
+            )
+        if outcome.state != "completed":
+            raise RuntimeError(outcome.error)
+        return "delegate_result:\n" + outcome.answer
 
     def tool_list_files(self, args):
         return toolkit.tool_list_files(self.tool_context(), args)
@@ -728,18 +1236,27 @@ class RepoAgent:
     def tool_delegate(self, args):
         return toolkit.tool_delegate(self.tool_context(), args)
 
-    def approve(self, name, args):
-        if self.read_only:
-            return False
-        if self.approval_policy == "auto":
-            return True
-        if self.approval_policy == "never":
-            return False
+    @staticmethod
+    def _prompt_for_approval(definition, request, arguments):
         try:
-            answer = input(f"approve {name} {json.dumps(args, ensure_ascii=True)}? [y/N] ")
+            answer = input(
+                "approve "
+                f"{definition.name} [{definition.effect.value}] "
+                f"{json.dumps(dict(arguments), ensure_ascii=True)}? [y/N] "
+            )
         except EOFError:
             return False
         return answer.strip().lower() in {"y", "yes"}
+
+    def approve(self, name, args):
+        """Compatibility helper; Gateway uses the structured approval engine."""
+        entry = self.tools.get(name)
+        if entry is None:
+            return False
+        request = self.build_tool_request(name, args)
+        return self.approval_engine.decide(
+            entry["definition"], request, args
+        ).allowed
 
     @staticmethod
     def parse(raw):
@@ -762,23 +1279,33 @@ class RepoAgent:
         # 这里支持两种工具格式：
         # 1. <tool>...</tool> 里包 JSON，适合简短调用
         # 2. XML 风格属性/子标签，适合写文件这类多行内容
-        if "<tool>" in raw and ("<final>" not in raw or raw.find("<tool>") < raw.find("<final>")):
+        if "<tool>" in raw and (
+            "<final>" not in raw or raw.find("<tool>") < raw.find("<final>")
+        ):
             body = RepoAgent.extract(raw, "tool")
             try:
                 payload = json.loads(body)
             except Exception:
-                return "retry", RepoAgent.retry_notice("model returned malformed tool JSON")
+                return "retry", RepoAgent.retry_notice(
+                    "model returned malformed tool JSON"
+                )
             if not isinstance(payload, dict):
-                return "retry", RepoAgent.retry_notice("tool payload must be a JSON object")
+                return "retry", RepoAgent.retry_notice(
+                    "tool payload must be a JSON object"
+                )
             if not str(payload.get("name", "")).strip():
-                return "retry", RepoAgent.retry_notice("tool payload is missing a tool name")
+                return "retry", RepoAgent.retry_notice(
+                    "tool payload is missing a tool name"
+                )
             args = payload.get("args", {})
             if args is None:
                 payload["args"] = {}
             elif not isinstance(args, dict):
                 return "retry", RepoAgent.retry_notice()
             return "tool", payload
-        if "<tool" in raw and ("<final>" not in raw or raw.find("<tool") < raw.find("<final>")):
+        if "<tool" in raw and (
+            "<final>" not in raw or raw.find("<tool") < raw.find("<final>")
+        ):
             payload = RepoAgent.parse_xml_tool(raw)
             if payload is not None:
                 return "tool", payload
@@ -787,7 +1314,9 @@ class RepoAgent:
             final = RepoAgent.extract(raw, "final").strip()
             if final:
                 return "final", final
-            return "retry", RepoAgent.retry_notice("model returned an empty <final> answer")
+            return "retry", RepoAgent.retry_notice(
+                "model returned an empty <final> answer"
+            )
         raw = raw.strip()
         if raw:
             return "final", raw
@@ -817,7 +1346,15 @@ class RepoAgent:
 
         body = match.group("body")
         args = dict(attrs)
-        for key in ("content", "old_text", "new_text", "command", "task", "pattern", "path"):
+        for key in (
+            "content",
+            "old_text",
+            "new_text",
+            "command",
+            "task",
+            "pattern",
+            "path",
+        ):
             if f"<{key}>" in body:
                 args[key] = RepoAgent.extract_raw(body, key)
 
@@ -831,8 +1368,12 @@ class RepoAgent:
     @staticmethod
     def parse_attrs(text):
         attrs = {}
-        for match in re.finditer(r"""([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)')""", text):
-            attrs[match.group(1)] = match.group(2) if match.group(2) is not None else match.group(3)
+        for match in re.finditer(
+            r"""([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)')""", text
+        ):
+            attrs[match.group(1)] = (
+                match.group(2) if match.group(2) is not None else match.group(3)
+            )
         return attrs
 
     @staticmethod
@@ -862,10 +1403,20 @@ class RepoAgent:
         return text[start:end]
 
     def reset(self):
+        if self._memory_backend_started:
+            raise RuntimeError("close the memory backend before resetting the agent")
+        default_backend = self.memory_backend is self.memory
         self.session["history"] = []
         self.session["memory"].clear()
         self.session["memory"].update(memorylib.default_memory_state())
-        self.memory = memorylib.LayeredMemory(self.session["memory"], workspace_root=self.root)
+        self.memory = memorylib.LayeredMemory(
+            self.session["memory"], workspace_root=self.root
+        )
+        if default_backend:
+            self.memory_backend = self.memory
+            self._memory_backend_started = False
+            self.last_memory_backend_metadata["backend"] = type(self.memory).__name__
+        self.backend_memory_hits = []
         self.session_store.save(self.session)
 
     def path(self, raw_path):

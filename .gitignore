@@ -7,7 +7,6 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
-uv.lock
 
 # Packaging
 *.egg-info/
@@ -44,9 +43,15 @@ docs/*
 docs/architecture/*
 !docs/architecture/agent-harness-v1-overview.md
 !docs/architecture/implementation-ledger.md
+!docs/architecture/current-architecture.md
 !docs/roadmaps/
 docs/roadmaps/*
 !docs/roadmaps/agent-harness-implementation-plan.md
+!docs/migration.md
+!docs/release.md
+!docs/security/
+docs/security/*
+!docs/security/threat-model.md
 examples/
 
 # Local secrets and provider configuration

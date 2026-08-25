@@ -10,12 +10,15 @@ from datetime import datetime
 import re
 from pathlib import Path
 
+from ..memory_backend import MemoryBackendNotStartedError, MemoryHit
 from ..paths import workspace_state_root
 from ..workspace import clip, now
 
 WORKING_FILE_LIMIT = 8
 EPISODIC_NOTE_LIMIT = 12
 FILE_SUMMARY_LIMIT = 6
+MEMORY_FRESHNESS_CURRENT = "current"
+MEMORY_FRESHNESS_SUPERSEDED = "superseded"
 
 DURABLE_TOPIC_DEFAULTS = {
     "project-conventions": {
@@ -120,6 +123,10 @@ class DurableMemoryStore:
                         "source": topic,
                         "created_at": updated_at or now(),
                         "kind": "durable",
+                        "freshness": MEMORY_FRESHNESS_CURRENT,
+                        "confidence": 1.0,
+                        "superseded_by": None,
+                        "conflicts_with": [],
                     }
                 )
         return notes
@@ -293,6 +300,33 @@ def _parse_timestamp(value):
         return 0.0
 
 
+def _normalize_confidence(value, default=1.0):
+    if isinstance(value, bool):
+        return float(default)
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return min(1.0, max(0.0, confidence))
+
+
+def _memory_subject_key(text):
+    text = str(text).strip()
+    for pattern in (
+        r"^(.+?)\s+is\s+.+$",
+        r"^(.+?)\s+are\s+.+$",
+        r"^(.+?)\s+uses?\s+.+$",
+        r"^(.+?)\s+should\s+.+$",
+        r"^(.+?)是.+$",
+        r"^(.+?)使用.+$",
+    ):
+        match = re.match(pattern, text, re.I)
+        if match:
+            subject = " ".join(_tokenize(match.group(1)))
+            return subject or None
+    return None
+
+
 def _normalize_note(note, index):
     if isinstance(note, str):
         text = clip(note.strip(), 500)
@@ -303,6 +337,10 @@ def _normalize_note(note, index):
             "created_at": now(),
             "note_index": index,
             "kind": "episodic",
+            "freshness": MEMORY_FRESHNESS_CURRENT,
+            "confidence": 1.0,
+            "superseded_by": None,
+            "conflicts_with": [],
         }
 
     if not isinstance(note, dict):
@@ -314,6 +352,10 @@ def _normalize_note(note, index):
             "created_at": now(),
             "note_index": index,
             "kind": "episodic",
+            "freshness": MEMORY_FRESHNESS_CURRENT,
+            "confidence": 1.0,
+            "superseded_by": None,
+            "conflicts_with": [],
         }
 
     text = clip(str(note.get("text", "")).strip(), 500)
@@ -322,6 +364,17 @@ def _normalize_note(note, index):
     created_at = str(note.get("created_at", "")).strip() or now()
     note_index = int(note.get("note_index", index))
     kind = str(note.get("kind", "episodic")).strip() or "episodic"
+    freshness = str(
+        note.get("freshness", MEMORY_FRESHNESS_CURRENT)
+    ).strip() or MEMORY_FRESHNESS_CURRENT
+    superseded_by = note.get("superseded_by")
+    if isinstance(superseded_by, bool) or not isinstance(superseded_by, int):
+        superseded_by = None
+    conflicts_with = [
+        int(item)
+        for item in _ensure_list(note.get("conflicts_with", []))
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0
+    ]
     return {
         "text": text,
         "tags": _dedupe_preserve_order(tags),
@@ -329,6 +382,10 @@ def _normalize_note(note, index):
         "created_at": created_at,
         "note_index": note_index,
         "kind": kind,
+        "freshness": freshness,
+        "confidence": _normalize_confidence(note.get("confidence", 1.0)),
+        "superseded_by": superseded_by,
+        "conflicts_with": _dedupe_preserve_order(conflicts_with),
     }
 
 
@@ -407,6 +464,21 @@ def normalize_memory_state(state, workspace_root=None):
             "summary": text,
             "created_at": created_at,
             "freshness": freshness,
+            "source": str(summary.get("source", path)).strip() if isinstance(summary, dict) else path,
+            "confidence": _normalize_confidence(
+                summary.get("confidence", 1.0) if isinstance(summary, dict) else 1.0
+            ),
+            "supersedes_digest": (
+                str(summary.get("supersedes_digest", "")).strip()
+                if isinstance(summary, dict)
+                else ""
+            ),
+            "conflicts_with": (
+                list(summary.get("conflicts_with", []))
+                if isinstance(summary, dict)
+                and isinstance(summary.get("conflicts_with", []), list)
+                else []
+            ),
         }
     state["file_summaries"] = normalized_file_summaries
 
@@ -444,7 +516,7 @@ def remember_file(state, path, workspace_root=None):
     return state
 
 
-def append_note(state, text, tags=(), source="", created_at=None, workspace_root=None, kind="episodic"):
+def append_note(state, text, tags=(), source="", created_at=None, workspace_root=None, kind="episodic", confidence=1.0):
     state = normalize_memory_state(state, workspace_root)
     text = clip(str(text).strip(), 500)
     if not text:
@@ -460,10 +532,31 @@ def append_note(state, text, tags=(), source="", created_at=None, workspace_root
         "created_at": str(created_at).strip() if created_at else now(),
         "note_index": int(state.get("next_note_index", 0)),
         "kind": str(kind).strip() or "episodic",
+        "freshness": MEMORY_FRESHNESS_CURRENT,
+        "confidence": _normalize_confidence(confidence),
+        "superseded_by": None,
+        "conflicts_with": [],
     }
     state["next_note_index"] = note["note_index"] + 1
 
     notes = [item for item in state["episodic_notes"] if item["text"] != note["text"]]
+    subject = _memory_subject_key(text)
+    if subject:
+        for old in notes:
+            if (
+                old.get("freshness") != MEMORY_FRESHNESS_CURRENT
+                or _memory_subject_key(old.get("text", "")) != subject
+            ):
+                continue
+            if (
+                old.get("created_at") == note["created_at"]
+                and old.get("confidence") == note["confidence"]
+            ):
+                old.setdefault("conflicts_with", []).append(note["note_index"])
+                note["conflicts_with"].append(old["note_index"])
+            else:
+                old["freshness"] = MEMORY_FRESHNESS_SUPERSEDED
+                old["superseded_by"] = note["note_index"]
     notes.append(note)
     state["episodic_notes"] = notes[-EPISODIC_NOTE_LIMIT:]
     state["notes"] = [item["text"] for item in state["episodic_notes"]]
@@ -474,10 +567,15 @@ def set_file_summary(state, path, summary, workspace_root=None):
     summary = clip(str(summary).strip(), 500)
     if not path or not summary:
         return state
+    previous = state["file_summaries"].get(path, {})
     state["file_summaries"][path] = {
         "summary": summary,
         "created_at": now(),
         "freshness": file_freshness(path, workspace_root),
+        "source": path,
+        "confidence": 1.0,
+        "supersedes_digest": str(previous.get("freshness") or ""),
+        "conflicts_with": [],
     }
     return state
 
@@ -522,6 +620,8 @@ def retrieval_candidates(state, query, limit=3, workspace_root=None):
     query_tokens = _tokenize(query)
     ranked = []
     for note in state["episodic_notes"]:
+        if note.get("freshness") == MEMORY_FRESHNESS_SUPERSEDED:
+            continue
         # 召回逻辑故意保持简单透明：先看 tag 精确命中，
         # 再看关键词重叠，最后看新旧程度。这里不引入 embedding。
         note_tags = {tag.lower() for tag in note.get("tags", [])}
@@ -602,6 +702,7 @@ class LayeredMemory:
         self.workspace_root = workspace_root
         self.state = normalize_memory_state(state, workspace_root)
         self.durable_store = DurableMemoryStore(workspace_state_root(workspace_root) / "memory") if workspace_root is not None else None
+        self._backend_started = False
 
     def to_dict(self):
         self.state = normalize_memory_state(self.state, self.workspace_root)
@@ -618,7 +719,7 @@ class LayeredMemory:
         self.state = remember_file(self.state, path, self.workspace_root)
         return self
 
-    def append_note(self, text, tags=(), source="", created_at=None, kind="episodic"):
+    def append_note(self, text, tags=(), source="", created_at=None, kind="episodic", confidence=1.0):
         self.state = append_note(
             self.state,
             text,
@@ -627,6 +728,7 @@ class LayeredMemory:
             created_at=created_at,
             workspace_root=self.workspace_root,
             kind=kind,
+            confidence=confidence,
         )
         return self
 
@@ -658,3 +760,122 @@ class LayeredMemory:
         promoted, superseded = self.durable_store.promote(promotions)
         self.state = normalize_memory_state(self.state, self.workspace_root)
         return promoted, superseded
+
+    async def start(self):
+        self._backend_started = True
+
+    async def stop(self):
+        self._backend_started = False
+
+    async def recall(
+        self,
+        query,
+        *,
+        user_id=None,
+        agent_id=None,
+        top_k,
+    ):
+        self._require_backend_started()
+        owners = [
+            str(owner).strip()
+            for owner in (user_id, agent_id)
+            if owner is not None and str(owner).strip()
+        ]
+        if len(owners) != 1:
+            return []
+        if isinstance(top_k, bool) or not isinstance(top_k, int):
+            raise TypeError("memory recall top_k must be an integer")
+        if top_k <= 0:
+            return []
+        query_tokens = _tokenize(query)
+        candidates = []
+
+        def add(text, *, source, kind, created_at="", metadata=None):
+            text = str(text).strip()
+            tokens = _tokenize(text) | _tokenize(source)
+            overlap = len(query_tokens & tokens)
+            if not text or (query_tokens and overlap == 0):
+                return
+            score = overlap / len(query_tokens) if query_tokens else 0.0
+            candidates.append(
+                (
+                    (score, _parse_timestamp(created_at), len(candidates)),
+                    MemoryHit(
+                        text=text,
+                        score=score,
+                        metadata={
+                            "source": str(source),
+                            "kind": str(kind),
+                            "created_at": str(created_at),
+                            **dict(metadata or {}),
+                        },
+                    ),
+                )
+            )
+
+        snapshot = self.to_dict()
+        add(
+            snapshot["working"]["task_summary"],
+            source="working.task_summary",
+            kind="working",
+        )
+        for path, summary in snapshot["file_summaries"].items():
+            if summary.get("freshness") != file_freshness(path, self.workspace_root):
+                continue
+            add(
+                summary.get("summary", ""),
+                source=path,
+                kind="file",
+                created_at=summary.get("created_at", ""),
+                metadata={
+                    "freshness": summary.get("freshness"),
+                    "confidence": summary.get("confidence", 1.0),
+                    "supersedes_digest": summary.get("supersedes_digest", ""),
+                    "conflicts_with": list(summary.get("conflicts_with", [])),
+                },
+            )
+        for note in retrieval_candidates(
+            snapshot,
+            query,
+            limit=max(top_k * 2, top_k),
+            workspace_root=self.workspace_root,
+        ):
+            add(
+                note.get("text", ""),
+                source=note.get("source", ""),
+                kind=note.get("kind", "episodic"),
+                created_at=note.get("created_at", ""),
+                metadata={
+                    "tags": list(note.get("tags", [])),
+                    "freshness": note.get(
+                        "freshness", MEMORY_FRESHNESS_CURRENT
+                    ),
+                    "confidence": note.get("confidence", 1.0),
+                    "superseded_by": note.get("superseded_by"),
+                    "conflicts_with": list(note.get("conflicts_with", [])),
+                },
+            )
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [hit for _, hit in candidates[:top_k]]
+
+    async def store(self, session_id, messages):
+        self._require_backend_started()
+        session_id = str(session_id).strip()
+        if not session_id:
+            raise ValueError("memory session_id must be non-empty")
+        if not isinstance(messages, list):
+            raise TypeError("memory messages must be a list")
+        for message in messages:
+            if not isinstance(message, dict):
+                raise TypeError("each memory message must be a dict")
+        # Tool-result extraction and explicit durable promotion already update
+        # this local adapter. Raw dialogue is not automatically a reusable fact.
+
+    async def feedback(self, signals):
+        self._require_backend_started()
+        if not isinstance(signals, dict):
+            raise TypeError("memory feedback signals must be a dict")
+
+    def _require_backend_started(self):
+        if not self._backend_started:
+            raise MemoryBackendNotStartedError("memory backend is not started")

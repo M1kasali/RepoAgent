@@ -1,5 +1,9 @@
+import pytest
+
 from repoagent.security import (
     REDACTED_VALUE,
+    NetworkPolicy,
+    NetworkPolicyError,
     detected_secret_env_items,
     looks_sensitive_env_name,
     redact_artifact,
@@ -48,3 +52,31 @@ def test_shell_env_uses_allowlist_and_sets_pwd_with_path_fallback(tmp_path):
     filtered = shell_env(env=env, allowlist=("HOME",), root=tmp_path)
 
     assert filtered == {"HOME": "/home/user", "PWD": str(tmp_path), "PATH": "/usr/bin"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/admin",
+        "http://[::1]/admin",
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.1/internal",
+        "http://localhost/internal",
+        "file:///etc/passwd",
+        "https://user:password@example.com/data",
+    ],
+)
+def test_network_policy_rejects_ssrf_and_credential_targets(url):
+    with pytest.raises(NetworkPolicyError):
+        NetworkPolicy().validate_url(url)
+
+
+def test_network_policy_allows_public_allowlisted_https_target():
+    policy = NetworkPolicy(allowed_hosts=("mcp.example.com",))
+
+    assert (
+        policy.validate_url("https://mcp.example.com/tools")
+        == "https://mcp.example.com/tools"
+    )
+    with pytest.raises(NetworkPolicyError, match="allowlisted"):
+        policy.validate_url("https://other.example.com/tools")

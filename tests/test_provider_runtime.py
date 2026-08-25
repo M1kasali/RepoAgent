@@ -793,6 +793,128 @@ def test_agent_loop_executes_normalized_native_tool_call(tmp_path):
     assert read_tool.parameters["properties"]["end"]["default"] == 200
 
 
+def test_agent_loop_parallelizes_safe_reads_but_preserves_serial_barriers(tmp_path):
+    class NativeBatchProvider:
+        supports_prompt_cache = False
+        model = "native-batch"
+
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                calls = (
+                    ToolCall("read-0", "read_file", {"path": "file-0.txt"}),
+                    ToolCall("read-1", "read_file", {"path": "file-1.txt"}),
+                    ToolCall(
+                        "write-0",
+                        "write_file",
+                        {"path": "written.txt", "content": "written\n"},
+                    ),
+                    ToolCall("read-2", "read_file", {"path": "file-2.txt"}),
+                    ToolCall("read-3", "read_file", {"path": "file-3.txt"}),
+                )
+                result = ModelResult(
+                    tool_calls=calls,
+                    finish_reason="tool_calls",
+                    provider="native",
+                    model=self.model,
+                )
+                for call in calls:
+                    yield ModelEvent(kind="tool_call", tool_call=call)
+                yield ModelEvent(kind="completed", result=result)
+                return
+            result = ModelResult(
+                text="<final>batch done</final>",
+                provider="native",
+                model=self.model,
+            )
+            yield ModelEvent(kind="text_delta", text=result.text)
+            yield ModelEvent(kind="completed", result=result)
+
+    for index in range(4):
+        (tmp_path / f"file-{index}.txt").write_text(
+            f"value-{index}\n", encoding="utf-8"
+        )
+    provider = NativeBatchProvider()
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+        max_parallel_tools=2,
+    )
+    lock = threading.Lock()
+    events = []
+    active = 0
+    peak = 0
+
+    def read_probe(args, control):
+        nonlocal active, peak
+        label = args["path"]
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            events.append(("start", label))
+        try:
+            index = int(label.removesuffix(".txt").split("-")[-1])
+            time.sleep(0.03 if index % 2 == 0 else 0.01)
+            return label
+        finally:
+            with lock:
+                events.append(("end", label))
+                active -= 1
+
+    def write_probe(args, control):
+        events.append(("start", "write"))
+        (tmp_path / args["path"]).write_text(args["content"], encoding="utf-8")
+        events.append(("end", "write"))
+        return "written"
+
+    agent.tools["read_file"]["run"] = read_probe
+    agent.tools["write_file"]["run"] = write_probe
+
+    assert agent.ask("execute a mixed native batch") == "batch done"
+
+    history = [item for item in agent.session["history"] if item["role"] == "tool"]
+    assert [item["tool_call_id"] for item in history] == [
+        "read-0",
+        "read-1",
+        "write-0",
+        "read-2",
+        "read-3",
+    ]
+    assert peak == 2
+    write_start = events.index(("start", "write"))
+    write_end = events.index(("end", "write"))
+    assert events.index(("end", "file-0.txt")) < write_start
+    assert events.index(("end", "file-1.txt")) < write_start
+    assert write_end < events.index(("start", "file-2.txt"))
+    assert write_end < events.index(("start", "file-3.txt"))
+    trace = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    batches = [item for item in trace if item["event"] == "tool_batch_completed"]
+    assert [item["mode"] for item in batches] == [
+        "parallel",
+        "serial",
+        "parallel",
+    ]
+    assert all(
+        item["tool_call_ids"] == item["result_call_ids"] for item in batches
+    )
+    assert [item["scheduling_reason"] for item in batches] == [
+        "concurrency_safe_read",
+        "mutation_conflict_policy",
+        "concurrency_safe_read",
+    ]
+    assert {item["mutation_conflict_policy"] for item in batches} == {"serial"}
+
+
 def test_final_text_stream_crosses_chunk_boundaries_without_leaking_protocol(tmp_path):
     class ChunkedProvider:
         supports_prompt_cache = False

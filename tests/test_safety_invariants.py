@@ -6,6 +6,7 @@ from unittest.mock import patch
 from repoagent import FakeModelClient, RepoAgent, SessionStore, WorkspaceContext
 from repoagent import cli as pico_cli
 from repoagent.task_state import TaskState
+from repoagent.tool_execution import ProcessOutcome
 
 
 def build_workspace(tmp_path):
@@ -64,9 +65,12 @@ def test_cli_build_agent_wires_secret_env_names_from_parser(tmp_path):
             raise AssertionError("model should not be invoked")
 
     (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
-    with patch.dict(os.environ, {"GITHUB_PAT": "ghp-1", "GH_PAT": "ghp-2"}, clear=True), patch(
-        "repoagent.cli.OllamaModelClient",
-        DummyModelClient,
+    with (
+        patch.dict(os.environ, {"GITHUB_PAT": "ghp-1", "GH_PAT": "ghp-2"}, clear=True),
+        patch(
+            "repoagent.cli.OllamaModelClient",
+            DummyModelClient,
+        ),
     ):
         args = pico_cli.build_arg_parser().parse_args(
             [
@@ -81,7 +85,10 @@ def test_cli_build_agent_wires_secret_env_names_from_parser(tmp_path):
             ]
         )
         agent = pico_cli.build_agent(args)
-        assert set(agent.secret_env_summary()["secret_env_names"]) == {"GITHUB_PAT", "GH_PAT"}
+        assert set(agent.secret_env_summary()["secret_env_names"]) == {
+            "GITHUB_PAT",
+            "GH_PAT",
+        }
 
 
 def test_cli_build_agent_uses_default_configured_secret_names(tmp_path):
@@ -94,11 +101,16 @@ def test_cli_build_agent_uses_default_configured_secret_names(tmp_path):
             raise AssertionError("model should not be invoked")
 
     (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
-    with patch.dict(os.environ, {"GH_PAT": "ghp-default-1"}, clear=True), patch(
-        "repoagent.cli.OllamaModelClient",
-        DummyModelClient,
+    with (
+        patch.dict(os.environ, {"GH_PAT": "ghp-default-1"}, clear=True),
+        patch(
+            "repoagent.cli.OllamaModelClient",
+            DummyModelClient,
+        ),
     ):
-        args = pico_cli.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--approval", "auto"])
+        args = pico_cli.build_arg_parser().parse_args(
+            ["--cwd", str(tmp_path), "--approval", "auto"]
+        )
         agent = pico_cli.build_agent(args)
         assert agent.secret_env_summary()["secret_env_names"] == ["GH_PAT"]
 
@@ -113,11 +125,20 @@ def test_cli_build_agent_loads_project_env_secrets_before_redaction_setup(tmp_pa
             raise AssertionError("model should not be invoked")
 
     (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
-    (tmp_path / ".env").write_text("REPOAGENT_DEEPSEEK_API_KEY=sk-project-secret\n", encoding="utf-8")
-    with patch.dict(os.environ, {}, clear=True), patch("repoagent.cli.AnthropicCompatibleModelClient", DummyModelClient):
-        args = pico_cli.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--provider", "deepseek"])
+    (tmp_path / ".env").write_text(
+        "REPOAGENT_DEEPSEEK_API_KEY=sk-project-secret\n", encoding="utf-8"
+    )
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("repoagent.cli.AnthropicCompatibleModelClient", DummyModelClient),
+    ):
+        args = pico_cli.build_arg_parser().parse_args(
+            ["--cwd", str(tmp_path), "--provider", "deepseek"]
+        )
         agent = pico_cli.build_agent(args)
-        assert agent.secret_env_summary()["secret_env_names"] == ["REPOAGENT_DEEPSEEK_API_KEY"]
+        assert agent.secret_env_summary()["secret_env_names"] == [
+            "REPOAGENT_DEEPSEEK_API_KEY"
+        ]
 
 
 def test_cli_build_agent_reads_secret_names_from_environment_config(tmp_path):
@@ -130,17 +151,24 @@ def test_cli_build_agent_reads_secret_names_from_environment_config(tmp_path):
             raise AssertionError("model should not be invoked")
 
     (tmp_path / "README.md").write_text("demo\n", encoding="utf-8")
-    with patch.dict(
-        os.environ,
-        {
-            "REPOAGENT_CUSTOM_SECRET": "custom-secret-value",
-            "REPOAGENT_SECRET_ENV_NAMES": "REPOAGENT_CUSTOM_SECRET",
-        },
-        clear=True,
-    ), patch("repoagent.cli.OllamaModelClient", DummyModelClient):
-        args = pico_cli.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--approval", "auto"])
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "REPOAGENT_CUSTOM_SECRET": "custom-secret-value",
+                "REPOAGENT_SECRET_ENV_NAMES": "REPOAGENT_CUSTOM_SECRET",
+            },
+            clear=True,
+        ),
+        patch("repoagent.cli.OllamaModelClient", DummyModelClient),
+    ):
+        args = pico_cli.build_arg_parser().parse_args(
+            ["--cwd", str(tmp_path), "--approval", "auto"]
+        )
         agent = pico_cli.build_agent(args)
-        assert agent.secret_env_summary()["secret_env_names"] == ["REPOAGENT_CUSTOM_SECRET"]
+        assert agent.secret_env_summary()["secret_env_names"] == [
+            "REPOAGENT_CUSTOM_SECRET"
+        ]
 
 
 def test_run_shell_uses_allowlisted_environment_only(tmp_path):
@@ -159,20 +187,28 @@ def test_run_shell_uses_allowlisted_environment_only(tmp_path):
 def test_bound_tool_methods_delegate_into_tools_module(tmp_path):
     agent = build_agent(tmp_path, [], approval_policy="auto")
 
-    with patch("repoagent.tools.subprocess.run") as fake_run:
-        fake_run.return_value = type(
-            "Result",
-            (),
-            {"returncode": 0, "stdout": "toolkit-shell\n", "stderr": ""},
-        )()
+    with patch("repoagent.sandbox.run_bounded_process") as fake_run:
+        fake_run.return_value = ProcessOutcome(
+            status="completed",
+            exit_code=0,
+            stdout="toolkit-shell\n",
+            stderr="",
+            stdout_chars=14,
+            stderr_chars=0,
+            output_truncated=False,
+        )
         shell_result = agent.tool_run_shell({"command": "echo bypass", "timeout": 20})
 
-    assert "toolkit-shell" in shell_result
+    assert "toolkit-shell" in shell_result.content
     fake_run.assert_called_once()
     assert agent.tool_run_shell.__func__.__module__ == "repoagent.runtime"
 
-    with patch("repoagent.tools.tool_delegate", return_value="toolkit-delegate") as fake_delegate:
-        delegate_result = agent.tool_delegate({"task": "inspect README.md", "max_steps": 2})
+    with patch(
+        "repoagent.tools.tool_delegate", return_value="toolkit-delegate"
+    ) as fake_delegate:
+        delegate_result = agent.tool_delegate(
+            {"task": "inspect README.md", "max_steps": 2}
+        )
 
     assert delegate_result == "toolkit-delegate"
     fake_delegate.assert_called_once()
@@ -213,16 +249,23 @@ def test_delegate_child_is_read_only(tmp_path):
 def test_configured_secret_env_names_are_redacted_in_trace_and_report(tmp_path):
     github_pat = "ghp_configured_secret_123"
     gh_pat = "ghp_configured_secret_456"
-    with patch.dict(os.environ, {"GITHUB_PAT": github_pat, "GH_PAT": gh_pat}, clear=True):
+    with patch.dict(
+        os.environ, {"GITHUB_PAT": github_pat, "GH_PAT": gh_pat}, clear=True
+    ):
         agent = build_agent(
             tmp_path,
             [],
             secret_env_names=("GITHUB_PAT", "GH_PAT"),
         )
-        state = TaskState.create(run_id="run_001", task_id="task_001", user_request="Mask configured secrets")
+        state = TaskState.create(
+            run_id="run_001", task_id="task_001", user_request="Mask configured secrets"
+        )
         agent.run_store.start_run(state)
 
-        assert set(agent.secret_env_summary()["secret_env_names"]) == {"GITHUB_PAT", "GH_PAT"}
+        assert set(agent.secret_env_summary()["secret_env_names"]) == {
+            "GITHUB_PAT",
+            "GH_PAT",
+        }
 
         payload = {
             "GITHUB_PAT": github_pat,

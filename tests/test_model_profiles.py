@@ -60,6 +60,12 @@ def test_builtin_profiles_are_valid_immutable_and_secret_free():
         ({"timeout_seconds": "30"}, "timeout"),
         ({"max_output_tokens": 0}, "max_output_tokens"),
         ({"max_output_tokens": 1.5}, "max_output_tokens"),
+        ({"context_window_tokens": 1}, "context_window_tokens"),
+        (
+            {"context_window_tokens": 1024, "max_output_tokens": 1024},
+            "smaller than context_window_tokens",
+        ),
+        ({"context_window_source": ""}, "context_window_source"),
         ({"temperature": float("nan")}, "temperature"),
         ({"temperature": 2.1}, "temperature"),
         ({"top_p": 0}, "top_p"),
@@ -112,6 +118,7 @@ def test_cli_resolves_profile_env_then_validates_overrides():
     assert profile.base_url == "https://gateway.example/v1"
     assert profile.timeout_seconds == 45
     assert profile.max_output_tokens == 2048
+    assert profile.context_window_tokens == 32768
     assert profile.temperature == 0.4
 
 
@@ -127,6 +134,21 @@ def test_cli_rejects_invalid_profile_url_and_numeric_overrides():
         _resolve_model_profile(invalid_url)
     with pytest.raises(ValueError, match="max_output_tokens"):
         _resolve_model_profile(invalid_tokens)
+
+
+def test_cli_exposes_explicit_context_token_budget():
+    args = build_arg_parser().parse_args(
+        [
+            "--context-token-budget",
+            "8192",
+            "--context-window-tokens",
+            "16384",
+        ]
+    )
+
+    assert args.context_token_budget == 8192
+    assert _resolve_model_profile(args).context_window_tokens == 16384
+    assert _resolve_model_profile(args).context_window_source == "cli-override"
 
 
 def test_model_profile_provenance_is_traced_without_credential_value(tmp_path):

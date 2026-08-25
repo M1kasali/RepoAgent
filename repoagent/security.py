@@ -1,9 +1,53 @@
 """Security and redaction helpers for runtime artifacts."""
 
 import os
+import ipaddress
+from urllib.parse import urlsplit
 
 SENSITIVE_ENV_NAME_MARKERS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD")
 REDACTED_VALUE = "<redacted>"
+
+
+class NetworkPolicyError(ValueError):
+    pass
+
+
+class NetworkPolicy:
+    def __init__(self, *, allowed_hosts=(), allow_private=False, enabled=True):
+        self.allowed_hosts = frozenset(
+            str(host).lower().rstrip(".") for host in allowed_hosts
+        )
+        self.allow_private = bool(allow_private)
+        self.enabled = bool(enabled)
+
+    def validate_url(self, url):
+        if not self.enabled:
+            raise NetworkPolicyError("network access is disabled")
+        parsed = urlsplit(str(url))
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise NetworkPolicyError("network URL must be absolute HTTP(S)")
+        if parsed.username or parsed.password:
+            raise NetworkPolicyError("network URL must not contain credentials")
+        host = parsed.hostname.lower().rstrip(".")
+        if self.allowed_hosts and host not in self.allowed_hosts:
+            raise NetworkPolicyError(f"network host is not allowlisted: {host}")
+        if host == "localhost" or host.endswith(".localhost"):
+            raise NetworkPolicyError("loopback network targets are denied")
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        if address is not None and not self.allow_private:
+            if (
+                address.is_private
+                or address.is_loopback
+                or address.is_link_local
+                or address.is_multicast
+                or address.is_reserved
+                or address.is_unspecified
+            ):
+                raise NetworkPolicyError("private or special network targets are denied")
+        return url
 
 
 def _normalized_secret_names(secret_env_names):

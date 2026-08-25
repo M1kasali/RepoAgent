@@ -97,11 +97,11 @@ No TODO is complete merely because code exists. Completion requires:
 | Skills | Missing | discovery, activation, lazy loading, references, local pool | P4 |
 | Tracing | PARTIAL: JSONL events | correlation context, semantic events, usage, query/export | P5 |
 | Evaluation | PARTIAL: scripted metrics | reproducible campaign runner, paired trials, scorecards | P6 |
-| Subagents | PARTIAL: delegate tool | isolated manager, budgets, messaging, evidence | P7 |
-| Model routing | Missing | profiles, fallback chain, explainable selection | P7 |
-| Plugin system | Missing | manifest, discovery, trust, lifecycle | P7 |
-| CLI/TUI/Gateway | PARTIAL: CLI only | consistent runtime assembly and cancellation across surfaces | P8 |
-| Channels/Cron | Missing | intake, delivery, deduplication, scheduled execution | P8 |
+| Subagents | Complete | isolated manager, budgets, messaging, roles, evidence | P7 |
+| Model routing | Complete | deterministic profiles, fallback chain, explainable selection | P7 |
+| Plugin system | Complete | manifest, discovery, external trust, lifecycle, Gateway-only tools | P7 |
+| CLI/TUI/Gateway | Complete | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
+| Channels/Cron | Complete | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
 | Evolver | Missing | isolated candidates, sealed gates, activation, rollback | P9 |
 | Release engineering | PARTIAL | clean-head evidence bundle, CI gates, migration docs | P10 |
 
@@ -159,7 +159,7 @@ Goal: replace direct synchronous orchestration with a durable Turn lifecycle.
 - [x] `P1-06` Implement a per-session FIFO scheduler.
 - [x] `P1-07` Allow bounded cross-session concurrency.
 - [x] `P1-08` Separate foreground and background capacity.
-- [ ] `P1-09` Add cooperative cancellation before model, during model, and during tool execution.
+- [x] `P1-09` Add cooperative cancellation before model, during model, and during tool execution.
 - [x] `P1-10` Add teardown barriers so shutdown leaves no accepted Turn unaccounted for.
 - [x] `P1-11` Make session and Turn persistence atomic and versioned.
 - [x] `P1-12` Add deterministic scheduler, cancellation, crash, and duplicate-delivery tests.
@@ -199,16 +199,16 @@ Goal: make one execution seam responsible for validation, authorization, isolati
 
 - [x] `P3-01` Define typed `ToolDefinition`, `ToolRequest`, `ToolEffect`, and `ToolResult`.
 - [x] `P3-02` Generate prompt/native schemas and argument validation from one definition.
-- [ ] `P3-03` Route all tools, delegation, and internal calls through one `ToolGateway`.
-- [ ] `P3-04` Add effect-aware approval and capability tokens.
-- [ ] `P3-05` Implement timeout, cancellation, output limits, and structured failures.
-- [ ] `P3-06` Add read-only bounded parallel execution with deterministic result order.
-- [ ] `P3-07` Keep mutations serial unless an explicit conflict policy permits them.
-- [ ] `P3-08` Implement MCP discovery, registration, execution, and schema validation.
-- [ ] `P3-09` Implement direct and isolated sandbox adapters.
-- [ ] `P3-10` Fail closed when a task requires isolation but no sandbox is available.
-- [ ] `P3-11` Add filesystem traversal, symlink, command injection, secret, SSRF, and network-policy tests.
-- [ ] `P3-12` Add Git/worktree tools as the coding application extension.
+- [x] `P3-03` Route all tools, delegation, and internal calls through one `ToolGateway`.
+- [x] `P3-04` Add effect-aware approval and capability tokens.
+- [x] `P3-05` Implement timeout, cancellation, output limits, and structured failures.
+- [x] `P3-06` Add read-only bounded parallel execution with deterministic result order.
+- [x] `P3-07` Keep mutations serial unless an explicit conflict policy permits them.
+- [x] `P3-08` Implement MCP discovery, registration, execution, and schema validation.
+- [x] `P3-09` Implement direct and isolated sandbox adapters.
+- [x] `P3-10` Fail closed when a task requires isolation but no sandbox is available.
+- [x] `P3-11` Add filesystem traversal, symlink, command injection, secret, SSRF, and network-policy tests.
+- [x] `P3-12` Add Git/worktree tools as the coding application extension.
 
 Gate:
 
@@ -221,17 +221,17 @@ Gate:
 
 Goal: control long-horizon information without silent semantic loss.
 
-- [ ] `P4-01` Define context segments and deterministic assembly order.
-- [ ] `P4-02` Replace character budgets with provider-aware token budgets.
-- [ ] `P4-03` Reserve output tokens before sending a request.
-- [ ] `P4-04` Add history trimming, summarization, and compaction with provenance.
-- [ ] `P4-05` Define a memory backend contract and in-memory fake.
-- [ ] `P4-06` Migrate working, episodic, file, and durable memory behind the contract.
-- [ ] `P4-07` Add freshness, supersession, conflict, confidence, and source metadata.
-- [ ] `P4-08` Add consolidation without exposing secrets or transient task state.
-- [ ] `P4-09` Define Skill manifests, references, discovery, activation, and lazy loading.
-- [ ] `P4-10` Add a local Skill pool and change watcher.
-- [ ] `P4-11` Add paired context and memory tests with graders isolated from model clients.
+- [x] `P4-01` Define context segments and deterministic assembly order.
+- [x] `P4-02` Replace character budgets with provider-aware token budgets.
+- [x] `P4-03` Reserve output tokens before sending a request.
+- [x] `P4-04` Add history trimming, summarization, and compaction with provenance.
+- [x] `P4-05` Define a memory backend contract and in-memory fake.
+- [x] `P4-06` Migrate working, episodic, file, and durable memory behind the contract.
+- [x] `P4-07` Add freshness, supersession, conflict, confidence, and source metadata.
+- [x] `P4-08` Add consolidation without exposing secrets or transient task state.
+- [x] `P4-09` Define Skill manifests, references, discovery, activation, and lazy loading.
+- [x] `P4-10` Add a local Skill pool and change watcher.
+- [x] `P4-11` Add paired context and memory tests with graders isolated from model clients.
 
 Gate:
 
@@ -244,14 +244,14 @@ Gate:
 
 Goal: correlate the complete path from accepted request to terminal outcome.
 
-- [ ] `P5-01` Define semantic event names and required attributes.
-- [ ] `P5-02` Propagate one trace context through scheduler, provider, tool, memory, and delivery stages.
-- [ ] `P5-03` Implement append, query, export, and retention interfaces.
-- [ ] `P5-04` Redact configured secrets at the write seam.
-- [ ] `P5-05` Correlate token/cost usage with Turn and provider call IDs.
-- [ ] `P5-06` Produce a self-contained evidence bundle with checksums.
-- [ ] `P5-07` Measure tracing latency and storage overhead.
-- [ ] `P5-08` Add a local trace inspection command; defer a viewer UI until needed.
+- [x] `P5-01` Define semantic event names and required attributes.
+- [x] `P5-02` Propagate one trace context through scheduler, provider, tool, memory, and delivery stages.
+- [x] `P5-03` Implement append, query, export, and retention interfaces.
+- [x] `P5-04` Redact configured secrets at the write seam.
+- [x] `P5-05` Correlate token/cost usage with Turn and provider call IDs.
+- [x] `P5-06` Produce a self-contained evidence bundle with checksums.
+- [x] `P5-07` Measure tracing latency and storage overhead.
+- [x] `P5-08` Add a local trace inspection command; defer a viewer UI until needed.
 
 Gate:
 
@@ -263,16 +263,16 @@ Gate:
 
 Goal: turn runtime claims into reproducible experiments rather than scripted percentages.
 
-- [ ] `P6-01` Define one versioned evaluation-result schema.
-- [ ] `P6-02` Record commit, dirty state, environment, benchmark digest, model, and design.
-- [ ] `P6-03` Implement isolated trial workspaces and raw-row persistence.
-- [ ] `P6-04` Implement deterministic runtime-contract campaigns.
-- [ ] `P6-05` Implement paired context, memory, cost, and recovery campaigns.
-- [ ] `P6-06` Add Wilson intervals, paired win/tie/loss, and paired bootstrap/McNemar where applicable.
-- [ ] `P6-07` Add fault injection at model, tool, persistence, and cancellation boundaries.
-- [ ] `P6-08` Add an adapter for at least one public coding benchmark.
-- [ ] `P6-09` Add red-team prompt injection, tool abuse, data exfiltration, and policy-bypass suites.
-- [ ] `P6-10` Add baseline comparison and release evidence bundling.
+- [x] `P6-01` Define one versioned evaluation-result schema.
+- [x] `P6-02` Record commit, dirty state, environment, benchmark digest, model, and design.
+- [x] `P6-03` Implement isolated trial workspaces and raw-row persistence.
+- [x] `P6-04` Implement deterministic runtime-contract campaigns.
+- [x] `P6-05` Implement paired context, memory, cost, and recovery campaigns.
+- [x] `P6-06` Add Wilson intervals, paired win/tie/loss, and paired bootstrap/McNemar where applicable.
+- [x] `P6-07` Add fault injection at model, tool, persistence, and cancellation boundaries.
+- [x] `P6-08` Add an adapter for at least one public coding benchmark.
+- [x] `P6-09` Add red-team prompt injection, tool abuse, data exfiltration, and policy-bypass suites.
+- [x] `P6-10` Add baseline comparison and release evidence bundling.
 
 Gate:
 
@@ -284,15 +284,15 @@ Gate:
 
 Goal: support bounded specialization without hiding responsibility or cost.
 
-- [ ] `P7-01` Define subagent request, budget, workspace, message, and outcome contracts.
-- [ ] `P7-02` Isolate subagent workspace and state.
-- [ ] `P7-03` Enforce parent-child cancellation and budget propagation.
-- [ ] `P7-04` Record subagent evidence under the parent Turn.
-- [ ] `P7-05` Add deterministic routing profiles and fallback chains.
-- [ ] `P7-06` Make routing decisions explainable in trace evidence.
-- [ ] `P7-07` Define plugin manifests, discovery, trust states, and lifecycle.
-- [ ] `P7-08` Prevent plugins from bypassing ToolGateway or secret policy.
-- [ ] `P7-09` Add coding roles for implementer, reviewer, and red-team verifier.
+- [x] `P7-01` Define subagent request, budget, workspace, message, and outcome contracts.
+- [x] `P7-02` Isolate subagent workspace and state.
+- [x] `P7-03` Enforce parent-child cancellation and budget propagation.
+- [x] `P7-04` Record subagent evidence under the parent Turn.
+- [x] `P7-05` Add deterministic routing profiles and fallback chains.
+- [x] `P7-06` Make routing decisions explainable in trace evidence.
+- [x] `P7-07` Define plugin manifests, discovery, trust states, and lifecycle.
+- [x] `P7-08` Prevent plugins from bypassing ToolGateway or secret policy.
+- [x] `P7-09` Add coding roles for implementer, reviewer, and red-team verifier.
 
 Gate:
 
@@ -304,15 +304,15 @@ Gate:
 
 Goal: expose the same runtime semantics through every supported entry point.
 
-- [ ] `P8-01` Split CLI parsing from runtime assembly.
-- [ ] `P8-02` Add doctor, provider, session, sandbox, trace, eval, and skill commands.
-- [ ] `P8-03` Add a TUI transport with send, subscribe, confirm, and cancel operations.
-- [ ] `P8-04` Add a local gateway with single-instance ownership and health checks.
-- [ ] `P8-05` Define channel intake and delivery contracts.
-- [ ] `P8-06` Implement at least one real channel adapter before generalizing the registry.
-- [ ] `P8-07` Add media normalization and optional transcription.
-- [ ] `P8-08` Add cron claims, deduplication, reload, delivery, and outcome persistence.
-- [ ] `P8-09` Ensure CLI, TUI, gateway, channel, and cron requests all enter the same scheduler.
+- [x] `P8-01` Split CLI parsing from runtime assembly.
+- [x] `P8-02` Add doctor, provider, session, sandbox, trace, eval, and skill commands.
+- [x] `P8-03` Add a TUI transport with send, subscribe, confirm, and cancel operations.
+- [x] `P8-04` Add a local gateway with single-instance ownership and health checks.
+- [x] `P8-05` Define channel intake and delivery contracts.
+- [x] `P8-06` Implement at least one real channel adapter before generalizing the registry.
+- [x] `P8-07` Add media normalization and optional transcription.
+- [x] `P8-08` Add cron claims, deduplication, reload, delivery, and outcome persistence.
+- [x] `P8-09` Ensure CLI, TUI, gateway, channel, and cron requests all enter the same scheduler.
 
 Gate:
 
@@ -324,16 +324,16 @@ Gate:
 
 Goal: improve prompts, Skills, and tool policy only through isolated, evidence-gated candidates.
 
-- [ ] `P9-01` Define candidate manifest, allowed mutation surface, budget, and provenance.
-- [ ] `P9-02` Build candidate generation from failure evidence.
-- [ ] `P9-03` Isolate candidates in Git trees/worktrees.
-- [ ] `P9-04` Separate training tasks from sealed evaluation tasks.
-- [ ] `P9-05` Add deterministic gates before expensive live trials.
-- [ ] `P9-06` Add paired scoring, minimum sample thresholds, and termination rules.
-- [ ] `P9-07` Maintain an append-only candidate and activation ledger.
-- [ ] `P9-08` Require human confirmation for activation.
-- [ ] `P9-09` Support activation, rollback, and production routing queries.
-- [ ] `P9-10` Prevent candidates from reading or modifying sealed graders.
+- [x] `P9-01` Define candidate manifest, allowed mutation surface, budget, and provenance.
+- [x] `P9-02` Build candidate generation from failure evidence.
+- [x] `P9-03` Isolate candidates in Git trees/worktrees.
+- [x] `P9-04` Separate training tasks from sealed evaluation tasks.
+- [x] `P9-05` Add deterministic gates before expensive live trials.
+- [x] `P9-06` Add paired scoring, minimum sample thresholds, and termination rules.
+- [x] `P9-07` Maintain an append-only candidate and activation ledger.
+- [x] `P9-08` Require human confirmation for activation.
+- [x] `P9-09` Support activation, rollback, and production routing queries.
+- [x] `P9-10` Prevent candidates from reading or modifying sealed graders.
 
 Gate:
 
@@ -345,13 +345,13 @@ Gate:
 
 Goal: publish a reproducible, installable, interview-ready project.
 
-- [ ] `P10-01` Add clean-head release workflow and package build.
-- [ ] `P10-02` Track a dependency lock and supported Python/OS matrix.
-- [ ] `P10-03` Add migration documentation for state, config, and schemas.
-- [ ] `P10-04` Add security model, threat model, and responsible disclosure policy.
-- [ ] `P10-05` Publish self-contained evaluation bundles bound to release tags.
-- [ ] `P10-06` Add a concise architecture document and end-to-end demo.
-- [ ] `P10-07` Generate resume metrics only from release evidence.
+- [x] `P10-01` Add clean-head release workflow and package build.
+- [x] `P10-02` Track a dependency lock and supported Python/OS matrix.
+- [x] `P10-03` Add migration documentation for state, config, and schemas.
+- [x] `P10-04` Add security model, threat model, and responsible disclosure policy.
+- [ ] `P10-05` Publish self-contained evaluation bundles bound to release tags. (Publishing workflow is implemented; first authorized tag is pending.)
+- [x] `P10-06` Add a concise architecture document and end-to-end demo.
+- [x] `P10-07` Generate resume metrics only from release evidence.
 
 Gate:
 
@@ -381,4 +381,4 @@ The completed implementation slice is `P1-01` through `P1-05`:
 - preserve `RepoAgent.ask()` as the compatibility facade;
 - document the design and verify terminal outcomes.
 
-Provider runtime phase `P2` is complete. AgentLoop consumes normalized streaming events, classification-driven fallback, multi-call usage, cache-aware cost evidence, and digest-bound offline replay. P3 now has immutable Tool Gateway contracts, and every built-in tool is declared once as a `ToolDefinition`. Prompt rendering, provider-native schemas, default application, type/range checks, effect metadata, and approval declarations all consume that same definition; workspace-dependent semantic checks remain beside the tool implementations. The next implementation slice is `P3-03`, routing tools, delegation, and later internal/MCP calls through one Tool Gateway.
+Provider runtime phase `P2`, tool execution/security phase `P3`, context/memory/Skill phase `P4`, tracing/evidence phase `P5`, evaluation-platform phase `P6`, bounded-specialization phase `P7`, product-surface phase `P8`, and controlled-evolution phase `P9` are complete. P10 implementation is complete except for the external publication action in `P10-05`: CI/package smokes, tracked locking, migration/security/architecture documentation, tagged evidence construction, offline demo, and release-only resume claims are ready. The next slice is an authorized release commit and `v0.1.0` tag, followed by verification of the uploaded bundle.

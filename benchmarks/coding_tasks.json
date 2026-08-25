@@ -85,12 +85,12 @@
         "kind": "context_reduction",
         "history_count": 12,
         "note_count": 6,
-        "total_budget": 700,
-        "section_budgets": {
-          "prefix": 800,
-          "memory": 800,
-          "relevant_memory": 800,
-          "history": 2400
+        "total_token_budget": 300,
+        "segment_token_budgets": {
+          "prefix": 200,
+          "memory": 200,
+          "relevant_memory": 200,
+          "history": 600
         }
       }
     },

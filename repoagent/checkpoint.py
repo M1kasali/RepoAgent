@@ -2,6 +2,7 @@
 
 import uuid
 
+from .compaction import HISTORY_COMPACTION_STRATEGY
 from .features import memory as memorylib
 from .workspace import clip, now
 
@@ -19,15 +20,31 @@ RUNTIME_IDENTITY_KEYS = (
     "approval_policy",
     "read_only",
     "max_steps",
+    "max_parallel_tools",
+    "mutation_conflict_policy",
+    "sandbox_identity",
+    "require_isolation",
     "max_new_tokens",
+    "context_token_budget",
+    "configured_context_token_budget",
+    "context_window_tokens",
+    "context_window_source",
+    "reserved_output_tokens",
+    "segment_token_budgets",
+    "token_counter",
+    "history_compaction_strategy",
+    "memory_backend",
+    "skill_catalog",
     "feature_flags",
     "shell_env_allowlist",
     "workspace_fingerprint",
     "tool_signature",
+    "capability_scope",
 )
 
 
 def current_runtime_identity(agent):
+    capability_scope = agent.capability_scope()
     return {
         "session_id": agent.session.get("id", ""),
         "cwd": str(agent.root),
@@ -36,11 +53,46 @@ def current_runtime_identity(agent):
         "approval_policy": agent.approval_policy,
         "read_only": bool(agent.read_only),
         "max_steps": int(agent.max_steps),
+        "max_parallel_tools": int(agent.max_parallel_tools),
+        "mutation_conflict_policy": str(agent.mutation_conflict_policy),
+        "sandbox_identity": agent.sandbox_adapter.identity,
+        "require_isolation": bool(agent.require_isolation),
         "max_new_tokens": int(agent.max_new_tokens),
+        "context_token_budget": int(agent.context_manager.total_token_budget),
+        "configured_context_token_budget": int(
+            agent.context_window_budget.configured_input_tokens
+        ),
+        "context_window_tokens": int(
+            agent.context_window_budget.context_window_tokens
+        ),
+        "context_window_source": agent.context_window_budget.window_source,
+        "reserved_output_tokens": int(
+            agent.context_window_budget.reserved_output_tokens
+        ),
+        "segment_token_budgets": dict(
+            agent.context_manager.segment_token_budgets
+        ),
+        "token_counter": agent.context_manager.token_counter.metadata(),
+        "history_compaction_strategy": HISTORY_COMPACTION_STRATEGY,
+        "memory_backend": type(agent.memory_backend).__name__,
+        "skill_catalog": [
+            {
+                "qualified_id": manifest.qualified_id,
+                "digest": manifest.digest,
+            }
+            for manifest in agent.skill_catalog.list()
+        ],
         "feature_flags": dict(agent.feature_flags),
         "shell_env_allowlist": list(agent.shell_env_allowlist),
         "workspace_fingerprint": getattr(getattr(agent, "prefix_state", None), "workspace_fingerprint", agent.workspace.fingerprint()),
         "tool_signature": agent.tool_signature(),
+        "capability_scope": {
+            "subject_id": capability_scope.get("subject_id", ""),
+            "session_id": capability_scope.get("session_id", ""),
+            "effects": list(capability_scope.get("effects", [])),
+            "tools": list(capability_scope.get("tools", [])),
+            "valid": bool(capability_scope.get("valid")),
+        },
     }
 
 

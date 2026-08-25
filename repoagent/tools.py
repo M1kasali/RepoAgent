@@ -5,14 +5,19 @@
 """
 
 import shutil
-import subprocess
 import textwrap
+import re
 from functools import partial
 
 from .tool_contracts import (
     ToolDefinition,
     ToolEffect,
     validate_tool_arguments,
+)
+from .tool_execution import (
+    ToolExecutionControl,
+    ToolRunnerOutput,
+    run_bounded_process,
 )
 from .workspace import IGNORED_PATH_NAMES
 
@@ -79,6 +84,7 @@ BASE_TOOL_DEFINITIONS = {
         ),
         effect=ToolEffect.EXECUTE,
         requires_approval=True,
+        timeout_seconds=120,
     ),
     "write_file": ToolDefinition(
         name="write_file",
@@ -107,6 +113,51 @@ BASE_TOOL_DEFINITIONS = {
         effect=ToolEffect.WRITE,
         requires_approval=True,
     ),
+    "git_status": ToolDefinition(
+        name="git_status",
+        description="Show concise Git branch and working-tree status.",
+        parameters=_object_schema({}, []),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "git_diff": ToolDefinition(
+        name="git_diff",
+        description="Show the unstaged Git diff, optionally for one workspace path.",
+        parameters=_object_schema(
+            {"path": {"type": "string", "default": ""}}, []
+        ),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "git_worktree_list": ToolDefinition(
+        name="git_worktree_list",
+        description="List Git worktrees in porcelain format.",
+        parameters=_object_schema({}, []),
+        effect=ToolEffect.READ,
+        concurrency_safe=True,
+    ),
+    "git_worktree_create": ToolDefinition(
+        name="git_worktree_create",
+        description="Create a named Git worktree on a repoagent branch.",
+        parameters=_object_schema(
+            {"name": {"type": "string", "minLength": 1, "maxLength": 40}},
+            ["name"],
+        ),
+        effect=ToolEffect.EXECUTE,
+        requires_approval=True,
+        timeout_seconds=60,
+    ),
+    "git_worktree_remove": ToolDefinition(
+        name="git_worktree_remove",
+        description="Remove a clean RepoAgent-managed Git worktree.",
+        parameters=_object_schema(
+            {"name": {"type": "string", "minLength": 1, "maxLength": 40}},
+            ["name"],
+        ),
+        effect=ToolEffect.EXECUTE,
+        requires_approval=True,
+        timeout_seconds=60,
+    ),
 }
 
 DELEGATE_TOOL_DEFINITION = ToolDefinition(
@@ -119,6 +170,11 @@ DELEGATE_TOOL_DEFINITION = ToolDefinition(
                 "type": "integer",
                 "minimum": 1,
                 "default": 3,
+            },
+            "role": {
+                "type": "string",
+                "enum": ["implementer", "reviewer", "red-team-verifier"],
+                "default": "reviewer",
             },
         },
         ["task"],
@@ -151,6 +207,11 @@ TOOL_EXAMPLES = {
     "write_file": '<tool name="write_file" path="binary_search.py"><content>def binary_search(nums, target):\n    return -1\n</content></tool>',
     "patch_file": '<tool name="patch_file" path="binary_search.py"><old_text>return -1</old_text><new_text>return mid</new_text></tool>',
     "delegate": '<tool>{"name":"delegate","args":{"task":"inspect README.md","max_steps":3}}</tool>',
+    "git_status": '<tool>{"name":"git_status","args":{}}</tool>',
+    "git_diff": '<tool>{"name":"git_diff","args":{"path":"repoagent/runtime.py"}}</tool>',
+    "git_worktree_list": '<tool>{"name":"git_worktree_list","args":{}}</tool>',
+    "git_worktree_create": '<tool>{"name":"git_worktree_create","args":{"name":"feature-check"}}</tool>',
+    "git_worktree_remove": '<tool>{"name":"git_worktree_remove","args":{"name":"feature-check"}}</tool>',
 }
 
 
@@ -234,6 +295,25 @@ def validate_tool(context, name, args):
             raise ValueError(f"old_text must occur exactly once, found {count}")
         return args
 
+    if name == "git_diff":
+        if args.get("path"):
+            context.path(args["path"])
+        return args
+
+    if name in {"git_status", "git_worktree_list"}:
+        return args
+
+    if name in {"git_worktree_create", "git_worktree_remove"}:
+        worktree_name = str(args.get("name", ""))
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}", worktree_name):
+            raise ValueError("invalid worktree name")
+        target = context.path(f".repoagent/worktrees/{worktree_name}")
+        if name == "git_worktree_create" and target.exists():
+            raise ValueError("worktree already exists")
+        if name == "git_worktree_remove" and not target.exists():
+            raise ValueError("managed worktree does not exist")
+        return args
+
     if name == "delegate":
         task = str(args.get("task", "")).strip()
         if not task:
@@ -243,7 +323,7 @@ def validate_tool(context, name, args):
         return args
 
 
-def tool_list_files(context, args):
+def tool_list_files(context, args, control=None):
     path = context.path(args.get("path", "."))
     if not path.is_dir():
         raise ValueError("path is not a directory")
@@ -258,7 +338,7 @@ def tool_list_files(context, args):
     return "\n".join(lines) or "(empty)"
 
 
-def tool_read_file(context, args):
+def tool_read_file(context, args, control=None):
     path = context.path(args["path"])
     if not path.is_file():
         raise ValueError("path is not a file")
@@ -271,21 +351,27 @@ def tool_read_file(context, args):
     return f"# {path.relative_to(context.root)}\n{body}"
 
 
-def tool_search(context, args):
+def tool_search(context, args, control=None):
     pattern = str(args.get("pattern", "")).strip()
     if not pattern:
         raise ValueError("pattern must not be empty")
     path = context.path(args.get("path", "."))
+    control = control or ToolExecutionControl(
+        timeout_seconds=30,
+        max_output_chars=4000,
+    )
 
     if shutil.which("rg"):
         # 优先用 rg，因为搜索会非常频繁，搜索延迟会直接影响 agent 控制循环。
-        result = subprocess.run(
+        outcome = run_bounded_process(
             ["rg", "-n", "--smart-case", "--max-count", "200", pattern, str(path)],
             cwd=context.root,
-            capture_output=True,
-            text=True,
+            env=context.shell_env(),
+            shell=False,
+            control=control,
         )
-        return result.stdout.strip() or result.stderr.strip() or "(no matches)"
+        content = outcome.stdout.strip() or outcome.stderr.strip() or "(no matches)"
+        return ToolRunnerOutput(content, outcome.metadata())
 
     matches = []
     files = [path] if path.is_file() else [
@@ -293,6 +379,11 @@ def tool_search(context, args):
         if item.is_file() and not any(part in IGNORED_PATH_NAMES for part in item.relative_to(context.root).parts)
     ]
     for file_path in files:
+        if control is not None and control.status() != "running":
+            return ToolRunnerOutput(
+                "search interrupted before completion",
+                {"execution_status": control.status()},
+            )
         for number, line in enumerate(file_path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
             if pattern.lower() in line.lower():
                 matches.append(f"{file_path.relative_to(context.root)}:{number}:{line}")
@@ -301,36 +392,48 @@ def tool_search(context, args):
     return "\n".join(matches) or "(no matches)"
 
 
-def tool_run_shell(context, args):
+def tool_run_shell(context, args, control=None):
     command = str(args.get("command", "")).strip()
     if not command:
         raise ValueError("command must not be empty")
     timeout = int(args.get("timeout", 20))
     if timeout < 1 or timeout > 120:
         raise ValueError("timeout must be in [1, 120]")
-    result = subprocess.run(
+    control = control or ToolExecutionControl(
+        timeout_seconds=timeout,
+        max_output_chars=4000,
+    )
+    if context.sandbox_adapter is None:
+        raise RuntimeError("shell execution has no sandbox adapter")
+    outcome = context.sandbox_adapter.execute(
         command,
         cwd=context.root,
-        shell=True,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
         # 这里传入的是过滤后的环境变量，而不是直接继承整个父 shell 环境，
         # 目的是减少敏感信息被意外带进命令执行环境的风险。
         env=context.shell_env(),
+        control=control,
     )
-    return textwrap.dedent(
+    content = textwrap.dedent(
         f"""\
-        exit_code: {result.returncode}
+        execution_status: {outcome.status}
+        exit_code: {outcome.exit_code if outcome.exit_code is not None else "unknown"}
         stdout:
-        {result.stdout.strip() or "(empty)"}
+        {outcome.stdout.strip() or "(empty)"}
         stderr:
-        {result.stderr.strip() or "(empty)"}
+        {outcome.stderr.strip() or "(empty)"}
         """
     ).strip()
+    return ToolRunnerOutput(
+        content,
+        {
+            **outcome.metadata(),
+            "sandbox_identity": context.sandbox_adapter.identity,
+            "sandbox_isolated": context.sandbox_adapter.is_isolated,
+        },
+    )
 
 
-def tool_write_file(context, args):
+def tool_write_file(context, args, control=None):
     path = context.path(args["path"])
     content = str(args["content"])
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -338,7 +441,7 @@ def tool_write_file(context, args):
     return f"wrote {path.relative_to(context.root)} ({len(content)} chars)"
 
 
-def tool_patch_file(context, args):
+def tool_patch_file(context, args, control=None):
     path = context.path(args["path"])
     if not path.is_file():
         raise ValueError("path is not a file")
@@ -355,13 +458,79 @@ def tool_patch_file(context, args):
     return f"patched {path.relative_to(context.root)}"
 
 
-def tool_delegate(context, args):
+def tool_delegate(context, args, control=None):
     if context.depth >= context.max_depth:
         raise ValueError("delegate depth exceeded")
     task = str(args.get("task", "")).strip()
     if not task:
         raise ValueError("task must not be empty")
-    return context.spawn_delegate(args)
+    if control is None:
+        return context.spawn_delegate(args)
+    return context.spawn_delegate(args, control=control)
+
+
+def _run_git(context, command, control, operation):
+    control = control or ToolExecutionControl(
+        timeout_seconds=60, max_output_chars=4000
+    )
+    outcome = run_bounded_process(
+        command,
+        cwd=context.root,
+        env=context.shell_env(),
+        shell=False,
+        control=control,
+    )
+    content = outcome.stdout.strip() or outcome.stderr.strip() or "(empty)"
+    return ToolRunnerOutput(
+        content,
+        {
+            **outcome.metadata(),
+            "exit_code_is_error": True,
+            "git_operation": operation,
+        },
+    )
+
+
+def tool_git_status(context, args, control=None):
+    return _run_git(
+        context, ["git", "status", "--short", "--branch"], control, "status"
+    )
+
+
+def tool_git_diff(context, args, control=None):
+    command = ["git", "diff", "--no-ext-diff"]
+    if args.get("path"):
+        path = context.path(args["path"])
+        command.extend(["--", path.relative_to(context.root).as_posix()])
+    return _run_git(context, command, control, "diff")
+
+
+def tool_git_worktree_list(context, args, control=None):
+    return _run_git(
+        context, ["git", "worktree", "list", "--porcelain"], control, "list"
+    )
+
+
+def tool_git_worktree_create(context, args, control=None):
+    name = args["name"]
+    target = context.path(f".repoagent/worktrees/{name}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return _run_git(
+        context,
+        ["git", "worktree", "add", "-b", f"repoagent/{name}", str(target), "HEAD"],
+        control,
+        "worktree_create",
+    )
+
+
+def tool_git_worktree_remove(context, args, control=None):
+    target = context.path(f'.repoagent/worktrees/{args["name"]}')
+    return _run_git(
+        context,
+        ["git", "worktree", "remove", str(target)],
+        control,
+        "worktree_remove",
+    )
 
 
 _TOOL_RUNNERS = {
@@ -371,4 +540,9 @@ _TOOL_RUNNERS = {
     "run_shell": tool_run_shell,
     "write_file": tool_write_file,
     "patch_file": tool_patch_file,
+    "git_status": tool_git_status,
+    "git_diff": tool_git_diff,
+    "git_worktree_list": tool_git_worktree_list,
+    "git_worktree_create": tool_git_worktree_create,
+    "git_worktree_remove": tool_git_worktree_remove,
 }

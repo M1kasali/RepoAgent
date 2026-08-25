@@ -1,8 +1,10 @@
 import hashlib
 import json
 import locale as locale_module
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -322,12 +324,20 @@ def _apply_task_setup(agent, task, fixture_copy_root):
                 created_at=f"2026-04-15T10:{index:02d}:00+00:00",
             )
         agent.session["memory"] = agent.memory.to_dict()
-        agent.context_manager.total_budget = int(setup.get("total_budget", 900))
-        agent.context_manager.section_budgets = dict(
-            setup.get(
-                "section_budgets",
-                {"prefix": 120, "memory": 120, "relevant_memory": 120, "history": 160},
-            )
+        agent.configure_context_budget(
+            setup.get("total_token_budget", setup.get("total_budget", 225)),
+            segment_token_budgets=setup.get(
+                "segment_token_budgets",
+                setup.get(
+                    "section_budgets",
+                    {
+                        "prefix": 30,
+                        "memory": 30,
+                        "relevant_memory": 30,
+                        "history": 40,
+                    },
+                ),
+            ),
         )
         return
 
@@ -489,12 +499,17 @@ class BenchmarkEvaluator:
         expected_artifact_exists = artifact_file.exists()
         artifact_digest = _digest_file(artifact_file) if expected_artifact_exists else ""
 
+        verifier_env = os.environ.copy()
+        verifier_env["PATH"] = os.pathsep.join(
+            (str(Path(sys.executable).parent), verifier_env.get("PATH", ""))
+        )
         verifier = subprocess.run(
             task["verifier"],
             cwd=fixture_copy_root,
             shell=True,
             capture_output=True,
             text=True,
+            env=verifier_env,
         )
 
         within_budget = task_state.tool_steps <= int(task["step_budget"])

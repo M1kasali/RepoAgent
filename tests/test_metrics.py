@@ -23,6 +23,13 @@ def test_run_context_ablation_v2_writes_expected_artifact(tmp_path):
     assert artifact["config_count"] == 12
     assert len(artifact["configs"]) == 12
     assert "current_request_preserved_rate" in artifact["summary"]
+    assert artifact["summary"]["avg_full_prompt_tokens"] > 0
+    assert artifact["summary"]["avg_raw_prompt_tokens"] > 0
+    assert artifact["summary"]["token_count_sources"] == ["estimated"]
+    assert artifact["summary"]["token_counter_identities"]
+    assert artifact["summary"]["context_window_admitted_rate"] == 1.0
+    assert artifact["summary"]["context_window_tokens"] == [32768]
+    assert artifact["summary"]["reserved_output_tokens"] == [4096]
 
 
 def test_provider_profile_loads_project_env_before_reading_deepseek_config(tmp_path, monkeypatch):

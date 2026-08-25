@@ -39,9 +39,15 @@ def _run_id(value):
 
 
 class RunStore:
-    def __init__(self, root):
+    def __init__(self, root, *, redactor=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self._redactor = redactor or (lambda value: value)
+
+    def set_redactor(self, redactor):
+        if not callable(redactor):
+            raise TypeError("RunStore redactor must be callable")
+        self._redactor = redactor
 
     def run_dir(self, run_id):
         return self.root / _run_id(run_id)
@@ -78,7 +84,7 @@ class RunStore:
     def write_task_state(self, task_state):
         path = self.task_state_path(task_state)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_json_atomic(path, task_state.to_dict())
+        self._write_json_atomic(path, self._redactor(task_state.to_dict()))
         return path
 
     def append_trace(self, task_state, event):
@@ -86,19 +92,23 @@ class RunStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         # trace 采用 jsonl 追加写入，原因是 agent 运行过程是流式事件序列，
         # 逐条落盘比“最后一次性写整份 trace”更稳，也更适合调试。
-        append_jsonl(path, event)
+        append_jsonl(path, self._redactor(event))
         return path
 
     def append_model_call(self, task_state, record):
         path = self.call_ledger_path(task_state)
         path.parent.mkdir(parents=True, exist_ok=True)
-        append_jsonl(path, record)
+        append_jsonl(path, self._redactor(record))
         return path
+
+    def load_model_calls(self, run_id):
+        path = self.call_ledger_path(run_id)
+        return read_jsonl_unlocked(path) if path.exists() else []
 
     def write_report(self, task_state, report):
         path = self.report_path(task_state)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._write_json_atomic(path, report)
+        self._write_json_atomic(path, self._redactor(report))
         return path
 
     def write_turn(self, turn_id, payload):
@@ -106,7 +116,7 @@ class RunStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_replace(
             path,
-            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+            json.dumps(self._redactor(payload), indent=2, sort_keys=True, ensure_ascii=True) + "\n",
             lock_path=self.turn_lock_path(turn_id),
         )
         return path
@@ -116,6 +126,10 @@ class RunStore:
 
     def commit_turn_event(self, turn_id, event, turn_snapshot=None):
         path = self.turn_events_path(turn_id)
+        event = self._redactor(event)
+        turn_snapshot = (
+            self._redactor(turn_snapshot) if turn_snapshot is not None else None
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with file_lock(self.turn_lock_path(turn_id)):
             append_jsonl_unlocked(
@@ -191,6 +205,121 @@ class RunStore:
 
     def load_report(self, task_id):
         return json.loads(self.report_path(task_id).read_text(encoding="utf-8"))
+
+    def query_trace(
+        self,
+        run_id,
+        *,
+        events=(),
+        stages=(),
+        provider_call_id="",
+        tool_call_id="",
+        limit=None,
+    ):
+        """Query legacy execution trace rows without exposing storage paths."""
+        event_filter = {str(value) for value in events}
+        stage_filter = {str(value) for value in stages}
+        path = self.trace_path(run_id)
+        if not path.exists():
+            return []
+        rows = read_jsonl_unlocked(path)
+        selected = []
+        for row in rows:
+            if event_filter and str(row.get("event", "")) not in event_filter:
+                continue
+            if stage_filter and str(row.get("stage", "")) not in stage_filter:
+                continue
+            if provider_call_id and row.get("provider_call_id") != provider_call_id:
+                continue
+            if tool_call_id and row.get("tool_call_id") != tool_call_id:
+                continue
+            selected.append(row)
+        if limit is not None:
+            if isinstance(limit, bool) or int(limit) < 0:
+                raise ValueError("trace query limit must be non-negative")
+            selected = selected[-int(limit) :]
+        return selected
+
+    def query_turn_events(self, turn_id, *, kinds=(), stages=(), limit=None):
+        kind_filter = {str(value) for value in kinds}
+        stage_filter = {str(value) for value in stages}
+        rows = self.load_turn_events(turn_id)
+        selected = [
+            row
+            for row in rows
+            if (not kind_filter or row.get("kind") in kind_filter)
+            and (not stage_filter or row.get("stage") in stage_filter)
+        ]
+        if limit is not None:
+            if isinstance(limit, bool) or int(limit) < 0:
+                raise ValueError("Turn event query limit must be non-negative")
+            selected = selected[-int(limit) :]
+        return selected
+
+    def export_trace(self, run_id):
+        """Return a self-describing in-memory export for inspection tooling."""
+        return {
+            "format_version": 1,
+            "run_id": _run_id(run_id),
+            "turn_events": (
+                self.load_turn_events(run_id)
+                if self.turn_events_path(run_id).exists()
+                else []
+            ),
+            "trace": self.query_trace(run_id),
+            "model_calls": (
+                read_jsonl_unlocked(self.call_ledger_path(run_id))
+                if self.call_ledger_path(run_id).exists()
+                else []
+            ),
+        }
+
+    def apply_retention(self, *, keep_latest=100, older_than=None, protected=()):
+        """Delete old completed run directories and return their IDs."""
+        if isinstance(keep_latest, bool) or int(keep_latest) < 0:
+            raise ValueError("keep_latest must be non-negative")
+        protected_ids = {str(value) for value in protected}
+        candidates = sorted(
+            (path for path in self.root.iterdir() if path.is_dir()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        removed = []
+        for index, path in enumerate(candidates):
+            if index < int(keep_latest) or path.name in protected_ids:
+                continue
+            if older_than is not None and path.stat().st_mtime >= float(older_than):
+                continue
+            if not self._run_is_terminal(path.name):
+                continue
+            self._remove_tree(path)
+            removed.append(path.name)
+        return removed
+
+    def _run_is_terminal(self, run_id):
+        event_path = self.turn_events_path(run_id)
+        if event_path.exists():
+            rows = read_jsonl_unlocked(event_path)
+            return bool(rows and rows[-1].get("kind") in TERMINAL_EVENT_KINDS)
+        report_path = self.report_path(run_id)
+        if not report_path.exists():
+            return False
+        report = self._load_optional_json(report_path) or {}
+        return str(report.get("status", "")) in {
+            "completed",
+            "stopped",
+            "failed",
+            "cancelled",
+        }
+
+    @classmethod
+    def _remove_tree(cls, path):
+        for child in path.iterdir():
+            if child.is_dir():
+                cls._remove_tree(child)
+            else:
+                child.unlink()
+        path.rmdir()
 
     def _write_json_atomic(self, path, payload):
         # 原子写：先写临时文件，再 replace。
@@ -285,6 +414,8 @@ class RunStore:
             request_id,
             1,
             {"request": dict(snapshot.get("request") or {})},
+            trace_source=dict(snapshot.get("trace_context") or {}),
+            trace_stage="scheduler",
         )
         append_jsonl_unlocked(
             self.turn_events_path(turn_id),
@@ -301,6 +432,8 @@ class RunStore:
                 request_id,
                 2,
                 dict(snapshot.get("outcome") or {}),
+                trace_source=dict(snapshot.get("trace_context") or {}),
+                trace_stage="delivery",
             )
             append_jsonl_unlocked(
                 self.turn_events_path(turn_id),
@@ -356,6 +489,8 @@ class RunStore:
             first["request_id"],
             len(records) + 1,
             outcome,
+            trace_source=first,
+            trace_stage="delivery",
         )
         request = dict(first.get("payload", {}).get("request") or {})
         if not request and snapshot:
@@ -372,8 +507,18 @@ class RunStore:
         return event, projection
 
     @staticmethod
-    def _make_event(kind, turn_id, session_id, request_id, sequence, payload):
-        return {
+    def _make_event(
+        kind,
+        turn_id,
+        session_id,
+        request_id,
+        sequence,
+        payload,
+        *,
+        trace_source=None,
+        trace_stage="",
+    ):
+        event = {
             "format_version": TURN_FORMAT_VERSION,
             "event_id": "event_recovery_" + uuid4().hex,
             "kind": kind,
@@ -384,3 +529,14 @@ class RunStore:
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "payload": payload,
         }
+        source = dict(trace_source or {})
+        if source.get("trace_id"):
+            event.update(
+                {
+                    "trace_id": source["trace_id"],
+                    "span_id": source.get("span_id", ""),
+                    "parent_span_id": source.get("parent_span_id", ""),
+                    "stage": trace_stage or source.get("stage", "runtime"),
+                }
+            )
+        return event

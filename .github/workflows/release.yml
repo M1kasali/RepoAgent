@@ -1,0 +1,48 @@
+name: Release Evidence
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --dev
+      - run: uv run repoagent-release-check --tag "${GITHUB_REF_NAME}"
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - run: uv build
+      - run: >-
+          uv run repoagent-eval contract
+          --repo-root .
+          --output /tmp/repoagent-contract
+      - run: >-
+          uv run repoagent-eval release
+          /tmp/repoagent-contract/results.json
+          "release/repoagent-${GITHUB_REF_NAME}"
+          --tag "${GITHUB_REF_NAME}"
+          --repo-root .
+          --benchmark benchmarks/coding_tasks.json
+      - run: >-
+          uv run python scripts/collect_resume_metrics.py
+          --release-bundle "release/repoagent-${GITHUB_REF_NAME}"
+          --output-json "release/resume-claims-${GITHUB_REF_NAME}.json"
+          --output-markdown "release/resume-claims-${GITHUB_REF_NAME}.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repoagent-${{ github.ref_name }}
+          path: |
+            dist/*
+            release/repoagent-${{ github.ref_name }}/**
+            release/resume-claims-${{ github.ref_name }}.*
+          if-no-files-found: error

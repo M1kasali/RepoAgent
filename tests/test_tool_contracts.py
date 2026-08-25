@@ -37,14 +37,19 @@ def test_tool_definition_is_deeply_immutable_and_stably_identified():
 
     assert isinstance(definition.parameters, MappingProxyType)
     assert definition.parameters["properties"]["path"]["type"] == "string"
-    assert definition.definition_id == ToolDefinition(
-        name="read_file",
-        description="Read a file from the workspace.",
-        parameters=_schema(),
-        effect=ToolEffect.READ,
-        concurrency_safe=True,
-    ).definition_id
+    assert (
+        definition.definition_id
+        == ToolDefinition(
+            name="read_file",
+            description="Read a file from the workspace.",
+            parameters=_schema(),
+            effect=ToolEffect.READ,
+            concurrency_safe=True,
+        ).definition_id
+    )
     assert definition.to_dict()["format_version"] == TOOL_CONTRACT_FORMAT_VERSION
+    assert definition.to_dict()["timeout_seconds"] == 30.0
+    assert definition.to_dict()["max_output_chars"] == 4000
     with pytest.raises(TypeError):
         definition.parameters["new"] = {}
 
@@ -79,6 +84,8 @@ def test_tool_definition_is_deeply_immutable_and_stably_identified():
         ),
         ({"effect": "read"}, "ToolEffect"),
         ({"effect": ToolEffect.WRITE, "concurrency_safe": True}, "read-effect"),
+        ({"timeout_seconds": 0}, "timeout_seconds"),
+        ({"max_output_chars": 0}, "max_output_chars"),
     ],
 )
 def test_tool_definition_rejects_invalid_contracts(overrides, message):
@@ -103,23 +110,32 @@ def test_tool_request_copies_nested_arguments_and_preserves_correlation():
         request_id="request-1",
         session_id="session-1",
         origin="model",
+        capability_token="opaque.signed-token",
     )
     arguments["options"]["lines"].append(3)
 
     assert request.arguments["options"]["lines"] == (1, 2)
     assert request.to_dict()["arguments"]["options"]["lines"] == [1, 2]
     assert request.to_dict()["turn_id"] == "turn-1"
+    assert request.to_dict()["timeout_seconds"] is None
+    assert request.to_dict()["max_output_chars"] is None
+    assert request.to_dict()["capability_token_present"] is True
+    assert request.to_dict()["capability_token_digest"].startswith("sha256:")
+    assert "opaque.signed-token" not in str(request.to_dict())
 
 
 @pytest.mark.parametrize(
     "overrides,message",
     [
         ({"call_id": ""}, "call_id"),
-        ({"name": "bad-name"}, "tool name"),
+        ({"name": ""}, "requested tool name"),
         ({"arguments": []}, "arguments"),
         ({"arguments": {1: "value"}}, "keys must be strings"),
         ({"arguments": {"value": object()}}, "JSON-compatible"),
         ({"origin": "unknown"}, "origin"),
+        ({"capability_token": object()}, "capability_token"),
+        ({"timeout_seconds": 0}, "timeout_seconds"),
+        ({"max_output_chars": 0}, "max_output_chars"),
         ({"parent_call_id": "call-1"}, "own parent"),
     ],
 )
@@ -161,13 +177,9 @@ def test_tool_definition_drives_argument_validation_and_defaults():
         "limit": 20,
     }
     with pytest.raises(ValueError, match="must be integer"):
-        validate_tool_arguments(
-            definition, {"path": "README.md", "limit": "20"}
-        )
+        validate_tool_arguments(definition, {"path": "README.md", "limit": "20"})
     with pytest.raises(ValueError, match="unknown fields"):
-        validate_tool_arguments(
-            definition, {"path": "README.md", "extra": True}
-        )
+        validate_tool_arguments(definition, {"path": "README.md", "extra": True})
 
 
 @pytest.mark.parametrize(

@@ -7,10 +7,16 @@ name = "repoagent"
 version = "0.1.0"
 description = "Small local coding agent for repository-grounded engineering tasks"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+  "tomli>=2.0; python_version < '3.11'",
+]
 
 [project.scripts]
 repoagent = "repoagent.cli:main"
+repoagent-trace = "repoagent.trace_inspection:main"
+repoagent-eval = "repoagent.evaluation.cli:main"
+repoagent-release-check = "repoagent.release_check:main"
+repoagent-demo = "repoagent.offline_demo:main"
 
 [dependency-groups]
 dev = [

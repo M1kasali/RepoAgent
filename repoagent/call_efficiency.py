@@ -66,6 +66,9 @@ class CallEfficiencyEntry:
     finish_reason: str = ""
     error_category: str = ""
     call_kind: str = "agent"
+    trace_id: str = ""
+    span_id: str = ""
+    parent_span_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.provider_call_id:
@@ -103,6 +106,10 @@ class CallEfficiencyEntry:
             "finish_reason": self.finish_reason,
             "error_category": self.error_category,
             "call_kind": self.call_kind,
+            "trace_id": self.trace_id,
+            "span_id": self.span_id,
+            "parent_span_id": self.parent_span_id,
+            "stage": "provider",
             "usage": self.usage.to_metadata(),
             "pricing": self.pricing.to_dict() if self.pricing else None,
             "estimated_cost_usd": self.estimated_cost_usd,

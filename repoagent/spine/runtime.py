@@ -7,6 +7,7 @@ from typing import Any
 from .events import RuntimeEvent
 from .runner import Drain, Emit, RunnerEvent, TurnOutcome, TurnRunner, Usage
 from .turn import TurnLifecycle, TurnRequest, TurnState
+from ..tracing import bind_trace_context, reset_trace_context
 
 
 EventSink = Callable[[RuntimeEvent], Awaitable[None]]
@@ -42,14 +43,14 @@ class TurnRuntime:
             session_id=request.session_id,
             request_id=request.request_id,
             sequence=lifecycle.next_sequence(),
-            payload=self._redact(
-                {
-                    "request": {
-                        "text": request.text,
-                        "work_class": request.work_class.value,
-                    }
-                }
-            ),
+            payload=self._redact({
+                "work_class": request.work_class.value,
+                "request": {
+                    "text": request.text,
+                    "work_class": request.work_class.value,
+                },
+            }),
+            trace_context=request.trace_context.for_stage("scheduler"),
         )
         self._run_store.commit_turn_event(
             request.turn_id,
@@ -65,8 +66,26 @@ class TurnRuntime:
         drain: Drain | None = None,
         event_sink: EventSink | None = None,
     ) -> TurnOutcome:
-        lifecycle = TurnLifecycle(request)
         self.accept(request)
+        trace_token = bind_trace_context(request.trace_context.for_stage("runtime"))
+        try:
+            return await self._execute_bound(
+                request,
+                emit,
+                drain=drain,
+                event_sink=event_sink,
+            )
+        finally:
+            reset_trace_context(trace_token)
+
+    async def _execute_bound(
+        self,
+        request: TurnRequest,
+        emit: Emit,
+        drain: Drain | None = None,
+        event_sink: EventSink | None = None,
+    ) -> TurnOutcome:
+        lifecycle = TurnLifecycle(request)
         lifecycle.sequence = 1
         drain = drain or (lambda: [])
 
@@ -82,6 +101,9 @@ class TurnRuntime:
                 request_id=request.request_id,
                 sequence=lifecycle.next_sequence(),
                 payload=self._redact(payload or {}),
+                trace_context=request.trace_context.for_stage(
+                    "delivery" if kind.startswith("runner.") or kind.startswith("turn.") and kind not in {"turn.started"} else "runtime"
+                ),
             )
             self._run_store.commit_turn_event(
                 request.turn_id, event.to_dict(), snapshot
@@ -92,7 +114,10 @@ class TurnRuntime:
         async def emit_and_record(event: RunnerEvent) -> None:
             await record(
                 "runner.text",
-                {"content": event.content},
+                {
+                    "semantic_event": "delivery.chunk",
+                    "content": event.content,
+                },
             )
             await emit(event)
 
@@ -179,6 +204,9 @@ class TurnRuntime:
             request_id=request.request_id,
             sequence=lifecycle.next_sequence(),
             payload=self._redact(payload or {}),
+            trace_context=request.trace_context.for_stage(
+                "delivery" if kind.startswith("turn.") else "runtime"
+            ),
         )
         self._run_store.commit_turn_event(
             request.turn_id, event.to_dict(), snapshot
@@ -206,6 +234,7 @@ class TurnRuntime:
                 "turn_id": str(request.turn_id),
                 "session_id": str(request.session_id),
                 "request_id": str(request.request_id),
+                "trace_context": request.trace_context.to_dict(),
                 "state": lifecycle.state.value,
                 "request": {
                     "text": request.text,

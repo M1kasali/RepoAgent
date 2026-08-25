@@ -73,9 +73,38 @@ Copy this section for each completed capability.
 | Session persistence | `repoagent/session_store.py`, `repoagent/atomic_io.py` | atomic and versioned | TECH-010 |
 | Run evidence | `repoagent/run_store.py`, `repoagent/atomic_io.py` | crash-recoverable Turn evidence | TECH-010 |
 | Checkpoint projection | `repoagent/checkpoint.py` | partial | TECH-003 |
-| Tool execution | `repoagent/tool_executor.py`, `repoagent/tools.py` | partial | TECH-004 |
-| Context reduction | `repoagent/context_manager.py` | partial | TECH-005 |
-| Memory | `repoagent/features/memory.py` | partial | TECH-005 |
+| Tool execution lifecycle | `repoagent/tool_execution.py`, `repoagent/tool_gateway.py`, `repoagent/tools.py` | deadlines, cancellation, bounded output, and process-tree convergence implemented | TECH-021 |
+| Tool batch scheduling | `repoagent/tool_gateway.py`, `repoagent/agent_loop.py` | bounded safe-read parallelism with deterministic result and evidence order | TECH-022 |
+| Mutation conflict policy | `repoagent/tool_scheduling.py`, `repoagent/tool_gateway.py` | explicit serial policy and auditable scheduling decisions | TECH-023 |
+| MCP runtime | `repoagent/mcp.py`, `repoagent/runtime.py` | namespaced discovery, schema validation, capability-scoped Gateway execution | TECH-024 |
+| Sandbox adapters | `repoagent/sandbox.py`, `repoagent/tools.py` | explicit direct-host identity and injected isolated-backend contract | TECH-025 |
+| Isolation enforcement | `repoagent/tool_gateway.py`, `repoagent/runtime.py` | definition- and task-level fail-closed isolation gate | TECH-026 |
+| Network and adversarial security | `repoagent/security.py`, `tests/test_security_adversarial.py` | secret redaction, network policy, and attack-path regressions | TECH-027 |
+| Git/worktree extension | `repoagent/tools.py` | argv-only repository inspection and managed worktree lifecycle | TECH-028 |
+| Context segments and reduction | `repoagent/context_manager.py` | immutable sourced segment manifest with token-aware reduction | TECH-029, TECH-030 |
+| Token counting and budgets | `repoagent/tokenization.py`, `repoagent/context_manager.py` | provider counter contract with explicitly labeled estimated fallback | TECH-030 |
+| Context-window admission | `repoagent/context_window.py`, `repoagent/runtime.py` | output reservation, effective input budget, and fail-closed preflight | TECH-031 |
+| History compaction | `repoagent/compaction.py`, `repoagent/context_manager.py` | deterministic trimming, summaries, and per-source provenance | TECH-032 |
+| Memory backend seam | `repoagent/memory_backend.py`, `repoagent/memory_contract.py`, `repoagent/agent_turn_runner.py` | lifecycle-managed recall/store with deterministic fake and conformance suite | TECH-033, TECH-034 |
+| Layered memory | `repoagent/features/memory.py` | default backend with working, episodic, file, durable, freshness, confidence, conflict, and supersession state | TECH-005, TECH-034 |
+| Memory consolidation | `repoagent/memory_consolidation.py` | deterministic explicit-intent extraction with secret/transient/noise rejection | TECH-035 |
+| Local Skills | `repoagent/skills.py`, `repoagent/context_manager.py` | manifest discovery, activation, lazy body/reference loading, local pool, and watcher | TECH-036 |
+| Paired evaluation | `repoagent/evaluation/paired.py` | task/repetition pairing with answer-isolated graders and raw rows | TECH-037 |
+| Semantic tracing | `repoagent/tracing.py`, `repoagent/spine/` | correlated scheduler/runtime/provider/tool/memory/delivery stages | TECH-038 |
+| Trace storage and evidence | `repoagent/run_store.py`, `repoagent/evidence.py` | redacted query/export/retention and checksummed bundles | TECH-039 |
+| Trace operations | `repoagent/evaluation/tracing.py`, `repoagent/trace_inspection.py` | measured local overhead and read-only inspection CLI | TECH-040 |
+| Evaluation result protocol | `repoagent/evaluation/schema.py`, `repoagent/evaluation/workspace.py` | versioned provenance, isolated trials, and raw rows | TECH-041 |
+| Evaluation campaigns and statistics | `repoagent/evaluation/campaigns.py`, `repoagent/evaluation/statistics.py` | runtime/paired campaigns with intervals and paired tests | TECH-042 |
+| Adversarial and public evaluation | `repoagent/evaluation/faults.py`, `repoagent/evaluation/red_team.py`, `repoagent/evaluation/swebench.py` | boundary faults, red-team grading, and SWE-bench adaptation | TECH-043 |
+| Evaluation release operations | `repoagent/evaluation/release.py`, `repoagent/evaluation/cli.py` | baseline gates and self-contained release bundles | TECH-044 |
+| Subagent runtime | `repoagent/subagents.py`, `repoagent/runtime.py` | isolated, budgeted, cancellable children with parent-owned evidence | TECH-045 |
+| Model routing | `repoagent/routing.py`, `repoagent/agent_loop.py` | deterministic profiles, provider fallback, and trace explanations | TECH-046 |
+| Plugin runtime | `repoagent/plugins.py`, `repoagent/tool_gateway.py` | declarative discovery, external trust, lifecycle, and Gateway-only execution | TECH-047 |
+| Specialized roles | `repoagent/subagents.py`, `repoagent/evaluation/subagents.py` | implementer/reviewer/red-team profiles and paired complement gate | TECH-048 |
+| Runtime assembly and command tree | `repoagent/runtime_assembly.py`, `repoagent/cli.py`, `repoagent/product_commands.py` | parser-independent assembly and structured operational commands | TECH-049 |
+| Product runtime host and TUI | `repoagent/runtime_host.py`, `repoagent/tui.py` | Scheduler-backed ingress with send/subscribe/confirm/cancel | TECH-050 |
+| Gateway, channels, and media | `repoagent/gateway.py`, `repoagent/channels.py` | single-instance ownership, deny-first intake, delivery, directory adapter, media normalization | TECH-051 |
+| Scheduled work | `repoagent/cron.py` | persistent deduplication, atomic claims, reload, execution, and outcomes | TECH-052 |
 | Provider contracts and adapters | `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/providers/fallback.py` | typed streaming, cancellation, and explicit fallback implemented | TECH-011 |
 | Model profiles | `repoagent/providers/profiles.py`, `repoagent/cli.py` | validated built-in profiles and compatibility assembly implemented | TECH-012 |
 | Usage accounting | `repoagent/providers/base.py`, `repoagent/agent_loop.py`, `repoagent/spine/runner.py` | multi-call totals and source completeness implemented | TECH-013 |
@@ -84,6 +113,8 @@ Copy this section for each completed capability.
 | Provider replay and live acceptance | `repoagent/call_replay.py`, `live_tests/test_live_providers.py` | deterministic offline verification and explicit live opt-in implemented | TECH-016 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
+| Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
+| Effect approval and capabilities | `repoagent/approval.py`, `repoagent/capabilities.py` | effect-aware decisions and enforced attenuable grants | TECH-020 |
 | Evaluation | `repoagent/evaluation/` | partial | TECH-007 |
 | Naming and compatibility | `repoagent/config.py`, `repoagent/paths.py` | implemented | TECH-001 |
 | Runtime Spine | `repoagent/spine/`, `repoagent/agent_turn_runner.py` | implemented single-Turn lifecycle | TECH-008 |
@@ -230,14 +261,14 @@ Do not add concurrency directly to `RepoAgent.ask()`. First introduce the Turn m
 - Checkpoints provide semantic re-anchoring, not exact execution replay.
 - Tool side-effect idempotency belongs to the future ToolGateway; Turn delivery itself is deduplicated.
 
-## TECH-004 - Current Tool Execution Baseline
+## TECH-004 - Historical Tool Execution Baseline
 
 - Plan items: predecessor to P3
-- Status: partial
+- Status: superseded by TECH-017 through TECH-020
 - Owning modules: `repoagent/tool_executor.py`, `repoagent/tool_context.py`, `repoagent/tools.py`
 - Tests: `tests/test_tool_executor.py`, `tests/test_tools.py`, `tests/test_allowed_tools.py`, `tests/test_security.py`
 
-The current implementation provides a legal-tool set, workspace path checks, approval policy, and structured execution results. It does not yet provide process isolation, MCP, capability tokens, native tool schema generation, or a proven single gateway for all side effects.
+This section records the pre-P3 baseline. Typed definitions, native schema projection, unified routing, effect-aware approval, and enforced capability tokens are now implemented in TECH-017 through TECH-020. Process isolation and MCP remain future P3 work.
 
 ## TECH-005 - Current Context and Memory Baseline
 
@@ -316,7 +347,7 @@ The existing `task_state.json`, `trace.jsonl`, and `report.json` remain intact. 
 
 ### Failure, Cancellation, and Recovery
 
-Runner exceptions are normalized to `TurnState.FAILED` with a persisted error string. Cancellation is represented in the state model, while provider/tool-level cooperative propagation remains P1-09. Append-first Turn persistence and host-start recovery are documented in TECH-010.
+Runner exceptions are normalized to `TurnState.FAILED` with a persisted error string. Cancellation propagates through the provider and Tool Gateway boundaries; external process convergence is documented in TECH-021. Append-first Turn persistence and host-start recovery are documented in TECH-010.
 
 ### Verification
 
@@ -331,11 +362,11 @@ Observed: 154 tests passed with six pre-existing `datetime.utcnow()` deprecation
 
 ### Tradeoffs and Follow-ups
 
-`AgentLoop` remains synchronous and runs through `asyncio.to_thread()` so nested synchronous delegation remains compatible and the event loop stays available. Admission, ordering, capacity, and teardown are now owned by TECH-009; provider/tool-level cancellation remains pending.
+`AgentLoop` remains synchronous and runs through `asyncio.to_thread()` so nested synchronous delegation remains compatible and the event loop stays available. Admission, ordering, capacity, and teardown are owned by TECH-009; provider and tool cancellation propagation is completed by TECH-011 and TECH-021.
 
 ## TECH-009 - Session Scheduler and Teardown Barrier
 
-- Plan items: `P1-06`, `P1-07`, `P1-08`, `P1-10`, `P1-12`; partial `P1-09`
+- Plan items: `P1-06`, `P1-07`, `P1-08`, `P1-10`, `P1-12`; completed by TECH-021: `P1-09`
 - Status: implemented with documented cancellation boundary
 - Implemented: 2026-08-24
 - Owning modules: `repoagent/spine/scheduler.py`, `repoagent/spine/_barrier.py`
@@ -381,7 +412,7 @@ shutdown -> seal -> cancel queued -> grace for running -> cancel survivors
 
 ### Failure and Cancellation
 
-The scheduler handles cancellation while queued, while waiting for capacity, and while executing an async runner. `TurnRuntime` converts cancellation into a persisted terminal outcome. `AgentTurnRunner` creates a cancellation token for its worker thread; cancellation reaches AgentLoop and the provider adapters, then the runner waits for worker convergence before returning control. Built-in providers close an active HTTP response, but Python still cannot kill a thread blocked before a response handle exists or stop a synchronous tool subprocess. Connection setup is timeout-bounded and tool-process cancellation remains `P3-05`, so `P1-09` is not marked complete.
+The scheduler handles cancellation while queued, while waiting for capacity, and while executing an async runner. `TurnRuntime` converts cancellation into a persisted terminal outcome. `AgentTurnRunner` creates a cancellation token for its worker thread; cancellation reaches AgentLoop, provider adapters, the Tool Gateway, and delegated Agent loops, then the runner waits for worker convergence before returning control. Built-in providers close an active HTTP response. TECH-021 adds cooperative checks around in-process tools and process-group termination for external commands, completing `P1-09`. Python code already blocked inside an arbitrary in-process runner remains bounded only at cooperative boundaries and is therefore not treated as an isolation guarantee.
 
 ### Verification
 
@@ -535,7 +566,7 @@ The current tool registry is deterministically projected to JSON Schema before e
 
 HTTP, connection, protocol, timeout, and cancellation outcomes now have explicit categories and retry/fallback properties. A `ModelRequest.timeout_seconds` override reaches built-in transports. `ask_async()` cancellation requests scheduler cancellation and waits for the Turn to reach a terminal state. `AgentTurnRunner` then cancels the shared token; Ollama, OpenAI-compatible, and Anthropic-compatible streams register the active response's `close()` method so blocked body iteration is interrupted. Provider cancellation writes `model_cancelled` evidence and prevents later tool execution or successful final persistence.
 
-The standard-library transport cannot expose a response handle while DNS, connection setup, or response-header receipt is still blocked, so that phase remains bounded by the configured timeout. Complete-only compatibility clients can observe cancellation only before and after their blocking call. Synchronous tool-process cancellation is owned by `P3-05`, so `P1-09` stays partial.
+The standard-library transport cannot expose a response handle while DNS, connection setup, or response-header receipt is still blocked, so that phase remains bounded by the configured timeout. Complete-only compatibility clients can observe cancellation only before and after their blocking call. Tool-process cancellation and bounded external-command convergence are completed by TECH-021.
 
 ### Verification
 
@@ -722,7 +753,7 @@ Focused tests cover price validation and stable identity, actual and estimated u
 ## TECH-015 - Cache and Compaction Accounting
 
 - Plan items: `P2-09`
-- Status: implemented accounting contract; model compactor integration remains owned by `P4-04`
+- Status: implemented accounting contract; deterministic P4 compaction adds no model calls
 - Implemented: 2026-08-24
 - Owning modules: `repoagent/providers/base.py`, `repoagent/pricing.py`, `repoagent/call_efficiency.py`
 - Integration: `repoagent/providers/clients.py`, `repoagent/cli.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/spine/runner.py`
@@ -749,7 +780,7 @@ Provider usage schemas disagree on whether input tokens include cached tokens. C
 - Cache tokens exceeding a total-input counter produce `invalid_cache_usage`.
 - A used cache dimension without its corresponding rate produces `cache_pricing_required`.
 - Local deterministic context trimming is not a provider call and does not increment the compaction bucket.
-- Any model-backed compactor added by `P4-04` must issue `call_kind=compaction` through this ledger; compaction cost contributes to total successful-Turn cost.
+- Any future model-backed compactor must issue `call_kind=compaction` through this ledger; compaction cost contributes to total successful-Turn cost.
 
 ### Evidence Flow
 
@@ -770,7 +801,7 @@ Focused tests prove that equivalent fresh-input and total-input rows produce the
 
 - The current context reducer is local and deterministic, so production runs correctly report zero compaction model calls today.
 - Anthropic-compatible gateways are assumed to preserve Anthropic usage semantics. Live-provider fixtures in `P2-10` must verify this for each supported route.
-- P4 must reuse this accounting boundary when it introduces model-based summarization; a direct unmetered provider call would violate the contract.
+- A future model-based summarizer must reuse this accounting boundary; a direct unmetered provider call would violate the contract.
 
 ## TECH-016 - Deterministic Call Replay and Live Acceptance
 
@@ -844,7 +875,7 @@ Focused tests cover byte-stable repeated replay, cost tampering, external digest
 ## TECH-017 - Typed Tool Gateway Contracts
 
 - Plan items: `P3-01`
-- Status: implemented contract; execution routing remains legacy until `P3-03`
+- Status: implemented; execution routing completed by `P3-03`
 - Implemented: 2026-08-24
 - Owning module: `repoagent/tool_contracts.py`
 - Tests: `tests/test_tool_contracts.py`, `tests/test_public_api_contract.py`
@@ -881,17 +912,17 @@ ToolDefinition
   -> ToolResult structured evidence
 ```
 
-The module intentionally contains no handler callable and performs no execution. This keeps the external interface small: implementations and adapters can vary behind the future Tool Gateway without exposing their internal dependencies to AgentLoop.
+The module intentionally contains no handler callable and performs no execution. Implementations and adapters vary behind `ToolGateway` without exposing their internal dependencies to AgentLoop.
 
 ### Verification
 
-Focused tests cover recursive immutability, stable definition identities, closed schema validation, effect/concurrency coherence, JSON compatibility, nested argument copies, request correlation, parent-call rejection, structured success, workspace effects, failure codes, duration validation, and public exports. Existing tool and provider tests remain green, confirming the new contracts do not change the legacy execution path.
+Focused tests cover recursive immutability, stable definition identities, closed schema validation, effect/concurrency coherence, JSON compatibility, nested argument copies, request correlation, parent-call rejection, structured success, workspace effects, failure codes, duration validation, and public exports. Gateway integration tests now exercise these contracts on the live execution path.
 
 ### Tradeoffs and Follow-ups
 
 - `BASE_TOOL_DEFINITIONS` is now the authoritative built-in registry; its projection and validation rules are recorded in TECH-018.
-- `ToolResult` is deliberately distinct from the compatibility `ToolExecutionResult`; P3-03 will adapt and then retire the loose metadata result.
-- Timeout and cancellation fields are not guessed into the definition yet. P3-05 will add them when the execution lifecycle is owned by the Gateway.
+- `ToolResult` is the runtime result. `ToolExecutionResult` remains only as a shallow compatibility projection for existing callers.
+- Definition-level timeout and output ceilings plus request-level narrowing are implemented by TECH-021.
 
 ## TECH-018 - Single-Source Tool Definition Projection
 
@@ -932,7 +963,7 @@ ToolDefinition
   -> prompt tool text and prefix signature
   -> provider-neutral ModelTool JSON Schema
   -> runtime argument validation and defaults
-  -> ToolExecutor effect / approval decisions
+  -> ToolGateway effect / approval decisions
   -> bound runner semantic checks and execution
 ```
 
@@ -943,8 +974,1023 @@ Focused tests assert that registry entries have no legacy `schema`, `risky`, or 
 ### Tradeoffs and Follow-ups
 
 - Tool-specific semantic checks remain an explicit second stage because JSON Schema cannot safely establish workspace state or patch uniqueness.
-- The existing `ToolExecutor` still owns routing and returns its compatibility result. P3-03 will introduce the Gateway implementation and adapt AgentLoop to `ToolRequest`/`ToolResult`.
+- `ToolExecutor` is retained as a compatibility adapter; it delegates to the Gateway and no longer owns policy or execution.
 - The validator intentionally implements the JSON Schema subset used by RepoAgent tools. New schema keywords require contract tests before use.
+
+## TECH-019 - Unified Tool Gateway Routing
+
+- Plan items: `P3-03`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tool_gateway.py`
+- Integration: `repoagent/runtime.py`, `repoagent/agent_loop.py`, `repoagent/tool_executor.py`
+- Tests: `tests/test_tool_gateway.py`, `tests/test_tool_executor.py`, `tests/test_repoagent.py`, `tests/test_safety_invariants.py`
+
+### Problem
+
+The runtime had typed tool contracts but still executed loose `(name, args)` pairs through `ToolExecutor`. Model calls, direct internal calls, and delegation therefore had no single request envelope, stable correlation was optional, and trace evidence reconstructed results from a metadata dictionary. MCP and sandbox adapters would multiply these paths unless execution first converged on one seam.
+
+### Interface
+
+- `ToolGateway.execute(ToolRequest) -> ToolResult` is the only component that invokes a bound tool runner.
+- `RepoAgent.build_tool_request()` attaches call, Turn, request, session, origin, and parent-call correlation.
+- `RepoAgent.execute_tool_request()` routes a typed request and publishes a temporary compatibility metadata projection.
+- `RepoAgent.execute_tool()` and `run_tool()` preserve internal callers while constructing typed requests.
+- `ToolExecutor` remains import-compatible but delegates immediately to `RepoAgent.execute_tool()`.
+
+### Invariants
+
+- Unknown, disallowed, invalid, repeated, capability-denied, and approval-denied calls return structured rejected results without invoking a runner.
+- Capability authorization runs before argument validation; JSON Schema defaults and workspace semantic validation run before repeated-call detection and approval.
+- Effect declarations decide approval and workspace-snapshot behavior; runners do not reinterpret those policies.
+- Every executed model call has a non-empty call ID. Provider IDs are preserved and missing IDs are generated within the session.
+- AgentLoop persists both complete request and result envelopes in `tool_executed`, with identical call IDs.
+- Delegation is a normal registered tool and cannot bypass validation, depth-limited registration, or Gateway accounting.
+- The only production invocation of a registry runner is inside `ToolGateway`.
+
+### Execution Flow
+
+```text
+model / internal / delegate / compatibility caller
+  -> ToolRequest with correlation and origin
+  -> ToolGateway
+     -> allowlist and definition lookup
+     -> subject/session/tool/effect capability authorization
+     -> schema plus semantic validation
+     -> repeat guard and approval
+     -> effect-aware workspace snapshot
+     -> bound runner
+     -> memory and workspace accounting
+  -> ToolResult
+  -> trace evidence and compatibility projection
+```
+
+### Verification
+
+Focused tests cover typed request enforcement, structured unknown and invalid rejection, read results, write-effect accounting, delegation defaults, compatibility projection, and end-to-end AgentLoop trace correlation. A source scan confirms the registry runner invocation exists only in `repoagent/tool_gateway.py`. Existing allowlist, safety, tool, and AgentLoop suites remain green.
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
+.venv/bin/ruff check .
+git diff --check
+.venv/bin/python -m repoagent --help
+.venv/bin/python scripts/collect_resume_metrics.py --help
+.venv/bin/python scripts/run_provider_experiments.py --help
+.venv/bin/python scripts/run_large_scale_experiments.py --help
+.venv/bin/python scripts/replay_call_ledger.py --help
+uv build --out-dir /tmp/repoagent-dist-<timestamp>
+```
+
+Observed: 304 tests passed; Ruff and diff checks passed; module CLI and all evaluation/replay script help paths passed; source and wheel distributions built with `tool_gateway.py` included.
+
+### Tradeoffs and Follow-ups
+
+- The Gateway currently uses the runtime facade as its host while policy is extracted incrementally. Approval and capability decisions are deep modules, but runtime assembly still owns their lifecycle.
+- Tool execution remains a synchronous Gateway interface, while TECH-021 supplies deadlines, cancellation convergence, output-limit status, and subprocess termination beneath it.
+- `compatibility_metadata()` intentionally duplicates legacy trace keys during migration; typed request/result payloads are authoritative.
+
+## TECH-020 - Effect-aware Approval and Capability Enforcement
+
+- Plan items: `P3-04`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/approval.py`, `repoagent/capabilities.py`
+- Integration: `repoagent/runtime.py`, `repoagent/tool_contracts.py`, `repoagent/tool_gateway.py`, `repoagent/checkpoint.py`
+- Tests: `tests/test_approval.py`, `tests/test_capabilities.py`, `tests/test_tool_gateway.py`, `tests/test_safety_invariants.py`, `tests/test_checkpoint.py`
+
+### Problem
+
+The previous `requires_approval` boolean and `RepoAgent.approve()` method could not explain why execution was allowed, and a misdeclared mutating tool could avoid approval. The reference capability token was an unwired format scaffold: issuing or verifying it did not constrain any tool. Multi-agent delegation requires an enforced, attenuable maximum authority in addition to an operator decision for each side effect.
+
+### Interfaces
+
+- `EffectApprovalPolicy.decide()` returns an immutable `ApprovalDecision` containing allowed, reason, mode, effect, and whether approval was required.
+- Every non-read effect requires approval regardless of the definition flag. `read_only` denies non-read effects before operator policy; safe reads do not prompt unless explicitly declared sensitive.
+- `CapabilityAuthority` issues and verifies compact JSON plus HMAC-SHA256 tokens using a process-local secret.
+- `CapabilityClaims` bind issuer, token ID, subject, session, allowed effects, allowed tools, issuance, expiry, and optional parent token ID.
+- `CapabilityAuthority.authorize()` returns a structured reason for missing, invalid/expired, subject, session, tool, or effect denial.
+- `ToolRequest` carries the opaque token in memory. `to_dict()` emits only presence and SHA256 digest, never the wire token.
+
+### Invariants
+
+- Gateway execution fails closed when a known tool request has no valid capability.
+- A valid signature alone is insufficient: subject, runtime session, tool name, and declared effect must all match.
+- Capability authorization occurs before argument validation so an unauthorized caller cannot use validation as a workspace-state oracle.
+- A child token's effect and tool sets must be subsets of its parent; its expiry is capped at the parent's expiry.
+- Delegate children share the authority but receive a new subject/session token limited to registered read tools, excluding further delegation.
+- Non-read effects always require approval, even if a future definition incorrectly sets `requires_approval=False`.
+- Invalid calls do not prompt, repeated calls do not prompt again, and every evaluated decision is attached to typed result metadata and trace evidence.
+- Capability scope, not token identity or signature, participates in checkpoint runtime identity; resuming a session can safely rotate the process-local authority.
+
+### Authorization Flow
+
+```text
+RepoAgent assembly
+  -> issue root token from effective tool/effect scope
+  -> ToolRequest carries opaque token in memory
+  -> ToolGateway verifies signature and subject/session/tool/effect
+  -> schema and semantic validation
+  -> effect-aware ApprovalDecision
+  -> runner execution
+  -> ToolResult metadata records capability/approval decisions
+
+delegate
+  -> verify parent
+  -> intersect to read tools without delegate
+  -> issue child subject/session token capped by parent expiry
+```
+
+### Security and Privacy
+
+HMAC authenticates token integrity but does not encrypt claims. Raw tokens are intentionally absent from request serialization, trace, report, compatibility metadata, and checkpoint identity; only a SHA256 digest and non-secret scope are recorded. The authority secret is generated in memory and is not persisted. This is an in-process authorization boundary, not protection from malicious code already executing inside the Python process; process isolation belongs to P3-09.
+
+### Verification
+
+Focused tests cover round-trip verification, tampered and malformed input, expiry, all four scope axes, child attenuation, effect/tool expansion rejection, parent-expiry capping, safe-read decisions, mandatory side-effect approval, read-only denial, operator decisions, fail-closed Gateway behavior, cross-session replay, trace token redaction, and checkpoint scope. Full tests are split only because the synthetic metrics suite approaches the command runner's single-wait limit.
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-1>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-2>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-3>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short tests/test_metrics.py
+.venv/bin/ruff check .
+git diff --check
+```
+
+Observed: 319 tests passed across four batches; the metrics batch retained six pre-existing `datetime.utcnow()` deprecation warnings. Ruff and diff checks passed.
+
+### Tradeoffs and Follow-ups
+
+- Tokens are intentionally workspace-process local. Durable distributed delegation would require persisted key IDs, rotation, revocation, and an operator-managed trust root.
+- Root scopes are assembled from the effective registry and read-only mode. Future plugin/MCP registration must occur before scope issuance or request an explicit re-issuance path.
+- TECH-021 adds request deadlines and cancellation evidence; P3-09 will turn process isolation into a capability requirement rather than a convention.
+
+## TECH-021 - Bounded Tool Execution Lifecycle
+
+- Plan items: `P3-05`; completes `P1-09`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tool_execution.py`
+- Integration: `repoagent/tool_contracts.py`, `repoagent/tool_gateway.py`, `repoagent/tools.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py`, `repoagent/task_state.py`
+- Tests: `tests/test_tool_execution.py`, `tests/test_tool_gateway.py`, `tests/test_repoagent.py`, `tests/test_tool_contracts.py`, `tests/test_safety_invariants.py`
+
+### Problem
+
+External commands previously used blocking `subprocess.run()`, retained complete output, and exposed timeout exceptions as runner failures. Turn cancellation reached providers but could not interrupt an active tool subprocess or a delegated child Agent. That left resource usage unbounded and made a cancelled Turn capable of leaving child processes behind.
+
+### Interface
+
+- `ToolDefinition.timeout_seconds` and `max_output_chars` declare hard execution ceilings.
+- `ToolRequest` may narrow either ceiling but cannot expand the definition's authority.
+- `ToolExecutionControl` carries a monotonic deadline, cancellation token, and output budget to runners.
+- `run_bounded_process()` returns `ProcessOutcome` with explicit completion, timeout, cancellation, exit, output-size, and truncation fields.
+- `ToolRunnerOutput` lets a runner return content plus lifecycle metadata without leaking subprocess types into the Gateway contract.
+- `ToolGateway.execute(..., cancellation_token=...)` maps lifecycle outcomes to structured `ToolResult` statuses and error codes.
+
+### Invariants
+
+- Effective timeout and output budgets are the minimum of the definition ceiling and any request override; shell arguments may narrow the timeout again.
+- Cancellation wins over later normal completion and is represented as `cancelled/tool_cancelled`.
+- Deadline expiry is represented as `timeout/tool_timeout`; bounded output is represented as `partial_success/tool_output_truncated`.
+- Stdout and stderr reader threads continue draining pipes while retaining bounded text, preventing pipe backpressure from deadlocking a noisy command.
+- Final tool content never exceeds the effective output budget.
+- POSIX commands start in a new session and termination targets the process group. Windows termination targets the process tree through `taskkill`.
+- AgentLoop forwards the Turn cancellation token and remaining deadline to model calls, tools, and delegated child loops.
+- A cancelled tool persists a stopped task state and emits `tool_cancelled` evidence before cancellation leaves AgentLoop.
+
+### Execution and Cancellation Flow
+
+```text
+Turn cancellation / request deadline
+  -> AgentLoop
+  -> ToolGateway computes effective limits
+  -> ToolExecutionControl
+  -> in-process runner cooperative checks
+     or run_bounded_process
+        -> bounded stdout/stderr drain
+        -> terminate process group/tree
+        -> grace period, then force kill
+  -> ToolRunnerOutput
+  -> structured ToolResult and trace evidence
+  -> persisted terminal Turn outcome
+```
+
+### Security and Failure Boundaries
+
+The host runner provides lifecycle control, not isolation. A command that deliberately detaches into a new session may escape the original process group; P3-09 must place untrusted execution inside an enforceable sandbox boundary. Python file tools check cancellation before and after their short in-process operations, but arbitrary Python runner code cannot be force-killed safely. The output budget bounds retained and returned output; it is not an input-size or filesystem-quota policy.
+
+### Verification
+
+Focused tests exercise request limit validation, effective-limit narrowing, exact final-output bounds, structured timeout/cancellation/truncation results, cancellation through `ask_async()`, terminal task state, delegated control propagation, and shell process-tree cleanup. Adversarial subprocess tests launch descendants that would write a delayed sentinel and verify that neither timeout nor cancellation leaves them alive.
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-1>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-2>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short <batch-3>
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -ra --tb=short tests/test_metrics.py
+.venv/bin/ruff check .
+git diff --check
+```
+
+Observed: 330 tests passed across four batches; the metrics batch retained six pre-existing `datetime.utcnow()` deprecation warnings. Timeout and cancellation process-tree tests left no sentinel files. Ruff and diff checks passed.
+
+### Tradeoffs and Follow-ups
+
+- The synchronous Gateway surface preserves existing tool implementations; TECH-022 adds orchestration-level parallelism only for definitions already marked concurrency-safe.
+- Output capture retains a bounded allocation per stream before applying the exact combined response cap. A future streaming tool protocol may avoid retaining even that bounded intermediate representation.
+- P3-09 remains responsible for CPU, memory, filesystem, network, and deliberately detached-process containment.
+
+## TECH-022 - Deterministic Read-only Tool Parallelism
+
+- Plan items: `P3-06`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning modules: `repoagent/tool_gateway.py`, `repoagent/agent_loop.py`
+- Configuration: `repoagent/runtime.py`, `repoagent/cli.py`, `repoagent/checkpoint.py`
+- Evaluation: `repoagent/evaluation/tool_execution.py`, `scripts/run_tool_execution_experiment.py`
+- Tests: `tests/test_tool_gateway.py`, `tests/test_provider_runtime.py`, `tests/test_tool_execution_experiment.py`
+
+### Problem
+
+One model response may request several independent repository reads. Serial execution wastes wall-clock time, but unrestricted parallelism can overlap mutations, reorder tool messages, race working-memory updates, and make trace evidence depend on thread completion order. The runtime already declared `concurrency_safe`; it needed one bounded scheduler that enforced that declaration without weakening deterministic session semantics.
+
+### Interface
+
+- `ToolGateway.plan_batches()` partitions model-order requests into consecutive safe-read batches and singleton barriers.
+- A request is parallel-safe only when its registered definition is both `ToolEffect.READ` and `concurrency_safe=True`.
+- Safe runs are chunked by `max_parallel_tools`, which defaults to four and is exposed as `--max-parallel-tools`.
+- `ToolGateway.execute_batch()` uses a bounded thread pool for a safe batch and returns `ToolResult` values in request order.
+- `RepoAgent.execute_tool_batch()` preserves the runtime facade and compatibility metadata projection.
+- `tool_batch_started` and `tool_batch_completed` trace events record mode, ordered call IDs, limit, and duration.
+
+### Invariants
+
+- Unknown, write, execute, external, delegate, and read tools without an explicit concurrency verdict are serial barriers.
+- A parallel batch cannot exceed the configured limit, even if a caller bypasses the planner.
+- The executor may complete futures in any order; the returned results always match request order.
+- Mutable host observations are deferred during worker execution, then memory and process notes commit on the calling thread in request order.
+- AgentLoop commits tool history, per-call trace, task state, checkpoints, and batch evidence in the model's call order.
+- A mutation begins only after the preceding safe batch has converged, and the next safe batch begins only after that mutation and its evidence commit complete.
+- All workers share the Turn cancellation token. A cancelled parallel batch converges before AgentLoop persists ordered cancellation evidence and exits the Turn.
+- `max_parallel_tools` participates in checkpoint runtime identity so a resumed run detects execution-policy drift.
+
+### Batch and Commit Flow
+
+```text
+model tool calls in provider order
+  -> build typed ToolRequests
+  -> plan consecutive batches
+     -> READ + concurrency_safe: chunks of <= max_parallel_tools
+     -> every other call: singleton barrier
+  -> execute batch
+     -> worker completion order is private
+     -> collect futures in request order
+     -> commit memory/process observations in request order
+  -> AgentLoop commits history/trace/checkpoints in request order
+  -> execute next batch
+```
+
+### Failure, Cancellation, and Security
+
+Each worker still crosses the complete Gateway authorization, validation, approval, timeout, output, and structured-failure path. Parallel eligibility is derived from the immutable definition, not from model arguments or runner claims. Threads do not provide isolation; P3-09 remains responsible for hostile code and resource containment. `delegate` remains serial because a child Agent owns a nested session lifecycle even though its granted effects are read-only.
+
+### Evaluation and Verification
+
+The experiment runs the real RepoAgent Gateway with eight delayed read requests, alternates serial and capability-parallel arm order, records raw repetitions, checks output order, and marks the result as `synthetic_gateway_scheduler_microbenchmark` with `positive_claim_eligible=false`.
+
+```bash
+.venv/bin/python scripts/run_tool_execution_experiment.py \
+  --repetitions 3 --tool-calls 8 --delay-ms 8 --max-parallel 4 \
+  --output-json /tmp/repoagent-tool-experiment.json
+.venv/bin/python -m pytest -q tests/test_tool_execution_experiment.py \
+  tests/test_tool_gateway.py tests/test_provider_runtime.py
+```
+
+Observed locally: all three repetitions preserved the eight-result order; serial peak concurrency was 1, parallel peak was 4, and median elapsed time was 67.98 ms versus 19.77 ms, a 70.92% synthetic reduction. Full verification passed 340 tests; the metrics batch retained six pre-existing `datetime.utcnow()` deprecation warnings. Ruff, diff checks, all CLI help paths, and source/wheel builds passed. The timing is environment-specific evidence for scheduler overlap, not a general coding-agent performance claim.
+
+### Tradeoffs and Follow-ups
+
+- A fresh thread pool is scoped to each parallel batch, prioritizing lifecycle convergence over worker reuse. A long-lived executor is only justified with explicit shutdown ownership.
+- Same-response duplicate reads can overlap because sibling results are not yet in history; a future request coalescer may deduplicate identical safe reads without changing result cardinality.
+- TECH-023 formalizes mutation conflict policy. The current implementation intentionally provides no opt-in path for parallel writes.
+
+## TECH-023 - Explicit Mutation Serialization Policy
+
+- Plan items: `P3-07`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tool_scheduling.py`
+- Integration: `repoagent/tool_gateway.py`, `repoagent/agent_loop.py`, `repoagent/runtime.py`, `repoagent/checkpoint.py`, `repoagent/cli.py`
+- Tests: `tests/test_tool_scheduling.py`, `tests/test_tool_gateway.py`, `tests/test_provider_runtime.py`, `tests/test_checkpoint.py`
+
+### Problem
+
+P3-06 made side-effecting calls singleton barriers, but the reason existed only as branching logic. A later optimization could accidentally group writes, or treat a misleading concurrency flag as permission, without changing a public contract or trace schema. Parallel mutation also cannot be made correct from path inequality alone while approval, workspace snapshots, partial effects, and cancellation accounting are global.
+
+### Interface
+
+- `MutationConflictPolicy` is the versioned policy vocabulary. The current release accepts only `serial`.
+- `ToolBatchMode` distinguishes serial and parallel execution decisions.
+- Immutable `ToolBatch` binds ordered requests, declared effects, mode, scheduling reason, and mutation policy.
+- `ToolGateway.plan_batches()` returns `ToolBatch` decisions rather than anonymous tuples.
+- `--mutation-conflict-policy serial` exposes the effective policy at assembly without advertising an unsafe implementation.
+- Batch start and completion events persist `mode`, `scheduling_reason`, `effects`, and `mutation_conflict_policy`.
+
+### Invariants
+
+- Under `serial`, every batch containing any non-read effect has exactly one request.
+- A parallel batch requires at least two requests and every effect must be `read`.
+- `concurrency_safe=True` cannot override a non-read effect; the ToolDefinition contract already rejects that declaration, and the scheduler independently checks both fields.
+- Unknown tools, delegates, unsafe reads, writes, shell execution, and external effects are serial decisions with explicit reasons.
+- Direct callers that submit several unsafe requests to `execute_batch()` still execute them one by one.
+- Each mutation completes Gateway validation, approval, execution, workspace diff, memory/process observation, history, trace, and checkpoint commit before the next batch begins.
+- The policy participates in checkpoint runtime identity; resume detects a changed execution policy.
+- Unsupported policies fail during runtime assembly rather than silently falling back to serial or enabling concurrency.
+
+### Scheduling Flow
+
+```text
+ToolRequests in model order
+  -> resolve registered ToolEffect
+  -> READ + concurrency_safe
+       -> bounded read batch (TECH-022)
+  -> every other effect
+       -> MutationConflictPolicy.SERIAL
+       -> singleton ToolBatch(reason=mutation_conflict_policy)
+       -> full Gateway execution and ordered evidence commit
+  -> next batch
+```
+
+### Conflict Correctness
+
+A regression case submits two patches against the same original file content. The first patch succeeds; only after its workspace evidence commits does the second request validate against the new file state and receive `invalid_arguments`. The final file contains the first patch, demonstrating state-observing serialization rather than merely a concurrency counter of one.
+
+### Why No `disjoint_paths` Policy Yet
+
+The current Gateway captures whole-workspace before/after snapshots. Concurrent writes to different files would cause each result to observe sibling changes and misattribute `affected_paths`. Interactive approvals could also race, and a command may mutate paths not derivable from its arguments. A policy that permits parallel mutations must therefore provide all of the following before registration:
+
+- sequential authorization and approval preflight;
+- canonical, complete resource claims with overlap detection;
+- effect-scoped diff attribution;
+- deterministic partial-failure and cancellation semantics;
+- adversarial tests for symlink changes, renamed parents, hidden command effects, and rollback boundaries.
+
+Rejecting the unimplemented `disjoint_paths` name is intentional fail-closed behavior.
+
+### Verification
+
+Tests cover immutable batch contracts, invalid parallel shapes, singleton mutation planning, unsupported-policy rejection, trace reasons, checkpoint identity, mixed read/write barriers, ordered results, and conflicting same-file patches. Full verification passed 347 tests; the metrics batch retained six pre-existing `datetime.utcnow()` deprecation warnings. Ruff and diff checks passed.
+
+### Tradeoffs and Follow-ups
+
+- The CLI currently has one mutation-policy choice so runtime identity and future schema evolution are explicit. It is not a claim that alternate policies exist.
+- Serial Shell execution remains necessary even if a command string appears read-only; declared execution effect controls scheduling.
+- MCP tools introduced in P3-08 must declare an effect. Missing or unknown effects remain serial and cannot opt into read parallelism.
+
+## TECH-024 - MCP Discovery and Gateway Registration
+
+- Plan items: `P3-08`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/mcp.py`
+- Integration: `repoagent/runtime.py`, `repoagent/agent_loop.py`, `repoagent/tool_gateway.py`
+- Tests: `tests/test_mcp.py`, `tests/test_provider_runtime.py`
+
+### Interface and Invariants
+
+`MCPManager` accepts named clients that implement `list_tools()` and `call_tool()`. Discovery validates server names, remote tool names, JSON input schemas, effects, deadlines, output ceilings, approval flags, concurrency declarations, and isolation requirements. Remote tools receive deterministic `mcp_<server>_<tool>` names and are registered before capabilities are issued, so they use the same prompt/native schema projection, argument validation, approval, scheduling, execution, redaction, trace, and checkpoint paths as local tools.
+
+Local-name collisions and malformed definitions fail during runtime assembly. Missing or unknown effects become `external`; they remain serial and cannot opt into read concurrency. An MCP endpoint declared by a client must pass the runtime network policy before discovery. Result evidence records both the server and remote tool identity.
+
+### Tradeoffs and Verification
+
+The core owns a provider-neutral client contract, not a bundled MCP stdio or HTTP lifecycle. A concrete transport can be injected without bypassing Gateway policy. Discovery, execution, native-schema exposure, collision handling, invalid schemas, conservative effects, endpoint denial, and trace metadata are covered by focused tests.
+
+## TECH-025 - Explicit Sandbox Adapter Boundary
+
+- Plan items: `P3-09`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/sandbox.py`
+- Integration: `repoagent/tool_context.py`, `repoagent/tools.py`, `repoagent/runtime.py`
+- Tests: `tests/test_sandbox.py`, `tests/test_safety_invariants.py`
+
+### Interface and Invariants
+
+`SandboxAdapter` defines execution identity, an explicit isolation claim, and a bounded process result contract. `DirectSandboxAdapter` is deliberately identified as `direct_host` and never claims isolation. `IsolatedSandboxAdapter` accepts only an injected backend that explicitly declares `is_isolated=True`, implements execution, and returns a typed `ProcessOutcome`. Shell execution routes through the adapter, while deadline, cancellation, output-limit, and sandbox identity evidence remain visible to the Gateway.
+
+The project does not bundle a VM/container engine in this phase. The adapter boundary permits BoxLite, container, or remote-executor integration while preventing the direct-host fallback from being mislabeled as isolated.
+
+## TECH-026 - Fail-closed Isolation Enforcement
+
+- Plan items: `P3-10`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tool_gateway.py`
+- Integration: `repoagent/tool_contracts.py`, `repoagent/runtime.py`, `repoagent/checkpoint.py`, `repoagent/cli.py`
+- Tests: `tests/test_sandbox.py`, `tests/test_checkpoint.py`
+
+### Policy
+
+Isolation can be required by a `ToolDefinition` or by task-level `--require-isolation` policy for execute/external effects. The Gateway evaluates this requirement before argument validation, approval, or runner invocation. If the active adapter is not isolated, execution returns a structured `sandbox_required` rejection and security evidence; it never falls back to direct host execution. Sandbox identity and the task requirement participate in checkpoint runtime identity so a resumed run detects policy drift.
+
+Tests prove that both local shell and MCP isolation requirements deny before side effects and that a backend cannot gain isolated status without the explicit adapter contract.
+
+## TECH-027 - Adversarial Runtime Security Controls
+
+- Plan items: `P3-11`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/security.py`
+- Integration: `repoagent/mcp.py`, `repoagent/tools.py`, `repoagent/tool_gateway.py`
+- Tests: `tests/test_security.py`, `tests/test_security_adversarial.py`, `tests/test_safety_invariants.py`
+
+### Controls and Coverage
+
+`NetworkPolicy` accepts absolute HTTP(S) endpoints, rejects embedded credentials, supports an exact host allowlist, and denies localhost plus literal private, loopback, link-local, multicast, reserved, and unspecified addresses by default. Shell processes receive an allowlisted environment rather than the host secret set, and persisted/tool-returned artifacts pass through secret-value redaction.
+
+Adversarial regressions cover workspace traversal and symlink escape, shell command injection behind approval, secret environment leakage, managed-worktree symlink escape, MCP output redaction, SSRF targets, and network allowlisting. Denials remain structured Gateway outcomes rather than raw exceptions.
+
+### Limitation
+
+The policy does not resolve arbitrary hostnames and therefore does not independently prevent DNS rebinding. Deployments that permit remote MCP should combine a strict hostname allowlist with an isolated backend that enforces egress at the network boundary.
+
+## TECH-028 - Controlled Git and Worktree Tools
+
+- Plan items: `P3-12`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tools.py`
+- Integration: `repoagent/tool_contracts.py`, `repoagent/tool_gateway.py`, `repoagent/runtime.py`
+- Tests: `tests/test_git_tools.py`, `tests/test_capabilities.py`, `tests/test_checkpoint.py`
+
+### Interface and Invariants
+
+The coding extension registers read-only `git_status`, `git_diff`, and `git_worktree_list` tools plus approval-required `git_worktree_create` and `git_worktree_remove` mutations. Every Git operation uses a fixed argv vector with `shell=False`; worktree names use a strict identifier grammar and resolve only beneath `.repoagent/worktrees`. Creation uses a managed `repoagent/<name>` branch. Removal intentionally omits `--force`, so dirty worktrees fail rather than lose changes. Non-zero Git exits are normalized as structured tool errors.
+
+### Verification
+
+Tests cover repository status/diff, worktree create/list/remove, invalid and injection-shaped names, capability scope, and checkpoint identity. Final P3 verification passed 375 tests: 369 non-metrics tests and 6 metrics tests. Ruff and whitespace checks pass; the metrics suite retains six existing `datetime.utcnow()` deprecation warnings.
+
+P3 is complete at 12/12 roadmap items. Concrete MCP transports and a production isolation engine are deployment integrations behind the completed core contracts, not implicit direct-host fallbacks.
+
+## TECH-029 - Immutable Context Segment Manifest
+
+- Plan items: `P4-01`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/context_manager.py`
+- Integration: `repoagent/runtime.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_context_manager.py`, `tests/test_repoagent.py`, `tests/test_metrics.py`
+
+### Problem
+
+Context assembly previously depended on string-keyed dictionaries and a hard-coded join expression. The order was observable but not represented as a contract, sources were absent from evidence, and checkpoint text was merged into the prefix. Token budgeting, compaction provenance, memory freshness, and lazy Skill activation would therefore have had no stable segment identity on which to operate.
+
+### Interface and Invariants
+
+`ContextSegmentDefinition` declares a stable name, source, order, reducibility, and mandatory policy. `ContextSegment` binds one definition to raw text, rendered text, an optional budget, and immutable detail metadata. The canonical manifest is:
+
+```text
+runtime.prefix
+  -> runtime.checkpoint
+  -> memory.working
+  -> memory.retrieval
+  -> session.history
+  -> request.user
+```
+
+Names and order values are unique. The current request is mandatory, non-reducible, and always last. Checkpoint state is a separate non-reducible segment; an absent checkpoint remains visible in the manifest as `present=false` but contributes no prompt separator. Prompt assembly iterates the definition order rather than naming sections in a second hard-coded list. Segment source and policy fields are persisted in prompt metadata while the prior `sections`, `section_order`, `relevant_memory`, `history`, and `current_request` fields remain compatible.
+
+### Verification and Limits
+
+Tests cover exact manifest order and sources, checkpoint placement, mandatory request policy, immutable definitions/details, existing reduction order, request preservation, history compression, resume prompts, and metrics compatibility. Focused verification passed 16 tests with the six existing metrics deprecation warnings.
+
+TECH-030 replaces the character-budget limitation. TECH-031 adds output reservation; semantic compaction with provenance belongs to P4-04.
+
+## TECH-030 - Provider-aware Token Budgeting
+
+- Plan items: `P4-02`
+- Status: implemented
+- Implemented: 2026-08-24
+- Owning module: `repoagent/tokenization.py`, `repoagent/context_manager.py`
+- Integration: `repoagent/runtime.py`, `repoagent/checkpoint.py`, `repoagent/cli.py`, `repoagent/evaluation/metrics.py`
+- Tests: `tests/test_tokenization.py`, `tests/test_context_manager.py`, `tests/test_checkpoint.py`, `tests/test_metrics.py`
+
+### Problem
+
+Character ceilings do not represent provider context limits: ASCII, CJK, code, and serialized tool schemas tokenize differently. Post-request usage cannot prevent an oversized request because it arrives after provider admission. The runtime needs a pre-request counter with explicit provenance and must never label a heuristic as provider usage.
+
+### Contracts and Resolution
+
+`TokenCounter` exposes a stable identity, a `provider` or `estimated` source, and non-negative integer counting. Resolution follows a strict order:
+
+1. use an explicit `model_client.token_counter` contract;
+2. adapt a callable provider `count_tokens()` method;
+3. use `Utf8TokenEstimator`, recording provider/model identity, bytes-per-token assumption, and `source=estimated`.
+
+`CallableTokenCounter` rejects negative, boolean, and non-integer results. The fallback counts UTF-8 bytes rather than Python characters, so non-ASCII text is not treated as single-byte input, but it remains an estimate and is reported as such.
+
+### Budget Flow and Invariants
+
+Context reduction now compares `prompt_tokens` with `prompt_token_budget`. Segment ceilings, floors, overflow deltas, relevant-memory allocation, recent-history admission, and binary-search clipping all use the same counter instance. Character lengths remain diagnostic fields only; `budget_chars` is `null` and cannot be mistaken for the enforcement unit.
+
+The current request and checkpoint remain non-reducible. Prompt metadata records counter provenance plus raw/rendered token counts for every segment. `--context-token-budget` configures the pre-request ceiling. Delegates inherit the exact counter and segment budgets. Context budget, segment budgets, and counter identity participate in checkpoint runtime identity, so resume rejects a changed budgeting contract.
+
+When reducible segments reach their configured floors and the prompt still exceeds the input ceiling, `ContextBudgetExceededError` stops the request before provider invocation and records observed/budget token values plus counter provenance. A direct ContextManager ablation may construct an over-budget prompt with reduction disabled; TECH-031 ensures the runtime still applies context-window admission before provider invocation.
+
+Context ablation persists both character and token measurements, token compression ratios, and counter source/identity. Existing character metrics remain for historical comparison, not enforcement.
+
+### Verification and Limits
+
+Tests cover injected provider counters, invalid counter results, estimated Unicode counting, resolution precedence, token-aware clipping, mandatory request preservation, fail-closed overflow, CLI configuration, delegate inheritance, checkpoint mismatch, benchmark setup, and context-ablation provenance. The 12-task scripted harness passed 12/12; its context-reduction case finished at exactly 300/300 estimated input tokens with five recorded reductions.
+
+Full verification passed 384 tests. Ruff, whitespace checks, and CLI help smoke passed; the metrics batch retains six existing `datetime.utcnow()` deprecation warnings.
+
+The default fallback does not claim tokenizer-exact counts. TECH-031 derives the effective input ceiling by reserving requested output capacity from a configured model context window.
+
+## TECH-031 - Output Reservation and Context-window Admission
+
+- Plan items: `P4-03`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning module: `repoagent/context_window.py`
+- Integration: `repoagent/providers/profiles.py`, `repoagent/runtime.py`, `repoagent/cli.py`, `repoagent/checkpoint.py`, `repoagent/evaluation/metrics.py`
+- Tests: `tests/test_context_window.py`, `tests/test_model_profiles.py`, `tests/test_checkpoint.py`, `tests/test_metrics.py`
+
+### Problem
+
+An input-only ceiling is insufficient because providers admit input and requested output against one model context window. A 3,000-token prompt with a 4,096-token completion reservation requires at least 7,096 tokens of capacity even before provider-specific framing. The runtime must reject invalid reservations at assembly and prove that no model call occurs after a failed admission.
+
+### Contract
+
+`ContextWindowBudget` binds four pieces of configuration: context-window tokens, configured input tokens, reserved output tokens, and window provenance. It computes:
+
+```text
+available_input = context_window - reserved_output
+effective_input = min(configured_input, available_input)
+admission_total = rendered_prompt + reserved_output
+```
+
+The contract rejects non-positive values and reservations greater than or equal to the window. `ContextWindowAdmission` records configured/effective input, rendered prompt, output reservation, total reserved tokens, remaining headroom, provenance, and the admission decision. Exact-boundary admission is valid; one token over is rejected.
+
+### Runtime Flow and Invariants
+
+Model profiles now carry `context_window_tokens` and `context_window_source`. The built-in 32,768-token value is labeled `repoagent-conservative-default`; it is a runtime admission setting, not a claim about a provider's advertised maximum. `--context-window-tokens` creates a `cli-override` source. Direct runtime arguments and defaults receive distinct provenance.
+
+`RepoAgent` constructs the window policy before `ContextManager`, passes only the effective input budget into prompt reduction, and performs a second admission check on the rendered token count before creating `ModelRequest`. `max_new_tokens` is the reserved output value and the same value is sent to the provider. Failed mandatory-input admission becomes a failed Turn and leaves the model client's prompt list empty.
+
+Delegates inherit configured input, window, output reservation, counter, segment budgets, and provenance. Benchmark setup uses `configure_context_budget()` so runtime policy and ContextManager cannot diverge. Context window, source, configured/effective input, output reservation, total admission, and headroom enter prompt evidence. Window policy also participates in checkpoint runtime identity. Context ablation reports an admission rate and the observed window/reservation set.
+
+### Verification and Limits
+
+Focused tests cover exact-boundary admission, one-token overflow, invalid reservations, output-driven input reduction, provenance, CLI/profile validation, atomic reconfiguration, delegate inheritance, checkpoint identity, full-Turn preflight failure, and zero provider calls after denial.
+
+Full verification passed 391 tests. The 12-task scripted harness passed 12/12; its context-reduction task used 300 input tokens plus a 64-token output reservation against the 32,768-token conservative runtime window, recorded five reductions, created a checkpoint, and passed its verifier. Ruff and whitespace checks passed; the metrics batch retains six existing `datetime.utcnow()` deprecation warnings.
+
+The runtime reserves the maximum requested output, not the output eventually consumed. Provider-specific message framing or hidden system tokens are covered only when the injected provider counter includes them; estimated counters retain their explicit uncertainty.
+
+## TECH-032 - Deterministic History Compaction Provenance
+
+- Plan items: `P4-04`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning module: `repoagent/compaction.py`
+- Integration: `repoagent/context_manager.py`, `repoagent/checkpoint.py`
+- Tests: `tests/test_compaction.py`, `tests/test_context_manager.py`, `tests/test_checkpoint.py`
+
+### Problem
+
+Long sessions cannot retain every message and tool payload verbatim. The former reducer already collapsed duplicate reads, reused file summaries, and shortened old tool output, but those decisions existed only as aggregate counters. An evaluator could not reconstruct which source entry was retained, summarized, clipped, collapsed, or dropped, and a policy change could silently alter checkpoint behavior.
+
+### Contract
+
+`DeterministicHistoryCompactor` owns one versioned policy, `deterministic-history-v1`. It reserves a six-entry recent window, traverses older entries in source order, collapses repeated reads of the same path, reuses available file-memory summaries, and creates bounded deterministic summaries for other tool results. It then admits candidates newest-first against the history segment's provider-aware token budget.
+
+Every input entry produces exactly one immutable `CompactionRecord`. A record contains its source index, role and tool type, transformation, budget action, inclusion decision, input/output token counts, content digests, and content-free transformation provenance. Stable record IDs and a result-level provenance digest make repeated compaction of identical state comparable. The rendered and raw transcript also receive digests. Raw message bodies, tool output, and memory-summary text are not copied into provenance records.
+
+The result distinguishes semantic transformation from budget pressure:
+
+- `retain_recent`, `trim_old_message`, `reuse_file_summary`, `summarize_tool_output`, and `collapse_duplicate_read` identify the operation;
+- `full`, `clipped`, `dropped`, and `collapsed` identify the budget outcome;
+- aggregate compatibility counters remain available while trace/report metadata gains the full per-source record list.
+
+Turning off context reduction preserves the raw transcript and labels compaction `disabled`; it does not manufacture compaction records. The local compactor never invokes a provider, so `call_kind=compaction` remains zero. Any future model-backed summarizer must use the TECH-015 call ledger.
+
+### Runtime and Resume Invariants
+
+`ContextManager` is now a consumer of the compactor rather than the owner of history heuristics. File-summary lookup returns its timestamp and freshness marker alongside the summary so provenance can identify the reused evidence without embedding its text. Prompt metadata carries the strategy, applied flag, per-entry records, counts, and digests through the existing redacted trace/report write path.
+
+The strategy version participates in checkpoint runtime identity. Resuming a checkpoint produced under a different compaction policy therefore reports a runtime mismatch instead of silently rebuilding a different prompt.
+
+### Verification and Limits
+
+Focused tests cover deterministic IDs and provenance digests, one-record-per-source coverage, duplicate-read lineage, file-summary source/freshness metadata, immutable records, raw-transcript ablation, clipping/drop accounting, token-budget compliance, absence of raw secret and summary text from serialized provenance, ContextManager integration, and checkpoint identity.
+
+Full verification passed 396 tests. The 12-task scripted harness passed 12/12; its context-reduction checkpoint recorded 13 source entries and 13 compaction records under the versioned strategy while retaining five prompt-budget reductions. Ruff, whitespace checks, and `uv build` passed. The metrics suite retains six existing `datetime.utcnow()` deprecation warnings.
+
+This is extractive deterministic compaction, not semantic model summarization. It prioritizes reproducibility, cost visibility, and bounded behavior; quality comparisons against model-backed or learned compaction belong to `P4-11` paired evaluation.
+
+## TECH-033 - Memory Backend Contract and In-memory Adapter
+
+- Plan items: `P4-05`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/memory_backend.py`, `repoagent/memory_contract.py`
+- Integration: public exports in `repoagent/__init__.py`; runtime migration is owned by `P4-06`
+- Tests: `tests/test_memory_backend.py`
+
+### Problem and Seam
+
+The existing `LayeredMemory` facade mixes working-state mutation, lexical retrieval, file freshness, durable Markdown I/O, and session serialization. Mirroring all of those methods in a backend would create a shallow interface and force plugins to reproduce RepoAgent internals. The backend seam instead describes the external long-term-memory capability that can genuinely vary across local, remote, and test adapters.
+
+`MemoryBackend` is a runtime-checkable asynchronous Protocol with five operations:
+
+- `recall(query, user_id XOR agent_id, top_k)` returns bounded standardized candidates;
+- `store(session_id, messages)` hands a conversation slice to the adapter;
+- `feedback(signals)` accepts optional free-form usage signals and may be a no-op;
+- `start()` and `stop()` define host-owned lifecycle points.
+
+`MemoryHit` is the immutable carrier across the seam. It validates pre-rendered text, a finite normalized score in `[0, 1]`, and adapter-specific metadata. Text is the only model-facing field; metadata is provenance and correlation data, not hidden prompt content.
+
+### In-memory Adapter
+
+`InMemoryMemoryBackend` is the second concrete target that makes the seam real before production migration. It provides immediate read-after-write behavior, session-scoped lexical recall, deterministic relevance/recency ordering, explicit owner-track provenance, bounded `top_k`, defensive copying, lock-protected concurrent writes, feedback capture, and idempotent lifecycle. Calls before `start()` fail explicitly. For this fake, `user_id` or `agent_id` maps directly to the `session_id` used by `store`; production identity mapping remains adapter-owned.
+
+The fake is a test adapter, not a durability claim. `stop()` retains its process-local contents so lifecycle restart tests remain deterministic; process exit loses all state.
+
+### Adapter Conformance
+
+`MemoryBackendContractTests` and `MemoryBackendLifecycleContractTests` are reusable test bases. Adapter authors supply only `make_backend()`. The suite checks structural Protocol compliance, bounded typed recall, store/recall interoperability without requiring immediate hits, free-form feedback tolerance, owner XOR behavior, idempotent lifecycle, and safe stop-before-start. This establishes a portable lower bound; it does not measure retrieval quality, extraction correctness, latency, or persistence durability.
+
+Focused tests also verify score validation, immutable hit fields, incomplete-adapter rejection, lifecycle enforcement, owner isolation, deterministic ranking, defensive copies, concurrent no-loss storage, and invalid-input handling.
+
+Full verification passed 410 tests. The 12-task scripted harness passed 12/12 and retained its 13-record history-compaction evidence. Ruff, whitespace checks, and `uv build` passed. The metrics suite retains six existing `datetime.utcnow()` deprecation warnings.
+
+### Migration Boundary
+
+P4-05 deliberately does not route `LayeredMemory` or AgentLoop through this backend. P4-06 owns that behavioral migration and must preserve current working, episodic, file-summary, durable-topic, checkpoint, and session invariants while adding backend lifecycle and failure evidence. Keeping definition and migration separate makes regressions attributable and leaves the current runtime operational throughout the transition.
+
+## TECH-034 - Memory Backend Runtime and Evidence Metadata
+
+- Plan items: `P4-06`, `P4-07`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/features/memory.py`, `repoagent/agent_turn_runner.py`
+- Integration: `repoagent/runtime.py`, `repoagent/context_manager.py`, `repoagent/checkpoint.py`
+- Tests: `tests/test_memory.py`, `tests/test_memory_backend.py`, `tests/test_repoagent.py`
+
+`LayeredMemory` is now the default `MemoryBackend` adapter while retaining its compatibility facade. Runtime startup and shutdown own backend lifecycle. Before a Turn enters the synchronous AgentLoop, `AgentTurnRunner` performs bounded agent-track recall; standardized hits join the existing relevant-memory segment. After a successful Turn, the redacted user/assistant slice crosses `store`. Recall failure fails before provider invocation; store failure changes the Turn outcome to failed and is written into final evidence. The local adapter deliberately does not convert raw dialogue into facts: existing tool-result extraction and explicit durable promotion remain the epistemic filters.
+
+Backend evidence records implementation identity, recall/store status, accepted and rejected hit counts, and stored-message count. External query and store payloads pass through the runtime redactor. Hits containing configured secret values are rejected before prompt assembly. Backend type, compaction policy, and the qualified-ID/digest Skill catalog snapshot participate in checkpoint identity. `reset()` replaces the default adapter rather than retaining a stale object and refuses to run while a backend lifecycle is active.
+
+Memory records now carry source, normalized confidence, freshness, supersession, and conflict metadata. A newer same-subject note supersedes older active evidence; equal-time/equal-confidence contradictions remain explicit conflicts. Retrieval excludes superseded notes. File summaries preserve content freshness, source, confidence, conflict slots, and the digest they replaced. Durable hits expose the same normalized metadata shape. These fields represent evidence state, not truth guarantees.
+
+## TECH-035 - Safe Deterministic Memory Consolidation
+
+- Plan items: `P4-08`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning module: `repoagent/memory_consolidation.py`
+- Integration: `repoagent/runtime.py`
+- Tests: `tests/test_memory_consolidation.py`, durable-memory cases in `tests/test_repoagent.py`
+
+`MemoryConsolidator` accepts only a user request plus final answer, never tool output or hidden process state. Consolidation requires explicit remember/persist intent and structured durable prefixes for project conventions, decisions, dependencies, or preferences. Every candidate records topic, source, and confidence. The injected redactor runs before admission; changed/redacted values, secret-shaped text, checkpoint-like transient state, stdout/stderr/traceback material, and oversized output are rejected with structured reasons. Runtime reports retain accepted/rejected counts and reasons. This local deterministic path makes no model call and does not claim learned extraction quality.
+
+## TECH-036 - Local Skill Catalog, Activation, and Watching
+
+- Plan items: `P4-09`, `P4-10`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning module: `repoagent/skills.py`
+- Integration: `repoagent/runtime.py`, `repoagent/context_manager.py`
+- Tests: `tests/test_skills.py`, `tests/test_context_manager.py`, `tests/test_checkpoint.py`
+
+Skills use one strict `SKILL.md` manifest: stable lowercase ID, name, description, version, source, `always`, declared references, and optional binary/environment requirements. Catalog discovery validates frontmatter and reference containment but retains no body. Activation ranks available manifests by explicit query overlap, force-includes available `always` entries, then lazily reads only selected bodies. References are also loaded only through a declared relative path and cannot escape the Skill directory.
+
+`LocalSkillPool` provides the runtime search seam. `SkillChangeWatcher` maintains a file metadata snapshot, supports deterministic polling and an optional daemon loop, and atomically refreshes the catalog after create/change/delete. Runtime polls before prompt construction, injects selected content through a dedicated reducible Skill segment, records qualified IDs and token use, and stops the watcher with the Agent. Empty catalogs consume no segment budget. This is keyword activation, not semantic Skill correctness; dependency presence is availability evidence, not proof a workflow will succeed.
+
+## TECH-037 - Answer-isolated Paired Context and Memory Evaluation
+
+- Plan items: `P4-11`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning module: `repoagent/evaluation/paired.py`
+- Tests: `tests/test_paired_evaluation.py`
+
+`PairedEvaluator` passes runners an `EvaluationInput` that omits the case's expected answer. A distinct grader callable receives the full case only after a `TrialOutput` exists. Every control/treatment observation is paired by task ID and repetition. The artifact preserves raw rows, per-pair deltas and win/tie/loss outcomes, while reporting `effective_n` as unique tasks separately from run and pair counts. Context tests require treatment quality preservation while measuring input reduction; memory tests demonstrate treatment gains without placing expected answers in runner/model-client state.
+
+The evaluator rejects duplicate task IDs, non-distinct variants, shared runner/grader callables, invalid repetition counts, and wrong runner/grader return types. It is an experiment framework and deterministic regression proof, not a statistical generalization claim; confidence intervals and live-provider campaigns remain P6 work.
+
+### P4 Completion Verification
+
+Full verification passed 426 tests. The 12-task scripted harness passed 12/12; its context-reduction checkpoint retained five budget reductions, 13 source entries and 13 compaction records, and successful memory backend recall/store evidence. Ruff, whitespace checks, and `uv build` passed. Six existing `datetime.utcnow()` deprecation warnings remain in the metrics writer.
+
+## TECH-038 - Semantic Trace Context and Call Correlation
+
+- Plan items: `P5-01`, `P5-02`, `P5-05`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/tracing.py`, `repoagent/spine/events.py`, `repoagent/spine/runtime.py`
+- Integration: `repoagent/agent_loop.py`, `repoagent/runtime.py`, `repoagent/call_efficiency.py`
+- Tests: `tests/test_tracing.py`, `tests/test_spine_runtime.py`, `tests/test_call_efficiency.py`
+
+`EventDefinition` is the versioned registry for accepted Turn, memory recall/store, provider call, tool call, delivery, and terminal events. Definitions own a stage and required attributes; unknown or incomplete semantic records fail validation. Old `RuntimeEvent` construction remains readable without a TraceContext, while every newly accepted `TurnRequest` receives an immutable context containing `trace_id`, `span_id`, optional parent span, stage, and format version.
+
+The same trace ID now crosses scheduler admission, runtime execution, memory recall, provider accounting, tool execution, streamed delivery, and terminal Turn persistence. The async context is copied into the AgentLoop worker thread. Provider calls create child spans and retain Turn, request, session, and provider-call IDs. Tool and memory runtime rows retain the root correlation and explicit stages. Delivery chunks and terminal events remain on the same lineage. Context is reset after execution so unrelated requests cannot inherit it.
+
+Every call-ledger row contains its trace/span lineage, provider-call ID, Turn/request/session IDs, usage provenance, pricing snapshot, and estimated cost status. Final reports list provider-call IDs beside aggregate usage and `call_efficiency`, so a Turn-level cost can be traced back to the exact calls rather than inferred from a global counter.
+
+## TECH-039 - Redacted Trace Storage and Self-contained Evidence
+
+- Plan items: `P5-03`, `P5-04`, `P5-06`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/run_store.py`, `repoagent/evidence.py`
+- Tests: `tests/test_tracing.py`, `tests/test_run_store.py`
+
+`RunStore` is now the final redaction seam for task state, runtime trace, model-call ledger, report, Turn snapshot, and Turn events. Runtime callers may still redact defensively, but persistence applies the configured redactor again, preventing a new caller from accidentally publishing configured secret values.
+
+Read APIs support filtered runtime-trace queries by event, stage, provider-call ID, tool-call ID, and tail limit; Turn-event queries filter by semantic kind and stage. Structured export returns Turn events, runtime rows, and model calls in memory without embedding host paths. Retention removes only terminal run directories, protects explicit IDs, preserves the newest configured count, and never deletes an accepted/running Turn.
+
+`EvidenceBundleBuilder` requires a terminal Turn event before publication. It copies the available Turn snapshot/events, task state, runtime trace, call ledger, and report into a new directory. Its manifest uses bundle-relative safe paths and records SHA-256 plus byte size for every artifact; it contains no temporary source path. Verification rejects missing, path-traversing, size-mismatched, or checksum-mismatched artifacts. The manifest itself identifies the run, trace, terminal kind, and Turn-event count.
+
+## TECH-040 - Trace Overhead Experiment and Local Inspector
+
+- Plan items: `P5-07`, `P5-08`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/tracing.py`, `repoagent/trace_inspection.py`
+- Entry points: `scripts/run_tracing_experiment.py`, `repoagent-trace`
+- Tests: `tests/test_tracing.py`
+
+The tracing microbenchmark separately times deterministic JSON serialization and the actual RunStore append path, reporting median/P95 milliseconds, total bytes, and bytes per event under an explicit event count and payload size. A 200-event local run with 128 content characters observed a `1.743 ms` append median, `2.403 ms` P95, and `188.45 bytes/event`. These are local filesystem measurements, not cross-machine latency claims.
+
+`repoagent-trace` is a read-only local command that loads one RunStore root and run ID, prints a compact stage/event timeline or structured JSON, filters by event/stage/tail limit, and can emit a verified evidence bundle. A viewer UI is intentionally deferred; P8 will integrate trace inspection into the unified product command tree without changing these storage interfaces.
+
+### P5 Completion Verification
+
+Full verification passed 433 tests. The 12-task scripted harness passed 12/12 with all workspace verifiers and step budgets passing. Ruff, whitespace checks, `uv build`, trace CLI help, the 200-event overhead experiment, and evidence tamper tests passed. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-041 - Unified Evaluation Result and Isolated Trials
+
+- Plan items: `P6-01`, `P6-02`, `P6-03`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/schema.py`, `repoagent/evaluation/workspace.py`
+- Tests: `tests/test_evaluation_platform.py`
+
+`repoagent.evaluation-result/v1` is the single result envelope for all new campaigns. It requires non-empty experiment, source, environment, benchmark, model, and design sections; raw rows have a unique `(task_id, variant, repetition)` identity and explicit `pass`, `fail`, `error`, or `skipped` status. `model.run_kind` must be `scripted`, `synthetic`, or `live`, preventing generated and real-provider evidence from sharing an ambiguous schema. Validation independently recomputes unique-task `effective_n` and total `run_n` from raw rows.
+
+Source provenance records exact commit, branch, dirty state, and a SHA-256 over tracked index state, working diff, and untracked content. Environment provenance records Python implementation/version, OS/release/architecture, locale, executable identity, and an available lock digest. Benchmark identity includes definition digest, version, and unique task count; model and experimental design remain explicit rather than inferred from filenames.
+
+`TrialWorkspace` creates one fresh fixture copy per task, variant, and repetition and refuses identity reuse. `RawRowWriter` appends validated rows immediately, so a later campaign crash does not erase completed observations. Result publication uses atomic replacement.
+
+## TECH-042 - Runtime, Paired, and Statistical Campaigns
+
+- Plan items: `P6-04`, `P6-05`, `P6-06`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/campaigns.py`, `repoagent/evaluation/statistics.py`
+- Tests: `tests/test_evaluation_platform.py`, `tests/test_paired_evaluation.py`
+
+`RuntimeContractCampaign` runs every deterministic fixture in a retained isolated workspace, persists a raw row, builds one checksummed Turn evidence bundle per task, and emits the unified result. Missing terminal evidence fails bundle creation. The campaign reports pass numerator/denominator and a Wilson 95% interval; it labels itself scripted and explicitly limits the claim to runtime contracts.
+
+The paired campaign adapter converts answer-isolated grader output into the same schema. `paired_campaign_matrix` requires all four declared dimensions: context, memory, cost, and recovery. It reports unique tasks separately from runs and pairs, paired win/tie/loss and mean/median deltas, deterministic paired-bootstrap intervals, and exact two-sided McNemar results for pass/fail discordance. Repetitions remain visible raw rows and do not inflate effective N.
+
+## TECH-043 - Fault Injection, SWE-bench, and Red-team Evaluation
+
+- Plan items: `P6-07`, `P6-08`, `P6-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/faults.py`, `repoagent/evaluation/swebench.py`, `repoagent/evaluation/red_team.py`
+- Tests: `tests/test_evaluation_platform.py`, `tests/test_security_adversarial.py`
+
+Fault plans target an exact occurrence at model, tool, persistence, or cancellation boundaries. Provider, ToolGateway, and persistence proxies expose injection without placing test branches in production implementations. The matrix records every boundary, including probe errors and faults that failed to trigger, then converts those rows into the unified schema with a strict all-detected gate.
+
+`SWEBenchAdapter` follows the official SWE-bench dataset fields: instance ID, repo, base commit, problem statement, patch, test patch, FAIL_TO_PASS, and PASS_TO_PASS. Runner input includes only repository coordinates and the problem statement. Gold patch, test patch, and test oracle remain in a separate grader payload; predictions use the official instance/model/model-patch shape. The adapter consumes local JSON/JSONL and does not silently download data or execute Docker. Dataset reference: [SWE-bench dataset guide](https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/datasets.md).
+
+Red-team cases cover prompt injection, forbidden-tool execution, secret canary exfiltration, and workspace/policy bypass. The runner receives no grader canary configuration beyond the public task input. Tool records and changed paths are graded structurally. Runner exceptions remain separate `error` rows and fail the release gate rather than disappearing from the denominator or being mislabeled as successful attacks.
+
+## TECH-044 - Evaluation Comparison and Release Evidence
+
+- Plan items: `P6-10`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/release.py`, `repoagent/evaluation/cli.py`
+- Entry point: `repoagent-eval`
+- Tests: `tests/test_evaluation_platform.py`
+
+Baseline comparison requires the same benchmark definition, run kind, and raw row identities. It reports pass-rate delta and exact per-row regressions/improvements; the default gate permits no pass-rate drop and no passing-row regression. This prevents aggregate improvements from hiding a broken task.
+
+Release bundling requires an exact commit and, by default, a clean source tree. Every row must reference a safe relative evidence directory. Results and evidence are copied into a self-contained directory with SHA-256 records; host and temporary paths are not published. Dirty bundles are possible only through an explicit local-development override and are not release eligible.
+
+`repoagent-eval` exposes `contract`, `validate`, `compare`, and `release` commands. P8 may route them through the unified product CLI without changing the evaluation interfaces.
+
+### P6 Completion Verification
+
+Full verification passed 444 tests. A fresh unified runtime-contract campaign passed 12/12 tasks and produced 12 raw rows plus 12 checksummed evidence bundles. Its observed pass rate was 100% with a Wilson 95% interval of approximately `[75.75%, 100%]`; this remains a scripted contract result. `repoagent-eval validate --require-evidence`, same-result baseline comparison, explicit dirty-local release smoke, Ruff, whitespace checks, and `uv build` passed. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-045 - Bounded and Isolated Subagent Runtime
+
+- Plan items: `P7-01`, `P7-02`, `P7-03`, `P7-04`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/subagents.py`, `repoagent/runtime.py`
+- Tests: `tests/test_subagents_routing_plugins.py`
+
+Subagent requests bind a child ID to the parent Turn, request, and session; declare a role, unique tool allowlist, message sequence, and positive step/token/time budget; and produce a typed completed, failed, or cancelled outcome. Requested budgets are attenuated against the parent's remaining step, context-window, output, and deadline limits. The active parent cancellation token and deadline are passed into the child Agent loop, and a cancellation regression verifies convergence while a child provider call is blocked.
+
+Each child receives a temporary repository snapshot with `.git` and `.repoagent` excluded, its own session and Run stores, an attenuated capability token, and only role-approved tools. Child writes therefore do not mutate the parent workspace. The parent Turn retains the request/outcome record, usage and call-efficiency totals, semantic start/completion events, and checksummed child task-state/trace/call/report evidence under `subagents/<child-id>`.
+
+## TECH-046 - Deterministic and Explainable Model Routing
+
+- Plan items: `P7-05`, `P7-06`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/routing.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_subagents_routing_plugins.py`
+
+Routing profiles declare ordered provider fallback chains plus optional role, category, keyword, and capability selectors. Selection uses a deterministic score and stable tie-break; unmatched specialized profiles are ineligible and a named default profile handles ordinary work. Every terminal model result carries the selected profile, candidate scores, reasons, primary provider, and fallback providers, which the Agent loop persists as a `model_routed` semantic event. Provider failure behavior remains owned by the typed fallback adapter rather than duplicated in routing policy.
+
+## TECH-047 - Trust-gated Declarative Plugins
+
+- Plan items: `P7-07`, `P7-08`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/plugins.py`, `repoagent/runtime.py`, `repoagent/tool_gateway.py`
+- Tests: `tests/test_subagents_routing_plugins.py`
+
+Plugins are discovered from versioned JSON manifests and move through discovered, blocked/disabled, registered, active, and stopped lifecycle states. Trust comes from an external host trust store; a manifest cannot approve itself. Manifests cannot import Python or name arbitrary entry points: each tool must reference a host-registered runner ID, and duplicate plugin IDs, tool collisions, missing runners, or invalid schemas fail closed.
+
+Approved tools join the same registry before capability issuance and execute only through ToolGateway. This preserves argument validation, effect-aware approval, capability checks, deadlines, output limits, isolation requirements, evidence, and post-execution secret redaction. Plugin tools can be selected by the runtime allowlist, but cannot mint capabilities or access the Agent object and process environment through the plugin contract.
+
+## TECH-048 - Coding Roles and Paired Complement Gate
+
+- Plan items: `P7-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/subagents.py`, `repoagent/evaluation/subagents.py`
+- Tests: `tests/test_subagents_routing_plugins.py`
+
+The runtime exposes three bounded role profiles: an isolated write-capable implementer, a read-only reviewer, and a read-only red-team verifier. Tool sets and approval policy follow the role contract rather than free-form model requests. `SubagentRoleEvaluator` compares separate single-agent and role-team runners on the same task/repetition pairs with an answer-isolated grader. Its gate requires at least one role-team paired win without reducing total passes, so merely adding more calls cannot satisfy the specialization claim.
+
+### P7 Completion Verification
+
+Full verification passed 451 tests. Focused contract, isolation, cancellation, routing, plugin-security, and paired-role tests passed. A fresh unified runtime-contract campaign passed 12/12 tasks and its evidence-aware validator accepted all retained bundles. Ruff, `git diff --check`, and `uv build` passed. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-049 - Parser-independent Assembly and Product Commands
+
+- Plan items: `P8-01`, `P8-02`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/runtime_assembly.py`, `repoagent/cli.py`, `repoagent/product_commands.py`
+- Tests: `tests/test_product_cli.py`, `tests/test_public_api_contract.py`
+
+`RuntimeAssembly` owns workspace/config loading, model and secret resolution inputs, Session/Run stores, incomplete-Turn recovery, resume selection, and the final RepoAgent object graph. The CLI keeps a compatibility `build_agent` facade but no longer constructs runtime storage and lifecycle objects itself. Existing arbitrary one-shot prompts and the REPL remain valid; reserved operational names enter a separate product parser.
+
+The unified command tree exposes structured doctor, provider, session, sandbox, trace, eval, skill, gateway, directory-channel, and cron inspection. Provider output reports whether a credential is configured without returning its value. Session and Skill commands return metadata rather than history/body content. The existing trace and evaluation CLIs are routed through this tree instead of reimplemented.
+
+## TECH-050 - Scheduler-backed RuntimeHost and TUI Transport
+
+- Plan items: `P8-03`, `P8-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/runtime_host.py`, `repoagent/tui.py`
+- Tests: `tests/test_product_transports.py`
+
+`RuntimeHost` is the shared ingress for interactive and background product surfaces. It converts normalized messages to the existing `TurnRequest`, submits only through `Scheduler` and `TurnRuntime`, retains handles for cancellation/waiting, publishes accepted and terminal events to per-session subscribers, and optionally delivers the final answer through a channel outlet. Stable channel/message IDs form the accepted-work dedup key.
+
+`TUITransport` provides send, subscribe/unsubscribe, cancel, and confirmation-response operations without owning Agent semantics. `ConfirmationBroker` bounds pending confirmations by timeout. The runnable terminal loop uses this transport and RuntimeHost rather than calling the model loop directly. The original CLI also continues to enter the same Turn/Scheduler runtime through `RepoAgent.ask_async`.
+
+## TECH-051 - Local Gateway, Channel Boundary, and Media
+
+- Plan items: `P8-04`, `P8-05`, `P8-06`, `P8-07`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/gateway.py`, `repoagent/channels.py`
+- Tests: `tests/test_product_transports.py`
+
+The local gateway owns RuntimeHost and channel lifecycle. A filesystem lease directory is acquired atomically, records PID/owner/start time, rejects a live second instance, recovers a stale owner, and exposes a zero-network health snapshot. Shutdown seals intake before stopping channels and draining the runtime.
+
+Channel intake is deny-by-default, validates channel identity, and submits immutable `ChannelMessage` objects. Delivery is an explicit asynchronous outlet and records success or failure in the terminal subscription event. `DirectoryChannel` is a usable SDK-free adapter: JSON inbox messages enter the runtime, processed input is retained, and replies are atomically written to an outbox. Duplicate platform message IDs resolve to the existing Turn and do not execute or deliver twice.
+
+Media persistence strips server-supplied path components, content-addresses filenames, applies a size ceiling, and returns digest/MIME/kind metadata. Audio normalization supports an injected asynchronous transcriber; absence is represented as `not_configured` rather than silently dropping audio.
+
+## TECH-052 - Persistent Cron Claims and Delivery Outcomes
+
+- Plan items: `P8-08`, `P8-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/cron.py`
+- Tests: `tests/test_cron.py`
+
+Cron supports one-shot timestamps and fixed intervals. The versioned JSON store uses the shared cross-platform file lock and atomic replacement. Add deduplication hashes schedule, prompt, channel, and destination; multiple processes therefore converge on one enabled job. Services detect store mtime changes and reload without restart.
+
+Due jobs are atomically claimed with an owner and expiry. A second worker cannot claim a live lease, while an expired claim is recoverable. Execution enters RuntimeHost as background work, final output uses the configured channel delivery surface, and completion persists Turn ID, terminal status/error, run count, and the next schedule. One-shot jobs disable after completion; recurring jobs advance beyond the current clock to avoid replay storms.
+
+### P8 Completion Verification
+
+Full verification passed 466 tests. The TUI-to-Scheduler-to-ToolGateway cancellation path terminated a real slow shell and persisted the `tool_cancelled` state; the underlying cancellation regression also passed five consecutive reruns. A fresh unified runtime-contract campaign and evidence validation passed 12/12 tasks. Doctor, provider, session, sandbox, trace, eval, skill, gateway, channel, cron, and TUI command smokes passed, as did Ruff, `git diff --check`, and `uv build`. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-053 - Bounded Evolution Candidate Contract
+
+- Plan items: `P9-01`, `P9-02`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evolver/contracts.py`, `repoagent/evolver/generator.py`
+- Tests: `tests/test_evolver_contracts.py`
+
+Evolution candidates are immutable manifests bound to an exact base commit, typed mutation label, explicit failure-evidence digests, before/after content digests, a patch digest, and file/byte/trial/cost budgets. Prompt, Skill, tool-policy, and routing mutations each have a narrow allowlist; runtime state, Git metadata, and sealed paths are denied independently of the model proposal. Generation accepts only registered host strategies and explicit failure evidence. The conservative changed-byte charge uses the larger before/after content size, so the budget cannot be understated by replacing a large file with a small one.
+
+## TECH-054 - Detached Candidate and Sealed Evaluation Isolation
+
+- Plan items: `P9-03`, `P9-04`, `P9-10`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evolver/workspace.py`, `repoagent/evolver/sealed.py`
+- Tests: `tests/test_evolver_contracts.py`
+
+Every candidate is applied to a temporary detached Git worktree created from the manifest's full commit SHA. Baseline and output digests are recomputed, symlinked mutation targets are rejected, and finalization returns immutable commit/tree identity while leaving the parent checkout unchanged. Training and sealed task IDs must be disjoint. Sealed scoring accepts only an explicitly isolated backend, rejects storage/workspace overlap and unsafe candidate IDs, stores raw grader output inside the vault, and exposes only a blind receipt until evolution is explicitly finished. The candidate contract contains neither grader path nor grader implementation; this is a local isolation boundary, not a claim of hostile multi-tenant containment.
+
+## TECH-055 - Deterministic and Paired Promotion Gates
+
+- Plan items: `P9-05`, `P9-06`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evolver/gates.py`
+- Tests: `tests/test_evolver_gates.py`
+
+Cheap gates first recompute the base identity and mutation content, then run injected deterministic checks with exceptions converted to failed evidence rather than terminating the controller. Expensive promotion uses unique task/repetition pairs, minimum effective task and repetition thresholds, quality non-inferiority, positive mean lift with more wins than losses, optional paired-bootstrap lower bounds, and trial/cost ceilings. Reports retain paired win/tie/loss, bootstrap interval, and exact McNemar statistics. A termination tracker stops on round budget, consecutive evaluator errors, or promotion patience. These mechanisms define a promotion protocol; they do not establish model improvement until populated with representative held-out tasks.
+
+## TECH-056 - Tamper-evident Human-approved Activation
+
+- Plan items: `P9-07`, `P9-08`, `P9-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evolver/ledger.py`, `repoagent/evolver/activation.py`, `repoagent/evolver/orchestrator.py`
+- Tests: `tests/test_evolver_activation.py`
+
+Candidate creation, materialization, gate decisions, approval requests/confirmations, activation, and rollback are append-only JSONL events protected by a sequence-numbered SHA-256 hash chain and cross-platform file lock. Approval uses a random one-time token whose digest, candidate, and paired-evidence digest are recorded; the raw token is never persisted. Activation accepts no caller-provided `approved` flag: it replays the ledger and requires matching manifest/materialization identity, latest passing deterministic and paired decisions, and a human confirmation bound to the latest paired evidence. Routing is reconstructed from activation events, while rollback appends a restoration event referencing the previous activation and never rewrites history.
+
+## TECH-057 - Evolver Operational Inspection
+
+- Plan items: `P9-09`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/product_commands.py`, `repoagent/cli.py`
+- Tests: `tests/test_product_cli.py`
+
+`repoagent evolver status` verifies the workspace evolution ledger and reports event count plus active prompt, Skill, tool-policy, and routing candidate identities. It is deliberately read-only: candidate generation, human token handling, and activation remain explicit library operations so an unattended product command cannot silently promote its own policy.
+
+### P9 Completion Verification
+
+Full verification passed 481 tests. Focused candidate provenance, detached-worktree isolation, sealed-boundary, deterministic/paired gate, ledger-tamper, human-approval, activation, rollback, and product-status tests passed 25/25. Ruff passed for all P9 modules and touched integration files. A fresh scripted runtime-contract campaign passed 12/12 tasks and its retained evidence bundles validated successfully. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-058 - Reproducible Package and CI Matrix
+
+- Plan items: `P10-01`, `P10-02`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning files: `pyproject.toml`, `uv.lock`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `repoagent/release_check.py`
+- Tests: `tests/test_release_hardening.py`
+
+`uv.lock` is tracked and frozen installation is the CI contract. Pull requests run Ruff and the full suite on Python 3.10, 3.11, and 3.12 across Ubuntu and Windows. A separate package job builds the sdist/wheel, installs the wheel into a fresh environment, and smokes the Agent, evaluation, release-check, and offline-demo entry points. The release preflight requires a clean exact HEAD, tracked lock, and a `vX.Y.Z` tag matching the package version and resolving to HEAD. Python 3.10 receives `tomli` through an environment marker while newer interpreters use the standard library parser.
+
+## TECH-059 - Migration and Security Contract
+
+- Plan items: `P10-03`, `P10-04`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning files: `docs/migration.md`, `docs/security/threat-model.md`, `SECURITY.md`
+
+The migration guide documents legacy `.pico` state selection, explicit stop/backup/rename/verify steps, `PICO_*` fallback configuration, current schema versions, and fail-closed behavior. It forbids merging two live state roots because their revisions, event sequences, leases, and hash chains are concurrency-sensitive. The threat model identifies repository data, credentials, execution authority, evidence, sealed graders, and activation state as assets; separates untrusted model/repository/plugin/channel inputs from host policy; maps threats to controls; and explicitly states that direct-host execution, hostile same-account tenants, provider retention, and semantic prompt injection remain outside guaranteed containment. `SECURITY.md` defines private reporting and safe reproduction expectations.
+
+## TECH-060 - Tagged Evidence and Release-only Claims
+
+- Plan items: `P10-05`, `P10-07`
+- Status: implementation complete; first authorized tag publication pending
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/release.py`, `repoagent/evaluation/resume.py`, `scripts/collect_resume_metrics.py`
+- Tests: `tests/test_release_hardening.py`
+
+A tagged bundle must bind a syntactically valid release tag to the evaluation commit and current clean repository HEAD. It includes results, the exact benchmark definition, every per-task evidence file, and a manifest containing tag, commit, benchmark digest, run kind, denominators, file sizes, and SHA-256 values. Verification recomputes every checksum, validates the unified result, verifies nested Turn evidence manifests, and rejects dirty or mismatched provenance. Tagged publication cannot use the development-only dirty override.
+
+The former resume collector no longer accepts arbitrary benchmark/run paths. It consumes only a verified tagged bundle and emits workload ID/digest, unique-task and run denominators, model/run kind, commit/tag, metrics, and limitations together. This prevents a synthetic local run from silently becoming a public claim. `P10-05` remains open until the owner authorizes, creates, and pushes the first tag and the workflow artifact is downloaded and reverified.
+
+## TECH-061 - Current Architecture and Offline Demo
+
+- Plan items: `P10-06`
+- Status: implemented
+- Implemented: 2026-08-25
+- Owning files: `docs/architecture/current-architecture.md`, `repoagent/offline_demo.py`, `README.md`
+- Tests: `tests/test_release_hardening.py`
+
+The current architecture document presents the unified ingress, Scheduler/Turn runtime, Agent loop, provider/context/tool boundaries, evidence flow, and controlled Evolver without requiring readers to reconstruct nine implementation phases. `repoagent-demo` runs the 12-task deterministic contract suite without credentials and verifies every generated evidence bundle before reporting success. Its output carries an explicit limitation that this is runtime-contract evidence rather than competitive coding quality.
+
+### P10 Release Readiness Verification
+
+Full verification passed 486 tests. The focused release/evaluation/public-API suite passed 21 tests, and the offline end-to-end demo passed 12/12 contracts with 12 verified evidence bundles. Ruff and whitespace checks passed. The package built successfully and its wheel installed into an independent virtual environment; `repoagent`, `repoagent-eval`, `repoagent-release-check`, and `repoagent-demo` help smokes all exited zero. The clean/tag preflight is covered in temporary Git repositories because the current implementation worktree is intentionally uncommitted. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
 
 ## 5. Decision Index
 

@@ -6,19 +6,34 @@
 """
 
 import argparse
+import asyncio
 import os
 import shutil
 import sys
 import textwrap
 
 from .pricing import ModelPricing
-from .config import load_project_env, load_user_env, provider_env
-from .paths import workspace_state_root
+from .config import provider_env
+from .evaluation.cli import main as evaluation_main
 from .providers.clients import AnthropicCompatibleModelClient, OllamaModelClient, OpenAICompatibleModelClient
 from .providers.profiles import BUILTIN_MODEL_PROFILES, get_model_profile
-from .run_store import RunStore
-from .runtime import RepoAgent, SessionStore
-from .workspace import WorkspaceContext, middle
+from .product_commands import (
+    cron_report,
+    evolver_report,
+    directory_channel_report,
+    doctor_report,
+    gateway_report,
+    print_json,
+    provider_report,
+    sandbox_report,
+    session_report,
+    skill_report,
+)
+from .evolver import LedgerIntegrityError
+from .runtime_assembly import assemble_runtime
+from .trace_inspection import main as trace_main
+from .tui import run_tui
+from .workspace import middle
 
 DEFAULT_SECRET_ENV_NAMES = (
     "REPOAGENT_OPENAI_API_KEY",
@@ -171,6 +186,15 @@ def _resolve_model_profile(args):
         timeout_seconds=timeout,
         max_output_tokens=getattr(
             args, "max_new_tokens", profile.max_output_tokens
+        ),
+        context_window_tokens=(
+            getattr(args, "context_window_tokens", None)
+            or profile.context_window_tokens
+        ),
+        context_window_source=(
+            "cli-override"
+            if getattr(args, "context_window_tokens", None) is not None
+            else profile.context_window_source
         ),
         temperature=getattr(args, "temperature", profile.temperature),
         top_p=(
@@ -331,67 +355,21 @@ def build_welcome(agent, model, host):
 
 
 def build_agent(args):
-    """根据 CLI 参数装配出一个可运行的 RepoAgent 实例。
-
-    为什么存在：
-    命令行参数只是字符串和开关，runtime 需要的是已经装配好的对象图：
-    model client、workspace snapshot、session store、secret 配置等。
-    这个函数负责把“启动参数”翻译成“agent 运行现场”。
-
-    输入 / 输出：
-    - 输入：`argparse` 解析后的 `args`
-    - 输出：一个新的 `RepoAgent`，或一个从旧 session 恢复出来的 `RepoAgent`
-
-    在 agent 链路里的位置：
-    它是整个程序启动链路里最靠近 runtime 的装配点。`main()` 先调它，
-    得到 agent 后，后面无论是 one-shot 还是 REPL 模式，都会落到 `ask()`。
-    """
-    # 这里是 CLI 到 runtime 的装配点：
-    # 用户级配置让 CLI 能在任意仓库使用；项目配置仍可按仓库覆盖它。
-    workspace = WorkspaceContext.build(args.cwd)
-    load_user_env()
-    load_project_env(workspace.repo_root)
-    configured_secret_names = _configured_secret_names(args)
-    state_root = workspace_state_root(workspace.repo_root)
-    store = SessionStore(state_root / "sessions")
-    run_store = RunStore(state_root / "runs")
-    recovered_turn_ids = run_store.recover_incomplete_turns()
-    model = _build_model_client(args)
-    model_profile = model.profile
-    session_id = args.resume
-    if session_id == "latest":
-        session_id = store.latest()
-    if session_id:
-        agent = RepoAgent.from_session(
-            model_client=model,
-            workspace=workspace,
-            session_store=store,
-            run_store=run_store,
-            session_id=session_id,
-            approval_policy=args.approval,
-            max_steps=args.max_steps,
-            max_new_tokens=model_profile.max_output_tokens,
-            secret_env_names=configured_secret_names,
-        )
-    else:
-        agent = RepoAgent(
-            model_client=model,
-            workspace=workspace,
-            session_store=store,
-            run_store=run_store,
-            approval_policy=args.approval,
-            max_steps=args.max_steps,
-            max_new_tokens=model_profile.max_output_tokens,
-            secret_env_names=configured_secret_names,
-        )
-    agent.recovered_turn_ids = tuple(recovered_turn_ids)
-    return agent
+    """Compatibility facade over the parser-independent runtime assembler."""
+    return assemble_runtime(
+        args,
+        model_client_factory=_build_model_client,
+        secret_names_factory=_configured_secret_names,
+    )
 
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Minimal coding agent for DeepSeek, OpenAI-compatible, Anthropic-compatible, or Ollama models.",
+        description=(
+            "Local coding-agent runtime with persistent Turns, constrained tools, "
+            "evidence, evaluation, and multiple model protocols."
+        ),
     )
     parser.add_argument("prompt", nargs="*", help="Optional one-shot prompt.")
     parser.add_argument("--cwd", default=".", help="Workspace directory.")
@@ -455,13 +433,180 @@ def build_arg_parser():
         help="Extra environment variable names to treat as secrets for trace/report redaction.",
     )
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum tool/model iterations per request.")
+    parser.add_argument(
+        "--max-parallel-tools",
+        type=int,
+        default=4,
+        help="Maximum concurrent calls in a concurrency-safe read batch.",
+    )
+    parser.add_argument(
+        "--mutation-conflict-policy",
+        choices=("serial",),
+        default="serial",
+        help="Conflict policy for side-effecting tools.",
+    )
+    parser.add_argument(
+        "--require-isolation",
+        action="store_true",
+        help="Reject execute/external tools unless an isolated sandbox is active.",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=4096, help="Maximum model output tokens per step.")
+    parser.add_argument(
+        "--context-token-budget",
+        type=int,
+        default=3000,
+        help="Maximum pre-request prompt tokens before output reservation.",
+    )
+    parser.add_argument(
+        "--context-window-tokens",
+        type=int,
+        default=None,
+        help="Configured model context window used for request admission.",
+    )
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature sent to Ollama.")
     parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling value sent to Ollama.")
     return parser
 
 
+PRODUCT_COMMANDS = frozenset(
+    {
+        "channel",
+        "cron",
+        "doctor",
+        "eval",
+        "evolver",
+        "gateway",
+        "provider",
+        "sandbox",
+        "session",
+        "skill",
+        "trace",
+        "tui",
+    }
+)
+
+
+def build_product_parser():
+    parser = argparse.ArgumentParser(
+        prog="repoagent",
+        description="Operate and inspect the RepoAgent runtime.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    doctor = commands.add_parser("doctor", help="Check the local runtime environment.")
+    doctor.add_argument("--cwd", default=".")
+
+    provider = commands.add_parser("provider", help="Inspect model profiles.")
+    provider_commands = provider.add_subparsers(dest="provider_command", required=True)
+    provider_commands.add_parser("list", help="List configured model profiles.")
+    provider_show = provider_commands.add_parser("show", help="Show one model profile.")
+    provider_show.add_argument("name", choices=PROVIDER_CHOICES)
+
+    session = commands.add_parser("session", help="Inspect persisted sessions.")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    session_list = session_commands.add_parser("list", help="List workspace sessions.")
+    session_list.add_argument("--cwd", default=".")
+    session_show = session_commands.add_parser("show", help="Show a session summary.")
+    session_show.add_argument("session_id")
+    session_show.add_argument("--cwd", default=".")
+
+    sandbox = commands.add_parser("sandbox", help="Inspect sandbox enforcement.")
+    sandbox_commands = sandbox.add_subparsers(dest="sandbox_command", required=True)
+    sandbox_status = sandbox_commands.add_parser("status", help="Show sandbox status.")
+    sandbox_status.add_argument("--require-isolation", action="store_true")
+
+    gateway = commands.add_parser("gateway", help="Inspect the local gateway.")
+    gateway_commands = gateway.add_subparsers(dest="gateway_command", required=True)
+    gateway_status = gateway_commands.add_parser("status", help="Show gateway health.")
+    gateway_status.add_argument("--cwd", default=".")
+
+    channel = commands.add_parser("channel", help="Inspect channel adapters.")
+    channel_commands = channel.add_subparsers(dest="channel_command", required=True)
+    directory_status = channel_commands.add_parser(
+        "directory-status", help="Show directory-channel queue counts."
+    )
+    directory_status.add_argument("--root", required=True)
+
+    cron = commands.add_parser("cron", help="Inspect scheduled work.")
+    cron_commands = cron.add_subparsers(dest="cron_command", required=True)
+    cron_list = cron_commands.add_parser("list", help="List persisted cron jobs.")
+    cron_list.add_argument("--cwd", default=".")
+
+    trace = commands.add_parser("trace", help="Inspect one Turn trace.")
+    trace.add_argument("trace_args", nargs=argparse.REMAINDER)
+
+    evaluation = commands.add_parser("eval", help="Run evaluation operations.")
+    evaluation.add_argument("eval_args", nargs=argparse.REMAINDER)
+
+    evolver = commands.add_parser("evolver", help="Inspect controlled evolution state.")
+    evolver_commands = evolver.add_subparsers(dest="evolver_command", required=True)
+    evolver_status = evolver_commands.add_parser(
+        "status", help="Verify the evolution ledger and show active routes."
+    )
+    evolver_status.add_argument("--cwd", default=".")
+
+    tui = commands.add_parser("tui", help="Run the scheduler-backed terminal UI.")
+    tui.add_argument("agent_args", nargs=argparse.REMAINDER)
+
+    skill = commands.add_parser("skill", help="Inspect local Skills.")
+    skill_commands = skill.add_subparsers(dest="skill_command", required=True)
+    skill_list = skill_commands.add_parser("list", help="List discovered Skills.")
+    skill_list.add_argument("--cwd", default=".")
+    skill_show = skill_commands.add_parser("show", help="Show one Skill manifest.")
+    skill_show.add_argument("skill_id")
+    skill_show.add_argument("--cwd", default=".")
+    return parser
+
+
+def run_product_command(argv):
+    args = build_product_parser().parse_args(argv)
+    try:
+        if args.command == "doctor":
+            payload = doctor_report(args.cwd)
+        elif args.command == "provider":
+            payload = provider_report(
+                args.name if args.provider_command == "show" else None
+            )
+        elif args.command == "session":
+            payload = session_report(
+                args.cwd,
+                args.session_id if args.session_command == "show" else None,
+            )
+        elif args.command == "sandbox":
+            payload = sandbox_report(require_isolation=args.require_isolation)
+        elif args.command == "gateway":
+            payload = gateway_report(args.cwd)
+        elif args.command == "channel":
+            payload = directory_channel_report(args.root)
+        elif args.command == "cron":
+            payload = cron_report(args.cwd)
+        elif args.command == "trace":
+            return trace_main(args.trace_args)
+        elif args.command == "eval":
+            return evaluation_main(args.eval_args)
+        elif args.command == "evolver":
+            payload = evolver_report(args.cwd)
+        elif args.command == "tui":
+            agent_args = build_arg_parser().parse_args(args.agent_args)
+            if agent_args.prompt:
+                raise ValueError("tui does not accept a one-shot prompt")
+            return asyncio.run(run_tui(build_agent(agent_args)))
+        else:
+            payload = skill_report(
+                args.cwd,
+                args.skill_id if args.skill_command == "show" else None,
+            )
+    except (OSError, ValueError, LedgerIntegrityError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print_json(payload)
+    return 0
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in PRODUCT_COMMANDS:
+        return run_product_command(argv)
     args = build_arg_parser().parse_args(argv)
     agent = build_agent(args)
 

@@ -1,5 +1,14 @@
 from repoagent import FakeModelClient, RepoAgent, SessionStore, WorkspaceContext
-from repoagent.context_manager import ContextManager
+from dataclasses import FrozenInstanceError
+
+import pytest
+
+from repoagent.context_manager import (
+    CONTEXT_SEGMENT_DEFINITIONS,
+    ContextBudgetExceededError,
+    ContextManager,
+)
+from repoagent.tokenization import CallableTokenCounter
 
 
 def build_workspace(tmp_path):
@@ -33,7 +42,112 @@ def test_context_manager_assembles_sections_in_expected_order(tmp_path):
     assert prompt.index("Relevant memory:") < prompt.index("Transcript:")
     assert prompt.index("Transcript:") < prompt.index("Current user request:")
     assert prompt.rstrip().endswith("Current user request:\nWhere is the deploy key?")
-    assert metadata["section_order"] == ["prefix", "memory", "relevant_memory", "history", "current_request"]
+    assert metadata["section_order"] == [
+        "prefix",
+        "checkpoint",
+        "memory",
+        "relevant_memory",
+        "skills",
+        "history",
+        "current_request",
+    ]
+
+
+def test_context_segment_manifest_has_stable_sources_and_policy(tmp_path):
+    agent = build_agent(tmp_path, [])
+    agent.render_checkpoint_text = lambda: "Task checkpoint:\n- continue safely"
+
+    prompt, metadata = ContextManager(agent).build("Inspect the current state")
+
+    assert prompt.index("You are repoagent") < prompt.index("Task checkpoint:")
+    assert prompt.index("Task checkpoint:") < prompt.index("Memory:")
+    assert metadata["segment_manifest"] == [
+        {
+            "name": "prefix",
+            "source": "runtime.prefix",
+            "order": 0,
+            "reducible": True,
+            "mandatory": True,
+            "present": True,
+        },
+        {
+            "name": "checkpoint",
+            "source": "runtime.checkpoint",
+            "order": 1,
+            "reducible": False,
+            "mandatory": False,
+            "present": True,
+        },
+        {
+            "name": "memory",
+            "source": "memory.working",
+            "order": 2,
+            "reducible": True,
+            "mandatory": False,
+            "present": True,
+        },
+        {
+            "name": "relevant_memory",
+            "source": "memory.retrieval",
+            "order": 3,
+            "reducible": True,
+            "mandatory": False,
+            "present": True,
+        },
+        {
+            "name": "skills",
+            "source": "skill.catalog",
+            "order": 4,
+            "reducible": True,
+            "mandatory": False,
+            "present": False,
+        },
+        {
+            "name": "history",
+            "source": "session.history",
+            "order": 5,
+            "reducible": True,
+            "mandatory": False,
+            "present": True,
+        },
+        {
+            "name": "current_request",
+            "source": "request.user",
+            "order": 6,
+            "reducible": False,
+            "mandatory": True,
+            "present": True,
+        },
+    ]
+    assert metadata["sections"]["checkpoint"]["budget_chars"] is None
+    assert metadata["sections"]["current_request"]["mandatory"] is True
+
+
+def test_context_segment_definitions_and_instances_are_immutable(tmp_path):
+    with pytest.raises(FrozenInstanceError):
+        CONTEXT_SEGMENT_DEFINITIONS[-1].order = 0
+
+    agent = build_agent(tmp_path, [])
+    rendered = ContextManager(agent)._render_sections(
+        {
+            "prefix": "prefix",
+            "checkpoint": "",
+            "memory": "memory",
+            "history": "",
+            "current_request": "Current user request:\nrequest",
+        },
+        {
+            "prefix": 100,
+            "memory": 100,
+            "relevant_memory": 100,
+            "history": 100,
+        },
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        rendered["prefix"].rendered = "changed"
+    with pytest.raises(TypeError):
+        rendered["history"].details["changed"] = True
 
 
 def test_context_manager_reduces_relevant_memory_before_history_and_preserves_newer_context(tmp_path):
@@ -51,19 +165,28 @@ def test_context_manager_reduces_relevant_memory_before_history_and_preserves_ne
 
     manager = ContextManager(
         agent,
-        total_budget=700,
-        section_budgets={
-            "prefix": 120,
-            "memory": 120,
-            "relevant_memory": 120,
-            "history": 400,
+        total_token_budget=175,
+        segment_token_budgets={
+            "prefix": 30,
+            "memory": 30,
+            "relevant_memory": 30,
+            "history": 100,
+        },
+        segment_token_floors={
+            "prefix": 10,
+            "memory": 10,
+            "relevant_memory": 10,
+            "history": 30,
         },
     )
 
     prompt, metadata = manager.build("keep this request verbatim")
 
     for section in ("prefix", "memory", "relevant_memory", "history"):
-        assert metadata["sections"][section]["rendered_chars"] <= metadata["sections"][section]["budget_chars"]
+        assert (
+            metadata["sections"][section]["rendered_tokens"]
+            <= metadata["sections"][section]["budget_tokens"]
+        )
 
     reduction_sections = [entry["section"] for entry in metadata["budget_reductions"]]
     assert reduction_sections[0] == "relevant_memory"
@@ -71,6 +194,76 @@ def test_context_manager_reduces_relevant_memory_before_history_and_preserves_ne
     assert "RECENT-CONTEXT" in prompt
     assert "OLD-CONTEXT" not in prompt
     assert "keep this request verbatim" in prompt
+
+
+def test_context_manager_uses_provider_token_counter_for_budgeting(tmp_path):
+    agent = build_agent(tmp_path, [])
+    agent.prefix = "one two three four five six seven eight"
+    agent.memory.render_memory_text = lambda: "Memory:\nnine ten eleven twelve"
+    counter = CallableTokenCounter(
+        lambda text: len(str(text).split()),
+        counter_identity="test-provider-tokenizer",
+    )
+
+    prompt, metadata = ContextManager(
+        agent,
+        total_token_budget=12,
+        segment_token_budgets={
+            "prefix": 4,
+            "memory": 2,
+            "relevant_memory": 2,
+            "history": 2,
+        },
+        segment_token_floors={
+            "prefix": 1,
+            "memory": 1,
+            "relevant_memory": 1,
+            "history": 1,
+        },
+        token_counter=counter,
+    ).build("keep request")
+
+    assert metadata["token_counter"] == {
+        "identity": "test-provider-tokenizer",
+        "source": "provider",
+    }
+    assert metadata["prompt_tokens"] == counter.count(prompt)
+    assert metadata["sections"]["prefix"]["rendered_tokens"] <= 4
+    assert metadata["sections"]["prefix"]["budget_chars"] is None
+    assert prompt.endswith("Current user request:\nkeep request")
+
+
+def test_context_manager_fails_closed_when_mandatory_segments_exceed_budget(
+    tmp_path,
+):
+    agent = build_agent(tmp_path, [])
+    counter = CallableTokenCounter(
+        lambda text: len(str(text).split()),
+        counter_identity="test-provider-tokenizer",
+    )
+    manager = ContextManager(
+        agent,
+        total_token_budget=4,
+        segment_token_budgets={
+            "prefix": 0,
+            "memory": 0,
+            "relevant_memory": 0,
+            "history": 0,
+        },
+        segment_token_floors={
+            "prefix": 0,
+            "memory": 0,
+            "relevant_memory": 0,
+            "history": 0,
+        },
+        token_counter=counter,
+    )
+
+    with pytest.raises(ContextBudgetExceededError) as raised:
+        manager.build("this mandatory request cannot fit")
+
+    assert raised.value.observed_tokens > raised.value.budget_tokens
+    assert raised.value.token_counter["source"] == "provider"
 
 
 def test_context_manager_renders_top_three_episodic_notes_per_note_under_budget(tmp_path):
@@ -83,8 +276,8 @@ def test_context_manager_renders_top_three_episodic_notes_per_note_under_budget(
 
     prompt, metadata = ContextManager(
         agent,
-        total_budget=250,
-        section_budgets={
+        total_token_budget=250,
+        segment_token_budgets={
             "prefix": 60,
             "memory": 60,
             "relevant_memory": 80,
@@ -122,8 +315,8 @@ def test_context_manager_preserves_current_request_when_over_budget(tmp_path):
     request = "please preserve this request exactly"
     prompt, metadata = ContextManager(
         agent,
-        total_budget=250,
-        section_budgets={
+        total_token_budget=250,
+        segment_token_budgets={
             "prefix": 80,
             "memory": 80,
             "relevant_memory": 80,
@@ -172,6 +365,14 @@ def test_context_manager_collapses_older_duplicate_reads_into_one_summary_line(t
     assert metadata["history"]["older_entries_count"] == 1
     assert metadata["history"]["collapsed_duplicate_reads"] == 1
     assert metadata["history"]["reused_file_summary_count"] == 1
+    assert metadata["history"]["compaction_strategy"] == "deterministic-history-v1"
+    assert metadata["history"]["compaction_applied"] is True
+    assert metadata["history"]["source_entry_count"] == 8
+    assert len(metadata["history"]["compaction_records"]) == 8
+    assert metadata["history"]["compaction_provenance_digest"].startswith("sha256:")
+    assert [
+        record["operation"] for record in metadata["history"]["compaction_records"][:2]
+    ] == ["reuse_file_summary", "collapse_duplicate_read"]
 
 
 def test_context_manager_summarizes_older_tool_output_into_one_line(tmp_path):

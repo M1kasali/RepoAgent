@@ -179,6 +179,25 @@ def measure_feature_ablation_metrics(agent, user_message):
             prompt, metadata = agent._build_prompt_and_metadata(user_message)
         results[name] = {
             "prompt_chars": int(metadata.get("prompt_chars", 0)),
+            "prompt_tokens": int(metadata.get("prompt_tokens", 0)),
+            "token_count_source": str(
+                metadata.get("token_counter", {}).get("source", "missing")
+            ),
+            "token_counter_identity": str(
+                metadata.get("token_counter", {}).get("identity", "")
+            ),
+            "context_window_tokens": int(
+                metadata.get("context_window_tokens", 0)
+            ),
+            "effective_input_token_budget": int(
+                metadata.get("effective_input_token_budget", 0)
+            ),
+            "reserved_output_tokens": int(
+                metadata.get("reserved_output_tokens", 0)
+            ),
+            "context_window_admitted": bool(
+                metadata.get("context_window_admitted", False)
+            ),
             "memory_chars": int(metadata.get("sections", {}).get("memory", {}).get("rendered_chars", 0)),
             "history_chars": int(metadata.get("sections", {}).get("history", {}).get("rendered_chars", 0)),
             "relevant_selected_count": int(metadata.get("relevant_memory", {}).get("selected_count", 0)),
@@ -475,12 +494,38 @@ def run_context_stress_matrix(repetitions=5):
                         metrics = measure_feature_ablation_metrics(agent, request_text)
                         full_chars = metrics["full"]["prompt_chars"]
                         raw_chars = metrics["no_context_reduction"]["prompt_chars"]
+                        full_tokens = metrics["full"]["prompt_tokens"]
+                        raw_tokens = metrics["no_context_reduction"]["prompt_tokens"]
                         ratio = _safe_ratio(raw_chars - full_chars, raw_chars)
+                        token_ratio = _safe_ratio(
+                            raw_tokens - full_tokens, raw_tokens
+                        )
                         per_run.append(
                             {
                                 "full_prompt_chars": full_chars,
                                 "raw_prompt_chars": raw_chars,
                                 "compression_ratio": ratio,
+                                "full_prompt_tokens": full_tokens,
+                                "raw_prompt_tokens": raw_tokens,
+                                "token_compression_ratio": token_ratio,
+                                "token_count_source": metrics["full"][
+                                    "token_count_source"
+                                ],
+                                "token_counter_identity": metrics["full"][
+                                    "token_counter_identity"
+                                ],
+                                "context_window_tokens": metrics["full"][
+                                    "context_window_tokens"
+                                ],
+                                "effective_input_token_budget": metrics["full"][
+                                    "effective_input_token_budget"
+                                ],
+                                "reserved_output_tokens": metrics["full"][
+                                    "reserved_output_tokens"
+                                ],
+                                "context_window_admitted": metrics["full"][
+                                    "context_window_admitted"
+                                ],
                                 "current_request_preserved": bool(metrics["full"]["current_request_preserved"]),
                             }
                         )
@@ -493,6 +538,41 @@ def run_context_stress_matrix(repetitions=5):
                         "avg_prompt_compression_ratio": _safe_mean(item["compression_ratio"] for item in per_run),
                         "avg_full_prompt_chars": _safe_mean(item["full_prompt_chars"] for item in per_run),
                         "avg_raw_prompt_chars": _safe_mean(item["raw_prompt_chars"] for item in per_run),
+                        "avg_full_prompt_tokens": _safe_mean(
+                            item["full_prompt_tokens"] for item in per_run
+                        ),
+                        "avg_raw_prompt_tokens": _safe_mean(
+                            item["raw_prompt_tokens"] for item in per_run
+                        ),
+                        "avg_prompt_token_compression_ratio": _safe_mean(
+                            item["token_compression_ratio"] for item in per_run
+                        ),
+                        "token_count_sources": sorted(
+                            {item["token_count_source"] for item in per_run}
+                        ),
+                        "token_counter_identities": sorted(
+                            {item["token_counter_identity"] for item in per_run}
+                        ),
+                        "context_window_tokens": sorted(
+                            {item["context_window_tokens"] for item in per_run}
+                        ),
+                        "effective_input_token_budgets": sorted(
+                            {
+                                item["effective_input_token_budget"]
+                                for item in per_run
+                            }
+                        ),
+                        "reserved_output_tokens": sorted(
+                            {item["reserved_output_tokens"] for item in per_run}
+                        ),
+                        "context_window_admitted_rate": _safe_ratio(
+                            sum(
+                                1
+                                for item in per_run
+                                if item["context_window_admitted"]
+                            ),
+                            len(per_run),
+                        ),
                         "current_request_preserved_rate": _safe_ratio(
                             sum(1 for item in per_run if item["current_request_preserved"]),
                             len(per_run),
@@ -502,12 +582,63 @@ def run_context_stress_matrix(repetitions=5):
     ratios = [config["avg_prompt_compression_ratio"] for config in configs]
     full_chars = [config["avg_full_prompt_chars"] for config in configs]
     raw_chars = [config["avg_raw_prompt_chars"] for config in configs]
+    full_tokens = [config["avg_full_prompt_tokens"] for config in configs]
+    raw_tokens = [config["avg_raw_prompt_tokens"] for config in configs]
+    token_ratios = [
+        config["avg_prompt_token_compression_ratio"] for config in configs
+    ]
     return {
         "config_count": len(configs),
         "configs": configs,
         "summary": {
             "avg_full_prompt_chars": _safe_mean(full_chars),
             "avg_raw_prompt_chars": _safe_mean(raw_chars),
+            "avg_full_prompt_tokens": _safe_mean(full_tokens),
+            "avg_raw_prompt_tokens": _safe_mean(raw_tokens),
+            "avg_prompt_token_compression_ratio": _safe_mean(token_ratios),
+            "token_count_sources": sorted(
+                {
+                    source
+                    for config in configs
+                    for source in config["token_count_sources"]
+                }
+            ),
+            "token_counter_identities": sorted(
+                {
+                    identity
+                    for config in configs
+                    for identity in config["token_counter_identities"]
+                }
+            ),
+            "context_window_admitted_rate": _safe_ratio(
+                sum(
+                    1
+                    for config in configs
+                    if config["context_window_admitted_rate"] == 1.0
+                ),
+                len(configs),
+            ),
+            "context_window_tokens": sorted(
+                {
+                    value
+                    for config in configs
+                    for value in config["context_window_tokens"]
+                }
+            ),
+            "effective_input_token_budgets": sorted(
+                {
+                    value
+                    for config in configs
+                    for value in config["effective_input_token_budgets"]
+                }
+            ),
+            "reserved_output_tokens": sorted(
+                {
+                    value
+                    for config in configs
+                    for value in config["reserved_output_tokens"]
+                }
+            ),
             "avg_prompt_compression_ratio": _safe_mean(ratios),
             "max_prompt_compression_ratio": max(ratios) if ratios else 0.0,
             "min_prompt_compression_ratio": min(ratios) if ratios else 0.0,

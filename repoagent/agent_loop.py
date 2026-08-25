@@ -3,7 +3,11 @@
 import time
 
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
-from .checkpoint import CHECKPOINT_NONE_STATUS, CHECKPOINT_PARTIAL_STALE_STATUS, CHECKPOINT_WORKSPACE_MISMATCH_STATUS
+from .checkpoint import (
+    CHECKPOINT_NONE_STATUS,
+    CHECKPOINT_PARTIAL_STALE_STATUS,
+    CHECKPOINT_WORKSPACE_MISMATCH_STATUS,
+)
 from .providers.base import (
     CancellationToken,
     ModelRequest,
@@ -15,6 +19,8 @@ from .providers.base import (
 )
 from .providers.tool_schema import model_tools_from_registry
 from .task_state import TaskState
+from .tool_gateway import compatibility_metadata
+from .tracing import current_trace_context
 from .workspace import clip, now
 
 
@@ -51,9 +57,7 @@ def _validated_fallback_attempts(value, *, statuses):
         if index < 0 or duration_ms < 0 or index in seen_indexes:
             continue
         seen_indexes.add(index)
-        attempts.append(
-            {**raw, "index": index, "duration_ms": duration_ms}
-        )
+        attempts.append({**raw, "index": index, "duration_ms": duration_ms})
     return tuple(attempts)
 
 
@@ -110,6 +114,7 @@ class AgentLoop:
         turn_request=None,
         model_text_sink=None,
         cancellation_token: CancellationToken | None = None,
+        deadline: float | None = None,
     ):
         agent = self.agent
         if cancellation_token is not None:
@@ -138,6 +143,10 @@ class AgentLoop:
             finish_reason="",
             error_category="",
         ):
+            parent_trace = current_trace_context()
+            provider_trace = (
+                parent_trace.child("provider") if parent_trace is not None else None
+            )
             entry = CallEfficiencyEntry(
                 provider_call_id=(
                     f"{model_request.request_id}:{model_request.attempt}:"
@@ -159,16 +168,20 @@ class AgentLoop:
                 finish_reason=finish_reason,
                 error_category=error_category,
                 call_kind=model_request.call_kind,
+                trace_id=provider_trace.trace_id if provider_trace else "",
+                span_id=provider_trace.span_id if provider_trace else "",
+                parent_span_id=(
+                    provider_trace.parent_span_id if provider_trace else ""
+                ),
             )
             call_entries.append(entry)
             payload = entry.to_dict()
+            payload["semantic_event"] = "provider.call.completed"
             agent.run_store.append_model_call(task_state, payload)
             agent.emit_trace(task_state, "model_call_accounted", payload)
-            agent.last_call_efficiency_summary = (
-                CallEfficiencySummary.from_entries(
-                    call_entries, turn_succeeded=False
-                ).to_dict()
-            )
+            agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
+                call_entries, turn_succeeded=False
+            ).to_dict()
             return entry
 
         def record_missing_model_calls(count, prompt_metadata):
@@ -184,15 +197,20 @@ class AgentLoop:
                 **agent.last_completion_metadata,
             }
             return aggregate_metadata
+
         agent.memory.set_task_summary(user_message)
         agent.record({"role": "user", "content": user_message, "created_at": now()})
 
         task_state = TaskState.create(
             run_id=str(turn_request.turn_id) if turn_request else agent.new_run_id(),
-            task_id=str(turn_request.request_id) if turn_request else agent.new_task_id(),
+            task_id=str(turn_request.request_id)
+            if turn_request
+            else agent.new_task_id(),
             user_request=user_message,
         )
-        task_state.resume_status = agent.resume_state.get("status", CHECKPOINT_NONE_STATUS)
+        task_state.resume_status = agent.resume_state.get(
+            "status", CHECKPOINT_NONE_STATUS
+        )
         agent.current_task_state = task_state
         agent.current_run_dir = agent.run_store.start_run(task_state)
         agent.emit_trace(
@@ -201,6 +219,19 @@ class AgentLoop:
             {
                 "task_id": task_state.task_id,
                 "user_request": clip(user_message, 300),
+            },
+        )
+        agent.emit_trace(
+            task_state,
+            "memory_recall_completed",
+            {
+                "semantic_event": "memory.recall.completed",
+                "hit_count": int(
+                    agent.last_memory_backend_metadata.get("recalled_count", 0)
+                ),
+                "status": agent.last_memory_backend_metadata.get(
+                    "recall_status", "not_run"
+                ),
             },
         )
 
@@ -233,7 +264,9 @@ class AgentLoop:
                 },
             )
             if prompt_metadata.get("resume_status") == CHECKPOINT_PARTIAL_STALE_STATUS:
-                checkpoint = agent.create_checkpoint(task_state, user_message, trigger="freshness_mismatch")
+                checkpoint = agent.create_checkpoint(
+                    task_state, user_message, trigger="freshness_mismatch"
+                )
                 agent.run_store.write_task_state(task_state)
                 agent.emit_trace(
                     task_state,
@@ -243,15 +276,22 @@ class AgentLoop:
                         "trigger": "freshness_mismatch",
                     },
                 )
-            elif prompt_metadata.get("resume_status") == CHECKPOINT_WORKSPACE_MISMATCH_STATUS:
+            elif (
+                prompt_metadata.get("resume_status")
+                == CHECKPOINT_WORKSPACE_MISMATCH_STATUS
+            ):
                 agent.emit_trace(
                     task_state,
                     "runtime_identity_mismatch",
                     {
-                        "fields": list(prompt_metadata.get("runtime_identity_mismatch_fields", [])),
+                        "fields": list(
+                            prompt_metadata.get("runtime_identity_mismatch_fields", [])
+                        ),
                     },
                 )
-                checkpoint = agent.create_checkpoint(task_state, user_message, trigger="workspace_mismatch")
+                checkpoint = agent.create_checkpoint(
+                    task_state, user_message, trigger="workspace_mismatch"
+                )
                 agent.run_store.write_task_state(task_state)
                 agent.emit_trace(
                     task_state,
@@ -262,7 +302,9 @@ class AgentLoop:
                     },
                 )
             if prompt_metadata.get("budget_reductions"):
-                checkpoint = agent.create_checkpoint(task_state, user_message, trigger="context_reduction")
+                checkpoint = agent.create_checkpoint(
+                    task_state, user_message, trigger="context_reduction"
+                )
                 agent.run_store.write_task_state(task_state)
                 agent.emit_trace(
                     task_state,
@@ -293,25 +335,35 @@ class AgentLoop:
                 prompt_cache_key = prompt_metadata.get("prompt_cache_key")
                 prompt_cache_retention = "in_memory"
             model_started_at = time.monotonic()
+            timeout_seconds = (
+                max(0.001, deadline - model_started_at)
+                if deadline is not None
+                else None
+            )
             model_request = ModelRequest(
                 prompt=prompt,
                 max_output_tokens=agent.max_new_tokens,
                 prompt_cache_key=prompt_cache_key,
                 prompt_cache_retention=prompt_cache_retention,
-                turn_id=str(turn_request.turn_id) if turn_request else task_state.run_id,
-                session_id=str(turn_request.session_id) if turn_request else agent.session["id"],
+                turn_id=str(turn_request.turn_id)
+                if turn_request
+                else task_state.run_id,
+                session_id=str(turn_request.session_id)
+                if turn_request
+                else agent.session["id"],
                 request_id=(
-                    str(turn_request.request_id)
-                    if turn_request
-                    else task_state.task_id
+                    str(turn_request.request_id) if turn_request else task_state.task_id
                 ),
                 attempt=task_state.attempts,
                 tools=model_tools_from_registry(agent.tools),
                 cancellation_token=cancellation_token,
+                timeout_seconds=timeout_seconds,
             )
             stream_stats = {"events": 0, "text_deltas": 0, "tool_calls": 0}
             final_stream = (
-                _FinalTextStream(model_text_sink) if model_text_sink is not None else None
+                _FinalTextStream(model_text_sink)
+                if model_text_sink is not None
+                else None
             )
 
             def observe_model_event(event):
@@ -336,9 +388,7 @@ class AgentLoop:
                     provider=exc.provider or type(agent.model_client).__name__,
                     model=str(getattr(agent.model_client, "model", "")),
                     status="cancelled",
-                    duration_ms=int(
-                        (time.monotonic() - model_started_at) * 1000
-                    ),
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
                     error_category=exc.category,
                 )
                 agent.emit_trace(
@@ -369,22 +419,16 @@ class AgentLoop:
                             model=attempt.get("model", ""),
                             status="failed",
                             duration_ms=int(attempt.get("duration_ms", 0)),
-                            error_category=attempt.get(
-                                "category", exc.category
-                            ),
+                            error_category=attempt.get("category", exc.category),
                         )
                 else:
                     record_model_call(
                         model_request,
                         provider_attempt=0,
-                        provider=(
-                            exc.provider or type(agent.model_client).__name__
-                        ),
+                        provider=(exc.provider or type(agent.model_client).__name__),
                         model=str(getattr(agent.model_client, "model", "")),
                         status="failed",
-                        duration_ms=int(
-                            (time.monotonic() - model_started_at) * 1000
-                        ),
+                        duration_ms=int((time.monotonic() - model_started_at) * 1000),
                         error_category=exc.category,
                     )
                 missing_calls = len(fallback_attempts)
@@ -412,9 +456,7 @@ class AgentLoop:
                     provider=type(agent.model_client).__name__,
                     model=str(getattr(agent.model_client, "model", "")),
                     status="failed",
-                    duration_ms=int(
-                        (time.monotonic() - model_started_at) * 1000
-                    ),
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
                     error_category="unexpected",
                 )
                 usage_aggregate = record_missing_model_calls(1, prompt_metadata)
@@ -454,9 +496,7 @@ class AgentLoop:
                 ):
                     fallback_attempts = ()
                 failed_attempts = sum(
-                    1
-                    for attempt in fallback_attempts
-                    if attempt["status"] == "failed"
+                    1 for attempt in fallback_attempts if attempt["status"] == "failed"
                 )
                 usage_rows.extend(ModelUsage() for _ in range(failed_attempts))
                 for attempt in fallback_attempts:
@@ -474,9 +514,7 @@ class AgentLoop:
                             else ModelUsage()
                         ),
                         finish_reason=(
-                            model_result.finish_reason
-                            if status == "completed"
-                            else ""
+                            model_result.finish_reason if status == "completed" else ""
                         ),
                         error_category=attempt.get("category", ""),
                     )
@@ -485,8 +523,7 @@ class AgentLoop:
                     model_request,
                     provider_attempt=0,
                     provider=(
-                        model_result.provider
-                        or type(agent.model_client).__name__
+                        model_result.provider or type(agent.model_client).__name__
                     ),
                     model=(
                         model_result.model
@@ -495,9 +532,7 @@ class AgentLoop:
                     status="completed",
                     duration_ms=(
                         model_result.latency_ms
-                        or int(
-                            (time.monotonic() - model_started_at) * 1000
-                        )
+                        or int((time.monotonic() - model_started_at) * 1000)
                     ),
                     usage=model_result.usage,
                     finish_reason=model_result.finish_reason,
@@ -516,17 +551,27 @@ class AgentLoop:
             agent.last_completion_metadata = completion_metadata
             agent.last_model_result = model_result
             agent.last_prompt_metadata = prompt_metadata
+            routing_decision = model_result.metadata.get("routing_decision")
+            if isinstance(routing_decision, dict):
+                agent.emit_trace(
+                    task_state,
+                    "model_routed",
+                    {"routing_decision": routing_decision},
+                )
             if isinstance(fallback, dict) and fallback.get("used"):
                 agent.emit_trace(task_state, "model_fallback", fallback)
             if model_result.tool_calls:
-                kind, payload = "tools", [
-                    {
-                        "id": tool_call.id,
-                        "name": tool_call.name,
-                        "args": dict(tool_call.arguments),
-                    }
-                    for tool_call in model_result.tool_calls
-                ]
+                kind, payload = (
+                    "tools",
+                    [
+                        {
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "args": dict(tool_call.arguments),
+                        }
+                        for tool_call in model_result.tool_calls
+                    ],
+                )
             else:
                 kind, payload = agent.parse(raw)
             agent.emit_trace(
@@ -543,62 +588,148 @@ class AgentLoop:
 
             if kind in {"tool", "tools"}:
                 calls = payload if kind == "tools" else [payload]
-                for call in calls:
+                remaining_steps = max(0, agent.max_steps - tool_steps)
+                prepared = []
+                for call in calls[:remaining_steps]:
+                    name = str(call.get("name") or "invalid_tool")
+                    raw_args = call.get("args", {})
+                    args = raw_args if isinstance(raw_args, dict) else {}
+                    request = agent.build_tool_request(
+                        name,
+                        args,
+                        call_id=str(call.get("id") or ""),
+                        origin="model",
+                    )
+                    prepared.append((request, name, args))
+                details = {
+                    id(request): (name, args) for request, name, args in prepared
+                }
+                batches = agent.tool_gateway.plan_batches(
+                    request for request, _, _ in prepared
+                )
+                for batch in batches:
                     if cancellation_token is not None:
                         cancellation_token.raise_if_cancelled(
                             provider=type(agent.model_client).__name__
                         )
-                    if tool_steps >= agent.max_steps:
-                        break
-                    tool_steps += 1
-                    tool_call_id = str(call.get("id") or "")
-                    name = call.get("name", "")
-                    args = call.get("args", {})
-                    task_state.record_tool(name)
-                    tool_started_at = time.monotonic()
-                    tool_result = agent.execute_tool(name, args)
-                    result = tool_result.content
-                    history_item = {
-                        "role": "tool",
-                        "name": name,
-                        "args": args,
-                        "content": result,
-                        "created_at": now(),
-                    }
-                    if tool_call_id:
-                        history_item["tool_call_id"] = tool_call_id
-                    agent.record(history_item)
+                    batch_started_at = time.monotonic()
+                    for request in batch:
+                        name, _ = details[id(request)]
+                        task_state.record_tool(name)
+                    tool_steps += len(batch)
                     agent.run_store.write_task_state(task_state)
                     agent.emit_trace(
                         task_state,
-                        "tool_executed",
+                        "tool_batch_started",
                         {
-                            "tool_call_id": tool_call_id,
-                            "name": name,
-                            "args": args,
-                            "result": clip(result, 500),
-                            "duration_ms": int(
-                                (time.monotonic() - tool_started_at) * 1000
+                            "tool_call_ids": [request.call_id for request in batch],
+                            "mode": batch.mode.value,
+                            "scheduling_reason": batch.reason,
+                            "effects": [effect.value for effect in batch.effects],
+                            "mutation_conflict_policy": (
+                                batch.mutation_conflict_policy.value
                             ),
-                            **dict(tool_result.metadata or {}),
+                            "max_parallel": agent.tool_gateway.max_parallel,
                         },
                     )
-                    checkpoint = agent.create_checkpoint(
-                        task_state, user_message, trigger="tool_executed"
+                    tool_results = agent.execute_tool_batch(
+                        batch,
+                        cancellation_token=cancellation_token,
                     )
-                    agent.run_store.write_task_state(task_state)
+                    cancelled = []
+                    for tool_request, tool_result in zip(
+                        batch, tool_results, strict=True
+                    ):
+                        name, args = details[id(tool_request)]
+                        tool_call_id = tool_request.call_id
+                        result = tool_result.content
+                        agent.record(
+                            {
+                                "role": "tool",
+                                "name": name,
+                                "args": args,
+                                "content": result,
+                                "created_at": now(),
+                                "tool_call_id": tool_call_id,
+                            }
+                        )
+                        agent.run_store.write_task_state(task_state)
+                        agent.emit_trace(
+                            task_state,
+                            "tool_executed",
+                            {
+                                "semantic_event": "tool.call.completed",
+                                "tool_call_id": tool_call_id,
+                                "status": tool_result.status,
+                                "name": name,
+                                "args": args,
+                                "result": clip(result, 500),
+                                "duration_ms": tool_result.duration_ms,
+                                "tool_request": tool_request.to_dict(),
+                                "tool_result": tool_result.to_dict(),
+                                **compatibility_metadata(tool_result),
+                            },
+                        )
+                        if tool_result.status == "cancelled":
+                            cancelled.append(tool_result)
+                            agent.emit_trace(
+                                task_state,
+                                "tool_cancelled",
+                                {
+                                    "tool_call_id": tool_call_id,
+                                    "name": name,
+                                    "status": tool_result.status,
+                                    "error_code": tool_result.error_code,
+                                },
+                            )
+                            continue
+                        checkpoint = agent.create_checkpoint(
+                            task_state, user_message, trigger="tool_executed"
+                        )
+                        agent.run_store.write_task_state(task_state)
+                        agent.emit_trace(
+                            task_state,
+                            "checkpoint_created",
+                            {
+                                "checkpoint_id": checkpoint["checkpoint_id"],
+                                "trigger": "tool_executed",
+                            },
+                        )
                     agent.emit_trace(
                         task_state,
-                        "checkpoint_created",
+                        "tool_batch_completed",
                         {
-                            "checkpoint_id": checkpoint["checkpoint_id"],
-                            "trigger": "tool_executed",
+                            "tool_call_ids": [
+                                request.call_id for request in batch
+                            ],
+                            "result_call_ids": [
+                                result.call_id for result in tool_results
+                            ],
+                            "mode": batch.mode.value,
+                            "scheduling_reason": batch.reason,
+                            "effects": [effect.value for effect in batch.effects],
+                            "mutation_conflict_policy": (
+                                batch.mutation_conflict_policy.value
+                            ),
+                            "duration_ms": int(
+                                (time.monotonic() - batch_started_at) * 1000
+                            ),
                         },
                     )
+                    if cancelled and cancellation_token is not None:
+                        task_state.stop_tool_cancelled(
+                            "Tool execution cancelled."
+                        )
+                        agent.run_store.write_task_state(task_state)
+                        cancellation_token.raise_if_cancelled(
+                            provider=type(agent.model_client).__name__
+                        )
                 continue
 
             if kind == "retry":
-                agent.record({"role": "assistant", "content": payload, "created_at": now()})
+                agent.record(
+                    {"role": "assistant", "content": payload, "created_at": now()}
+                )
                 agent.run_store.write_task_state(task_state)
                 continue
 
@@ -609,13 +740,13 @@ class AgentLoop:
                 )
             agent.record({"role": "assistant", "content": final, "created_at": now()})
             task_state.finish_success(final)
-            agent.last_call_efficiency_summary = (
-                CallEfficiencySummary.from_entries(
-                    call_entries, turn_succeeded=True
-                ).to_dict()
-            )
+            agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
+                call_entries, turn_succeeded=True
+            ).to_dict()
             agent.promote_durable_memory(user_message, final)
-            checkpoint = agent.create_checkpoint(task_state, user_message, trigger="run_finished")
+            checkpoint = agent.create_checkpoint(
+                task_state, user_message, trigger="run_finished"
+            )
             agent.run_store.write_task_state(task_state)
             agent.emit_trace(
                 task_state,
@@ -636,7 +767,9 @@ class AgentLoop:
                     "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
                 },
             )
-            agent.run_store.write_report(task_state, agent.redact_artifact(agent.build_report(task_state)))
+            agent.run_store.write_report(
+                task_state, agent.redact_artifact(agent.build_report(task_state))
+            )
             return final
 
         if attempts >= max_attempts and tool_steps < agent.max_steps:
@@ -646,14 +779,14 @@ class AgentLoop:
             final = "Stopped after reaching the step limit without a final answer."
             task_state.stop_step_limit(final)
         agent.record({"role": "assistant", "content": final, "created_at": now()})
-        agent.last_call_efficiency_summary = (
-            CallEfficiencySummary.from_entries(
-                call_entries, turn_succeeded=False
-            ).to_dict()
-        )
+        agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
+            call_entries, turn_succeeded=False
+        ).to_dict()
         agent.promote_durable_memory(user_message, final)
         agent.run_store.write_task_state(task_state)
-        checkpoint = agent.create_checkpoint(task_state, user_message, trigger=task_state.stop_reason or "run_stopped")
+        checkpoint = agent.create_checkpoint(
+            task_state, user_message, trigger=task_state.stop_reason or "run_stopped"
+        )
         agent.emit_trace(
             task_state,
             "checkpoint_created",
@@ -673,5 +806,7 @@ class AgentLoop:
                 "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
             },
         )
-        agent.run_store.write_report(task_state, agent.redact_artifact(agent.build_report(task_state)))
+        agent.run_store.write_report(
+            task_state, agent.redact_artifact(agent.build_report(task_state))
+        )
         return final

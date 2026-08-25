@@ -6,6 +6,7 @@ import re
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
+from ..context_window import DEFAULT_CONTEXT_WINDOW_TOKENS
 from ..pricing import ModelPricing
 
 
@@ -26,6 +27,8 @@ class ModelProfile:
     credential_envs: tuple[str, ...] = ()
     timeout_seconds: float = 300
     max_output_tokens: int = 4096
+    context_window_tokens: int = DEFAULT_CONTEXT_WINDOW_TOKENS
+    context_window_source: str = "repoagent-conservative-default"
     temperature: float | None = 0.2
     top_p: float | None = None
     pricing: ModelPricing | None = None
@@ -65,6 +68,21 @@ class ModelProfile:
             or self.max_output_tokens < 1
         ):
             raise ValueError("model profile max_output_tokens must be positive")
+        if (
+            isinstance(self.context_window_tokens, bool)
+            or not isinstance(self.context_window_tokens, int)
+            or self.context_window_tokens < 2
+        ):
+            raise ValueError("model profile context_window_tokens must be at least 2")
+        if self.max_output_tokens >= self.context_window_tokens:
+            raise ValueError(
+                "model profile max_output_tokens must be smaller than context_window_tokens"
+            )
+        if (
+            not isinstance(self.context_window_source, str)
+            or not self.context_window_source.strip()
+        ):
+            raise ValueError("model profile context_window_source must be non-empty")
         self._validate_probability("temperature", self.temperature, 0, 2)
         self._validate_probability("top_p", self.top_p, 0, 1, lower_open=True)
         if self.protocol != "ollama" and self.top_p is not None:
@@ -128,6 +146,8 @@ class ModelProfile:
             "credential_envs": list(self.credential_envs),
             "timeout_seconds": self.timeout_seconds,
             "max_output_tokens": self.max_output_tokens,
+            "context_window_tokens": self.context_window_tokens,
+            "context_window_source": self.context_window_source,
             "temperature": self.temperature,
             "top_p": self.top_p,
             "pricing": self.pricing.to_dict() if self.pricing else None,

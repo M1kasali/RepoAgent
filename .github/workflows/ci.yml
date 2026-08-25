@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --frozen --dev
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --dev
+      - run: uv build
+      - run: python -m venv /tmp/repoagent-smoke
+      - run: /tmp/repoagent-smoke/bin/pip install dist/*.whl
+      - run: /tmp/repoagent-smoke/bin/repoagent --help
+      - run: /tmp/repoagent-smoke/bin/repoagent-eval --help
+      - run: /tmp/repoagent-smoke/bin/repoagent-release-check
+      - run: /tmp/repoagent-smoke/bin/repoagent-demo --help

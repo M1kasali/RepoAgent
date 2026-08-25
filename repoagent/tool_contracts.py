@@ -58,6 +58,17 @@ def _validate_tool_name(name: Any) -> None:
         raise ValueError(f"invalid tool name: {name!r}")
 
 
+def _validate_requested_tool_name(name: Any) -> None:
+    if (
+        not isinstance(name, str)
+        or not name
+        or name != name.strip()
+        or len(name) > 256
+        or any(ord(character) < 32 for character in name)
+    ):
+        raise ValueError("requested tool name must be a safe non-empty string")
+
+
 def _validate_parameters_schema(value: Any) -> None:
     if not isinstance(value, Mapping):
         raise ValueError("tool parameters must be a JSON Schema object")
@@ -195,6 +206,9 @@ class ToolDefinition:
     effect: ToolEffect
     concurrency_safe: bool = False
     requires_approval: bool = False
+    timeout_seconds: float = 30.0
+    max_output_chars: int = 4000
+    requires_isolation: bool = False
 
     def __post_init__(self) -> None:
         _validate_tool_name(self.name)
@@ -211,8 +225,23 @@ class ToolDefinition:
             raise ValueError("tool concurrency_safe must be boolean")
         if not isinstance(self.requires_approval, bool):
             raise ValueError("tool requires_approval must be boolean")
+        if not isinstance(self.requires_isolation, bool):
+            raise ValueError("tool requires_isolation must be boolean")
         if self.concurrency_safe and self.effect is not ToolEffect.READ:
             raise ValueError("only read-effect tools may be concurrency safe")
+        if (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, (int, float))
+            or not math.isfinite(float(self.timeout_seconds))
+            or self.timeout_seconds <= 0
+        ):
+            raise ValueError("tool timeout_seconds must be positive")
+        if (
+            isinstance(self.max_output_chars, bool)
+            or not isinstance(self.max_output_chars, int)
+            or self.max_output_chars <= 0
+        ):
+            raise ValueError("tool max_output_chars must be positive")
         object.__setattr__(self, "parameters", _freeze(self.parameters))
 
     @property
@@ -234,6 +263,9 @@ class ToolDefinition:
             "effect": self.effect.value,
             "concurrency_safe": self.concurrency_safe,
             "requires_approval": self.requires_approval,
+            "timeout_seconds": self.timeout_seconds,
+            "max_output_chars": self.max_output_chars,
+            "requires_isolation": self.requires_isolation,
         }
         if include_definition_id:
             value["definition_id"] = self.definition_id
@@ -250,6 +282,9 @@ class ToolRequest:
     session_id: str = ""
     origin: str = "model"
     parent_call_id: str = ""
+    capability_token: str = field(default="", repr=False)
+    timeout_seconds: float | None = None
+    max_output_chars: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -258,7 +293,7 @@ class ToolRequest:
             or self.call_id != self.call_id.strip()
         ):
             raise ValueError("tool call_id must be a non-empty trimmed string")
-        _validate_tool_name(self.name)
+        _validate_requested_tool_name(self.name)
         if not isinstance(self.arguments, Mapping):
             raise ValueError("tool arguments must be an object")
         if self.origin not in TOOL_ORIGINS:
@@ -275,6 +310,21 @@ class ToolRequest:
                 raise ValueError(f"tool {name} must be trimmed")
         if self.parent_call_id and self.parent_call_id == self.call_id:
             raise ValueError("tool call cannot be its own parent")
+        if not isinstance(self.capability_token, str):
+            raise ValueError("tool capability_token must be a string")
+        if self.timeout_seconds is not None and (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, (int, float))
+            or not math.isfinite(float(self.timeout_seconds))
+            or self.timeout_seconds <= 0
+        ):
+            raise ValueError("tool request timeout_seconds must be positive")
+        if self.max_output_chars is not None and (
+            isinstance(self.max_output_chars, bool)
+            or not isinstance(self.max_output_chars, int)
+            or self.max_output_chars <= 0
+        ):
+            raise ValueError("tool request max_output_chars must be positive")
         object.__setattr__(self, "arguments", _freeze(self.arguments))
 
     def to_dict(self) -> dict[str, Any]:
@@ -288,6 +338,15 @@ class ToolRequest:
             "session_id": self.session_id,
             "origin": self.origin,
             "parent_call_id": self.parent_call_id,
+            "capability_token_present": bool(self.capability_token),
+            "capability_token_digest": (
+                "sha256:"
+                + hashlib.sha256(self.capability_token.encode("utf-8")).hexdigest()
+                if self.capability_token
+                else ""
+            ),
+            "timeout_seconds": self.timeout_seconds,
+            "max_output_chars": self.max_output_chars,
         }
 
 
@@ -310,10 +369,8 @@ class ToolResult:
             or not self.call_id
             or self.call_id != self.call_id.strip()
         ):
-            raise ValueError(
-                "tool result call_id must be a non-empty trimmed string"
-            )
-        _validate_tool_name(self.name)
+            raise ValueError("tool result call_id must be a non-empty trimmed string")
+        _validate_requested_tool_name(self.name)
         if self.status not in TOOL_RESULT_STATUSES:
             raise ValueError(f"invalid tool result status: {self.status!r}")
         if not isinstance(self.effect, ToolEffect):

@@ -3,6 +3,7 @@
 import asyncio
 
 from .agent_loop import AgentLoop
+from .memory_backend import MemoryHit
 from .providers import CancellationToken, ProviderCancelledError
 from .spine import Text, TurnOutcome, TurnState, Usage
 
@@ -45,6 +46,60 @@ class AgentTurnRunner:
         event_loop = asyncio.get_running_loop()
         cancellation_token = CancellationToken()
         streamed_text = []
+        backend = self._agent.memory_backend
+        backend_metadata = {
+            "backend": type(backend).__name__,
+            "recall_status": "not_run",
+            "store_status": "not_run",
+            "recalled_count": 0,
+            "stored_message_count": 0,
+            "rejected_secret_hits": 0,
+        }
+        try:
+            hits = await backend.recall(
+                self._agent.redact_text(request.text),
+                agent_id=str(request.session_id),
+                top_k=3,
+            )
+            safe_hits = []
+            rejected_secret_hits = 0
+            for hit in hits:
+                safe_text = self._agent.redact_text(hit.text)
+                if safe_text != hit.text:
+                    rejected_secret_hits += 1
+                    continue
+                safe_hits.append(
+                    MemoryHit(
+                        text=safe_text,
+                        score=hit.score,
+                        metadata=self._agent.redact_artifact(hit.metadata),
+                    )
+                )
+            self._agent.backend_memory_hits = safe_hits
+            backend_metadata.update(
+                {
+                    "recall_status": "completed",
+                    "recalled_count": len(safe_hits),
+                    "rejected_secret_hits": rejected_secret_hits,
+                }
+            )
+        except Exception as exc:
+            backend_metadata.update(
+                {
+                    "recall_status": "failed",
+                    "recall_error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            self._agent.last_memory_backend_metadata = backend_metadata
+            self._agent.backend_memory_hits = []
+            return TurnOutcome(
+                turn_id=request.turn_id,
+                request_id=request.request_id,
+                session_id=request.session_id,
+                state=TurnState.FAILED,
+                error=backend_metadata["recall_error"],
+            )
+        self._agent.last_memory_backend_metadata = backend_metadata
 
         def emit_model_text(content):
             streamed_text.append(content)
@@ -74,8 +129,10 @@ class AgentTurnRunner:
                 worker.add_done_callback(_consume_background_result)
             except Exception:
                 pass
+            self._agent.backend_memory_hits = []
             raise
         except Exception as exc:
+            self._agent.backend_memory_hits = []
             task_state = self._agent.current_task_state
             return TurnOutcome(
                 turn_id=request.turn_id,
@@ -94,6 +151,63 @@ class AgentTurnRunner:
         if not streamed_text:
             await emit(Text(content=final_answer))
         task_state = self._agent.current_task_state
+        messages = self._agent.redact_artifact(
+            [
+                {"role": "user", "content": request.text},
+                {"role": "assistant", "content": final_answer},
+            ]
+        )
+        try:
+            await backend.store(str(request.session_id), messages)
+            backend_metadata.update(
+                {
+                    "store_status": "completed",
+                    "stored_message_count": len(messages),
+                }
+            )
+            if backend is self._agent.memory:
+                self._agent.session["memory"] = self._agent.memory.to_dict()
+                self._agent.session_path = self._agent.session_store.save(
+                    self._agent.session
+                )
+        except Exception as exc:
+            backend_metadata.update(
+                {
+                    "store_status": "failed",
+                    "store_error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            self._agent.last_memory_backend_metadata = backend_metadata
+            self._agent.backend_memory_hits = []
+            self._agent.emit_trace(
+                task_state, "memory_backend_store_failed", backend_metadata
+            )
+            self._agent.run_store.write_report(
+                task_state,
+                self._agent.redact_artifact(
+                    self._agent.build_report(task_state)
+                ),
+            )
+            return TurnOutcome(
+                turn_id=request.turn_id,
+                request_id=request.request_id,
+                session_id=request.session_id,
+                state=TurnState.FAILED,
+                usage=_usage_from_metadata(
+                    self._agent.last_completion_metadata
+                ),
+                call_efficiency=dict(
+                    self._agent.last_call_efficiency_summary
+                ),
+                tool_calls=int(task_state.tool_steps),
+                error=backend_metadata["store_error"],
+            )
+        self._agent.last_memory_backend_metadata = backend_metadata
+        self._agent.run_store.write_report(
+            task_state,
+            self._agent.redact_artifact(self._agent.build_report(task_state)),
+        )
+        self._agent.backend_memory_hits = []
         return TurnOutcome(
             turn_id=request.turn_id,
             request_id=request.request_id,

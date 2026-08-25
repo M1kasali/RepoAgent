@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .ids import RequestId, SessionId, TurnId, new_request_id, new_turn_id
+from ..tracing import TraceContext
 
 
 class TurnState(str, Enum):
@@ -51,6 +52,9 @@ class TurnRequest:
     request_id: RequestId
     text: str
     work_class: WorkClass = WorkClass.FOREGROUND
+    trace_context: TraceContext = field(
+        default_factory=lambda: TraceContext.create(stage="scheduler")
+    )
 
     @classmethod
     def create(
@@ -61,6 +65,7 @@ class TurnRequest:
         turn_id: TurnId | None = None,
         request_id: RequestId | None = None,
         work_class: WorkClass = WorkClass.FOREGROUND,
+        trace_context: TraceContext | None = None,
     ) -> "TurnRequest":
         return cls(
             turn_id=turn_id or new_turn_id(),
@@ -68,6 +73,7 @@ class TurnRequest:
             request_id=request_id or new_request_id(),
             text=str(text),
             work_class=work_class,
+            trace_context=trace_context or TraceContext.create(stage="scheduler"),
         )
 
 

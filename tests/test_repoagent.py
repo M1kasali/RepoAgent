@@ -52,7 +52,10 @@ def test_agent_runs_tool_then_final(tmp_path):
     answer = agent.ask("Inspect hello.txt")
 
     assert answer == "Read the file successfully."
-    assert any(item["role"] == "tool" and item["name"] == "read_file" for item in agent.session["history"])
+    assert any(
+        item["role"] == "tool" and item["name"] == "read_file"
+        for item in agent.session["history"]
+    )
     assert "hello.txt" in agent.session["memory"]["files"]
 
 
@@ -64,7 +67,10 @@ def test_ask_routes_through_spine_and_persists_terminal_outcome(tmp_path):
     turn_path = agent.run_store.turn_path(agent.current_task_state.run_id)
     events_path = agent.run_store.turn_events_path(agent.current_task_state.run_id)
     turn = json.loads(turn_path.read_text(encoding="utf-8"))
-    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert turn["state"] == "completed"
     assert turn["outcome"]["final_answer"] == "Finished."
     assert [event["kind"] for event in events] == [
@@ -87,9 +93,46 @@ def test_ask_async_uses_the_same_spine_path(tmp_path):
 
     assert answer == "Async finished."
     turn = json.loads(
-        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(encoding="utf-8")
+        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(
+            encoding="utf-8"
+        )
     )
     assert turn["state"] == "completed"
+
+
+def test_ask_async_cancellation_reaps_shell_and_stops_task_state(tmp_path):
+    async def scenario():
+        agent = build_agent(
+            tmp_path,
+            [
+                '<tool>{"name":"run_shell","args":'
+                f'{{"command":"{sys.executable} -c \\"import time; time.sleep(5)\\"",'
+                '"timeout":10}}</tool>'
+            ],
+        )
+        task = asyncio.create_task(agent.ask_async("Run a slow command"))
+        deadline = asyncio.get_running_loop().time() + 2
+        while agent.current_task_state is None:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("tool turn did not start")
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        state = agent.current_task_state
+        trace = [
+            json.loads(line)
+            for line in agent.run_store.trace_path(state)
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        assert state.status == "stopped"
+        assert state.stop_reason == "tool_cancelled"
+        assert any(event["event"] == "tool_cancelled" for event in trace)
+        await agent.aclose()
+
+    asyncio.run(scenario())
 
 
 def test_concurrent_ask_async_calls_are_fifo_and_keep_answers_isolated(tmp_path):
@@ -121,7 +164,9 @@ def test_ask_persists_failed_turn_before_raising(tmp_path):
         agent.ask("This will fail")
 
     turn = json.loads(
-        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(encoding="utf-8")
+        agent.run_store.turn_path(agent.current_task_state.run_id).read_text(
+            encoding="utf-8"
+        )
     )
     events = [
         json.loads(line)
@@ -181,7 +226,9 @@ def test_agent_only_stores_reusable_epistemic_notes(tmp_path):
     assert "deploy key is red" in prompt
 
 
-def test_file_summary_cache_is_invalidated_on_out_of_band_edit_and_path_spelling(tmp_path):
+def test_file_summary_cache_is_invalidated_on_out_of_band_edit_and_path_spelling(
+    tmp_path,
+):
     file_path = tmp_path / "sample.txt"
     file_path.write_text("alpha\n", encoding="utf-8")
     agent = build_agent(tmp_path, [])
@@ -218,7 +265,11 @@ def test_agent_retries_after_empty_model_output(tmp_path):
     answer = agent.ask("Do the task")
 
     assert answer == "Recovered after retry."
-    notices = [item["content"] for item in agent.session["history"] if item["role"] == "assistant"]
+    notices = [
+        item["content"]
+        for item in agent.session["history"]
+        if item["role"] == "assistant"
+    ]
     assert any("empty response" in item for item in notices)
 
 
@@ -236,8 +287,15 @@ def test_agent_retries_after_malformed_tool_payload(tmp_path):
     answer = agent.ask("Inspect hello.txt")
 
     assert answer == "Recovered after malformed tool output."
-    assert any(item["role"] == "tool" and item["name"] == "read_file" for item in agent.session["history"])
-    notices = [item["content"] for item in agent.session["history"] if item["role"] == "assistant"]
+    assert any(
+        item["role"] == "tool" and item["name"] == "read_file"
+        for item in agent.session["history"]
+    )
+    notices = [
+        item["content"]
+        for item in agent.session["history"]
+        if item["role"] == "assistant"
+    ]
     assert any("valid <tool> call" in item for item in notices)
 
 
@@ -353,16 +411,46 @@ def test_list_files_hides_internal_agent_state(tmp_path):
 
 def test_repeated_identical_tool_call_is_rejected(tmp_path):
     agent = build_agent(tmp_path, [])
-    agent.record({"role": "tool", "name": "list_files", "args": {}, "content": "(empty)", "created_at": "1"})
-    agent.record({"role": "tool", "name": "list_files", "args": {}, "content": "(empty)", "created_at": "2"})
+    agent.record(
+        {
+            "role": "tool",
+            "name": "list_files",
+            "args": {},
+            "content": "(empty)",
+            "created_at": "1",
+        }
+    )
+    agent.record(
+        {
+            "role": "tool",
+            "name": "list_files",
+            "args": {},
+            "content": "(empty)",
+            "created_at": "2",
+        }
+    )
 
     result = agent.run_tool("list_files", {})
 
-    assert result == "error: repeated identical tool call for list_files; choose a different tool or return a final answer"
+    assert (
+        result
+        == "error: repeated identical tool call for list_files; choose a different tool or return a final answer"
+    )
 
 
 def test_welcome_screen_keeps_box_shape_for_long_paths(tmp_path):
-    deep = tmp_path / "very" / "long" / "path" / "for" / "the" / "repoagent" / "agent" / "welcome" / "screen"
+    deep = (
+        tmp_path
+        / "very"
+        / "long"
+        / "path"
+        / "for"
+        / "the"
+        / "repoagent"
+        / "agent"
+        / "welcome"
+        / "screen"
+    )
     deep.mkdir(parents=True)
     agent = build_agent(deep, [])
 
@@ -581,11 +669,11 @@ def test_openai_compatible_client_extracts_text_from_event_stream_deltas():
 
         def read(self):
             return (
-                'event: response.output_text.delta\n'
+                "event: response.output_text.delta\n"
                 'data: {"type":"response.output_text.delta","delta":"<final>"}\n'
-                'event: response.output_text.delta\n'
+                "event: response.output_text.delta\n"
                 'data: {"type":"response.output_text.delta","delta":"OK"}\n'
-                'event: response.output_text.done\n'
+                "event: response.output_text.done\n"
                 'data: {"type":"response.output_text.done","text":"<final>OK</final>"}\n'
                 "data: [DONE]\n"
             ).encode("utf-8")
@@ -735,16 +823,21 @@ def test_build_agent_uses_openai_provider_and_model_override(tmp_path):
         },
         clear=False,
     ):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai,
+        ):
             fake_client = mock_openai.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_openai.assert_called_once()
     assert mock_openai.call_args.kwargs["model"] == "override-model"
-    assert mock_openai.call_args.kwargs["base_url"] == "https://www.right.codes/codex/v1"
+    assert (
+        mock_openai.call_args.kwargs["base_url"] == "https://www.right.codes/codex/v1"
+    )
     assert mock_openai.call_args.kwargs["api_key"] == "sk-test"
     assert agent.model_client is fake_client
 
@@ -771,11 +864,16 @@ def test_build_agent_uses_right_codes_shared_key_for_openai_provider(tmp_path):
         },
     )()
 
-    with patch.dict(os.environ, {"REPOAGENT_RIGHT_CODES_API_KEY": "sk-right-codes"}, clear=True):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai:
+    with patch.dict(
+        os.environ, {"REPOAGENT_RIGHT_CODES_API_KEY": "sk-right-codes"}, clear=True
+    ):
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai,
+        ):
             fake_client = mock_openai.return_value
             agent = pico_pkg.build_agent(args)
 
@@ -789,17 +887,24 @@ def test_build_arg_parser_leaves_provider_unset_for_runtime_resolution(tmp_path)
 
     assert args.provider is None
     assert args.max_steps == 20
+    assert args.max_parallel_tools == 4
+    assert args.mutation_conflict_policy == "serial"
+    assert args.require_isolation is False
     assert args.max_new_tokens == 4096
 
 
 def test_build_arg_parser_accepts_anthropic_provider(tmp_path):
-    args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--provider", "anthropic"])
+    args = pico_pkg.build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--provider", "anthropic"]
+    )
 
     assert args.provider == "anthropic"
 
 
 def test_build_arg_parser_accepts_deepseek_provider(tmp_path):
-    args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--provider", "deepseek"])
+    args = pico_pkg.build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--provider", "deepseek"]
+    )
 
     assert args.provider == "deepseek"
 
@@ -821,19 +926,25 @@ def test_build_agent_uses_project_env_provider_when_cli_omitted(tmp_path):
     args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path)])
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch(
-            "repoagent.cli.AnthropicCompatibleModelClient",
-            side_effect=AssertionError("deepseek client should not be used"),
-        ), patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch(
+                "repoagent.cli.AnthropicCompatibleModelClient",
+                side_effect=AssertionError("deepseek client should not be used"),
+            ),
+            patch("repoagent.cli.OpenAICompatibleModelClient") as mock_openai,
+        ):
             fake_client = mock_openai.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_openai.assert_called_once()
     assert mock_openai.call_args.kwargs["model"] == "gpt-5.4"
-    assert mock_openai.call_args.kwargs["base_url"] == "https://www.right.codes/codex/v1"
+    assert (
+        mock_openai.call_args.kwargs["base_url"] == "https://www.right.codes/codex/v1"
+    )
     assert mock_openai.call_args.kwargs["api_key"] == "sk-project-openai"
     assert agent.model_client is fake_client
 
@@ -857,19 +968,26 @@ def test_build_agent_prefers_cli_provider_over_project_env_provider(tmp_path):
     )
 
     with patch.dict(os.environ, {}, clear=True):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch(
-            "repoagent.cli.OpenAICompatibleModelClient",
-            side_effect=AssertionError("openai client should not be used"),
-        ), patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch(
+                "repoagent.cli.OpenAICompatibleModelClient",
+                side_effect=AssertionError("openai client should not be used"),
+            ),
+            patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic,
+        ):
             fake_client = mock_anthropic.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_anthropic.assert_called_once()
     assert mock_anthropic.call_args.kwargs["model"] == "deepseek-v4-pro"
-    assert mock_anthropic.call_args.kwargs["base_url"] == "https://api.deepseek.com/anthropic"
+    assert (
+        mock_anthropic.call_args.kwargs["base_url"]
+        == "https://api.deepseek.com/anthropic"
+    )
     assert mock_anthropic.call_args.kwargs["api_key"] == "sk-project-deepseek"
     assert agent.model_client is fake_client
 
@@ -903,25 +1021,34 @@ def test_build_agent_uses_anthropic_provider_and_openai_key_fallback(tmp_path):
         },
         clear=True,
     ):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch(
-            "repoagent.cli.OpenAICompatibleModelClient",
-            side_effect=AssertionError("openai client should not be used"),
-        ), patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch(
+                "repoagent.cli.OpenAICompatibleModelClient",
+                side_effect=AssertionError("openai client should not be used"),
+            ),
+            patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic,
+        ):
             fake_client = mock_anthropic.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_anthropic.assert_called_once()
     assert mock_anthropic.call_args.kwargs["model"] == "claude-sonnet-4-5-20250929"
-    assert mock_anthropic.call_args.kwargs["base_url"] == "https://www.right.codes/claude/v1"
+    assert (
+        mock_anthropic.call_args.kwargs["base_url"]
+        == "https://www.right.codes/claude/v1"
+    )
     assert mock_anthropic.call_args.kwargs["api_key"] == "sk-openai-fallback"
     assert agent.model_client is fake_client
 
 
 def test_build_agent_uses_anthropic_default_model_when_env_is_missing(tmp_path):
-    args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--provider", "anthropic"])
+    args = pico_pkg.build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--provider", "anthropic"]
+    )
 
     with patch.dict(
         os.environ,
@@ -979,32 +1106,44 @@ def test_build_agent_uses_deepseek_provider_and_env_configuration(tmp_path):
         },
         clear=True,
     ):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch(
-            "repoagent.cli.OpenAICompatibleModelClient",
-            side_effect=AssertionError("openai client should not be used"),
-        ), patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch(
+                "repoagent.cli.OpenAICompatibleModelClient",
+                side_effect=AssertionError("openai client should not be used"),
+            ),
+            patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic,
+        ):
             fake_client = mock_anthropic.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_anthropic.assert_called_once()
     assert mock_anthropic.call_args.kwargs["model"] == "deepseek-v4-pro"
-    assert mock_anthropic.call_args.kwargs["base_url"] == "https://api.deepseek.com/anthropic"
+    assert (
+        mock_anthropic.call_args.kwargs["base_url"]
+        == "https://api.deepseek.com/anthropic"
+    )
     assert mock_anthropic.call_args.kwargs["api_key"] == "sk-project-deepseek"
     assert agent.model_client is fake_client
 
 
 def test_build_agent_uses_deepseek_default_model_when_env_is_missing(tmp_path):
-    args = pico_pkg.build_arg_parser().parse_args(["--cwd", str(tmp_path), "--provider", "deepseek"])
+    args = pico_pkg.build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--provider", "deepseek"]
+    )
 
     with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-deepseek"}, clear=True):
         with patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic:
             pico_pkg.build_agent(args)
 
     assert mock_anthropic.call_args.kwargs["model"] == "deepseek-v4-pro"
-    assert mock_anthropic.call_args.kwargs["base_url"] == "https://api.deepseek.com/anthropic"
+    assert (
+        mock_anthropic.call_args.kwargs["base_url"]
+        == "https://api.deepseek.com/anthropic"
+    )
 
 
 def test_build_agent_uses_deepseek_provider_by_default(tmp_path):
@@ -1018,19 +1157,26 @@ def test_build_agent_uses_deepseek_provider_by_default(tmp_path):
         },
         clear=False,
     ):
-        with patch(
-            "repoagent.cli.OllamaModelClient",
-            side_effect=AssertionError("ollama client should not be used"),
-        ), patch(
-            "repoagent.cli.OpenAICompatibleModelClient",
-            side_effect=AssertionError("openai client should not be used"),
-        ), patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic:
+        with (
+            patch(
+                "repoagent.cli.OllamaModelClient",
+                side_effect=AssertionError("ollama client should not be used"),
+            ),
+            patch(
+                "repoagent.cli.OpenAICompatibleModelClient",
+                side_effect=AssertionError("openai client should not be used"),
+            ),
+            patch("repoagent.cli.AnthropicCompatibleModelClient") as mock_anthropic,
+        ):
             fake_client = mock_anthropic.return_value
             agent = pico_pkg.build_agent(args)
 
     mock_anthropic.assert_called_once()
     assert mock_anthropic.call_args.kwargs["model"] == "deepseek-v4-pro"
-    assert mock_anthropic.call_args.kwargs["base_url"] == "https://api.deepseek.com/anthropic"
+    assert (
+        mock_anthropic.call_args.kwargs["base_url"]
+        == "https://api.deepseek.com/anthropic"
+    )
     assert mock_anthropic.call_args.kwargs["api_key"] == "sk-test"
     assert agent.model_client is fake_client
 
@@ -1084,7 +1230,10 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
             ],
         )
 
-        assert agent.ask("Mask the secret sk-test-secret-123") == "Masked sk-test-secret-123."
+        assert (
+            agent.ask("Mask the secret sk-test-secret-123")
+            == "Masked sk-test-secret-123."
+        )
 
     runs_root = tmp_path / ".repoagent" / "runs"
     run_dirs = [path for path in runs_root.iterdir() if path.is_dir()]
@@ -1104,7 +1253,9 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
     assert "<redacted>" in turn_text
     assert "<redacted>" in turn_events_text
 
-    prompt_events = [event for event in trace_events if event["event"] == "prompt_built"]
+    prompt_events = [
+        event for event in trace_events if event["event"] == "prompt_built"
+    ]
     assert prompt_events
     assert prompt_events[0]["prompt_metadata"]["secret_env_count"] >= 1
     assert "OPENAI_API_KEY" in prompt_events[0]["prompt_metadata"]["secret_env_names"]
@@ -1117,9 +1268,20 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
 
 def test_prompt_budget_metadata_records_budget_decisions(tmp_path):
     agent = build_agent(tmp_path, ["<final>Done.</final>"])
-    agent.memory.append_note("alpha episodic note " + ("A" * 120), tags=("recall",), created_at="2026-04-07T10:00:00+00:00")
-    agent.memory.append_note("beta episodic recall note " + ("B" * 120), created_at="2026-04-07T10:01:00+00:00")
-    agent.memory.append_note("gamma episodic note " + ("C" * 120), tags=("recall",), created_at="2026-04-07T10:02:00+00:00")
+    agent.memory.append_note(
+        "alpha episodic note " + ("A" * 120),
+        tags=("recall",),
+        created_at="2026-04-07T10:00:00+00:00",
+    )
+    agent.memory.append_note(
+        "beta episodic recall note " + ("B" * 120),
+        created_at="2026-04-07T10:01:00+00:00",
+    )
+    agent.memory.append_note(
+        "gamma episodic note " + ("C" * 120),
+        tags=("recall",),
+        created_at="2026-04-07T10:02:00+00:00",
+    )
 
     for index in range(4):
         agent.record(
@@ -1130,8 +1292,8 @@ def test_prompt_budget_metadata_records_budget_decisions(tmp_path):
             }
         )
 
-    agent.context_manager.total_budget = 1000
-    agent.context_manager.section_budgets = {
+    agent.context_manager.total_token_budget = 1000
+    agent.context_manager.segment_token_budgets = {
         "prefix": 80,
         "memory": 80,
         "relevant_memory": 80,
@@ -1142,16 +1304,29 @@ def test_prompt_budget_metadata_records_budget_decisions(tmp_path):
 
     trace_events = [
         json.loads(line)
-        for line in (agent.run_store.trace_path(agent.current_task_state).read_text(encoding="utf-8").splitlines())
+        for line in (
+            agent.run_store.trace_path(agent.current_task_state)
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
     ]
-    prompt_events = [event for event in trace_events if event["event"] == "prompt_built"]
+    prompt_events = [
+        event for event in trace_events if event["event"] == "prompt_built"
+    ]
     assert prompt_events
     metadata = prompt_events[0]["prompt_metadata"]
-    relevant_section = agent.model_client.prompts[0].split("Relevant memory:\n", 1)[1].split("\n\nTranscript:", 1)[0]
+    relevant_section = (
+        agent.model_client.prompts[0]
+        .split("Relevant memory:\n", 1)[1]
+        .split("\n\nTranscript:", 1)[0]
+    )
 
     assert metadata["relevant_memory"]["selected_count"] == 3
     assert len(metadata["relevant_memory"]["rendered_notes"]) == 3
-    assert len([line for line in relevant_section.splitlines() if line.startswith("- ")]) == 3
+    assert (
+        len([line for line in relevant_section.splitlines() if line.startswith("- ")])
+        == 3
+    )
     assert "alpha episodic" in relevant_section
     assert "beta episodic" in relevant_section
     assert "gamma episodic" in relevant_section
@@ -1179,7 +1354,9 @@ def test_prompt_metadata_refreshes_prefix_when_workspace_changes(tmp_path):
     assert "demo changed" in agent.prefix
 
 
-def test_agent_creates_checkpoint_when_context_reduction_happens_and_artifacts_only_reference_it(tmp_path):
+def test_agent_creates_checkpoint_when_context_reduction_happens_and_artifacts_only_reference_it(
+    tmp_path,
+):
     agent = build_agent(tmp_path, ["<final>Done after checkpoint.</final>"])
     for index in range(10):
         agent.record(
@@ -1189,9 +1366,13 @@ def test_agent_creates_checkpoint_when_context_reduction_happens_and_artifacts_o
                 "created_at": f"2026-04-07T10:{index:02d}:00+00:00",
             }
         )
-    agent.memory.append_note("checkpoint note " + ("B" * 220), tags=("checkpoint",), created_at="2026-04-07T11:00:00+00:00")
-    agent.context_manager.total_budget = 900
-    agent.context_manager.section_budgets = {
+    agent.memory.append_note(
+        "checkpoint note " + ("B" * 220),
+        tags=("checkpoint",),
+        created_at="2026-04-07T11:00:00+00:00",
+    )
+    agent.context_manager.total_token_budget = 300
+    agent.context_manager.segment_token_budgets = {
         "prefix": 120,
         "memory": 120,
         "relevant_memory": 120,
@@ -1209,11 +1390,21 @@ def test_agent_creates_checkpoint_when_context_reduction_happens_and_artifacts_o
     assert checkpoint["current_blocker"] == ""
     assert checkpoint["next_step"]
 
-    task_state = json.loads(agent.run_store.task_state_path(agent.current_task_state).read_text(encoding="utf-8"))
-    report = json.loads(agent.run_store.report_path(agent.current_task_state).read_text(encoding="utf-8"))
+    task_state = json.loads(
+        agent.run_store.task_state_path(agent.current_task_state).read_text(
+            encoding="utf-8"
+        )
+    )
+    report = json.loads(
+        agent.run_store.report_path(agent.current_task_state).read_text(
+            encoding="utf-8"
+        )
+    )
     trace_events = [
         json.loads(line)
-        for line in agent.run_store.trace_path(agent.current_task_state).read_text(encoding="utf-8").splitlines()
+        for line in agent.run_store.trace_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert task_state["checkpoint_id"] == checkpoint["checkpoint_id"]
@@ -1221,7 +1412,9 @@ def test_agent_creates_checkpoint_when_context_reduction_happens_and_artifacts_o
     assert report["task_state"]["checkpoint_id"] == checkpoint["checkpoint_id"]
     assert "current_goal" not in task_state
     assert "current_goal" not in report
-    checkpoint_events = [event for event in trace_events if event["event"] == "checkpoint_created"]
+    checkpoint_events = [
+        event for event in trace_events if event["event"] == "checkpoint_created"
+    ]
     assert checkpoint_events
     assert checkpoint_events[-1]["checkpoint_id"] == checkpoint["checkpoint_id"]
     assert "current_goal" not in checkpoint_events[-1]
@@ -1290,7 +1483,9 @@ def test_resume_invalidates_stale_file_summaries_and_marks_partial_stale(tmp_pat
                 "key_files": [{"path": "runtime.py", "freshness": freshness}],
                 "freshness": {"runtime.py": freshness},
                 "summary": "runtime.py is important",
-                "runtime_identity": {"workspace_fingerprint": agent.workspace.fingerprint()},
+                "runtime_identity": {
+                    "workspace_fingerprint": agent.workspace.fingerprint()
+                },
             }
         },
     }
@@ -1312,7 +1507,9 @@ def test_resume_invalidates_stale_file_summaries_and_marks_partial_stale(tmp_pat
     assert resumed.last_prompt_metadata["stale_summary_invalidations"] == 1
 
 
-def test_run_shell_nonzero_with_workspace_change_is_recorded_as_partial_success(tmp_path):
+def test_run_shell_nonzero_with_workspace_change_is_recorded_as_partial_success(
+    tmp_path,
+):
     agent = build_agent(tmp_path, [])
 
     result = agent.run_tool(
@@ -1329,7 +1526,9 @@ def test_run_shell_nonzero_with_workspace_change_is_recorded_as_partial_success(
     assert agent._last_tool_result_metadata["workspace_changed"] is True
 
 
-def test_resume_marks_workspace_mismatch_when_checkpoint_runtime_identity_is_stale(tmp_path):
+def test_resume_marks_workspace_mismatch_when_checkpoint_runtime_identity_is_stale(
+    tmp_path,
+):
     agent = build_agent(tmp_path, ["<final>checkpoint ready.</final>"])
     agent.session["checkpoints"] = {
         "current_id": "ckpt_workspace",
@@ -1378,9 +1577,13 @@ def test_write_file_trace_records_minimum_tool_contract_fields(tmp_path):
 
     trace_events = [
         json.loads(line)
-        for line in agent.run_store.trace_path(agent.current_task_state).read_text(encoding="utf-8").splitlines()
+        for line in agent.run_store.trace_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
-    tool_event = [event for event in trace_events if event["event"] == "tool_executed"][-1]
+    tool_event = [event for event in trace_events if event["event"] == "tool_executed"][
+        -1
+    ]
 
     assert tool_event["name"] == "write_file"
     assert tool_event["risk_level"] == "high"
@@ -1409,7 +1612,9 @@ def test_resume_marks_schema_mismatch_when_checkpoint_version_is_incompatible(tm
                 "key_files": [],
                 "freshness": {},
                 "summary": "schema changed",
-                "runtime_identity": {"workspace_fingerprint": agent.workspace.fingerprint()},
+                "runtime_identity": {
+                    "workspace_fingerprint": agent.workspace.fingerprint()
+                },
             }
         },
     }
@@ -1467,7 +1672,9 @@ def test_freshness_mismatch_creates_checkpoint_before_model_completion(tmp_path)
                 "key_files": [{"path": "runtime.py", "freshness": freshness}],
                 "freshness": {"runtime.py": freshness},
                 "summary": "runtime.py changed",
-                "runtime_identity": {"workspace_fingerprint": agent.workspace.fingerprint()},
+                "runtime_identity": {
+                    "workspace_fingerprint": agent.workspace.fingerprint()
+                },
             }
         },
     }
@@ -1478,9 +1685,13 @@ def test_freshness_mismatch_creates_checkpoint_before_model_completion(tmp_path)
 
     trace_events = [
         json.loads(line)
-        for line in agent.run_store.trace_path(agent.current_task_state).read_text(encoding="utf-8").splitlines()
+        for line in agent.run_store.trace_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
-    checkpoint_events = [event for event in trace_events if event["event"] == "checkpoint_created"]
+    checkpoint_events = [
+        event for event in trace_events if event["event"] == "checkpoint_created"
+    ]
 
     assert checkpoint_events
     assert checkpoint_events[0]["trigger"] == "freshness_mismatch"
@@ -1512,7 +1723,9 @@ def test_runtime_identity_persists_key_execution_metadata(tmp_path):
     assert runtime_identity["shell_env_allowlist"] == list(agent.shell_env_allowlist)
 
 
-def test_resume_records_runtime_identity_mismatch_fields_in_metadata_and_trace(tmp_path):
+def test_resume_records_runtime_identity_mismatch_fields_in_metadata_and_trace(
+    tmp_path,
+):
     agent = build_agent(tmp_path, ["<final>checkpoint ready.</final>"])
     agent.session["checkpoints"] = {
         "current_id": "ckpt_identity",
@@ -1573,9 +1786,13 @@ def test_resume_records_runtime_identity_mismatch_fields_in_metadata_and_trace(t
 
     trace_events = [
         json.loads(line)
-        for line in resumed.run_store.trace_path(resumed.current_task_state).read_text(encoding="utf-8").splitlines()
+        for line in resumed.run_store.trace_path(resumed.current_task_state)
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
-    mismatch_events = [event for event in trace_events if event["event"] == "runtime_identity_mismatch"]
+    mismatch_events = [
+        event for event in trace_events if event["event"] == "runtime_identity_mismatch"
+    ]
     assert mismatch_events
     assert mismatch_events[0]["fields"] == [
         "approval_policy",
@@ -1605,7 +1822,10 @@ def test_partial_success_creates_process_note_for_exploration_history(tmp_path):
     ]
 
     assert process_notes
-    assert process_notes[-1]["text"] == "run_shell partial_success on README.md; inspect diff before retry"
+    assert (
+        process_notes[-1]["text"]
+        == "run_shell partial_success on README.md; inspect diff before retry"
+    )
     assert "partial_success" in process_notes[-1]["tags"]
     assert "README.md" in process_notes[-1]["tags"]
 
@@ -1628,16 +1848,27 @@ def test_explicit_memory_promotion_persists_durable_memory_topics(tmp_path):
     assert "Project convention:" in answer
 
     index_path = tmp_path / ".repoagent" / "memory" / "MEMORY.md"
-    conventions_path = tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    conventions_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    )
     decisions_path = tmp_path / ".repoagent" / "memory" / "topics" / "key-decisions.md"
-    report = json.loads(agent.run_store.report_path(agent.current_task_state).read_text(encoding="utf-8"))
+    report = json.loads(
+        agent.run_store.report_path(agent.current_task_state).read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert index_path.exists()
     assert conventions_path.exists()
     assert decisions_path.exists()
     assert "project-conventions" in index_path.read_text(encoding="utf-8")
-    assert "Use constrained tools instead of guessing." in conventions_path.read_text(encoding="utf-8")
-    assert "Keep durable memory topic-based and lightweight." in decisions_path.read_text(encoding="utf-8")
+    assert "Use constrained tools instead of guessing." in conventions_path.read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "Keep durable memory topic-based and lightweight."
+        in decisions_path.read_text(encoding="utf-8")
+    )
     assert report["durable_promotions"] == [
         "project-conventions: Use constrained tools instead of guessing.",
         "project-conventions: Preserve local agent state under .repoagent/.",
@@ -1658,11 +1889,17 @@ def test_explicit_memory_promotion_supports_chinese_intent_and_labels(tmp_path):
 
     assert "项目约定：" in answer
 
-    conventions_path = tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    conventions_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    )
     decisions_path = tmp_path / ".repoagent" / "memory" / "topics" / "key-decisions.md"
 
-    assert "优先使用受约束工具，不要靠猜。" in conventions_path.read_text(encoding="utf-8")
-    assert "持久记忆保持轻量、按 topic 管理。" in decisions_path.read_text(encoding="utf-8")
+    assert "优先使用受约束工具，不要靠猜。" in conventions_path.read_text(
+        encoding="utf-8"
+    )
+    assert "持久记忆保持轻量、按 topic 管理。" in decisions_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_explicit_memory_promotion_rejects_secret_shaped_and_transient_lines(tmp_path):
@@ -1678,9 +1915,17 @@ def test_explicit_memory_promotion_rejects_secret_shaped_and_transient_lines(tmp
 
     agent.ask("Capture these stable facts into durable memory.")
 
-    report = json.loads(agent.run_store.report_path(agent.current_task_state).read_text(encoding="utf-8"))
-    conventions_path = tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
-    dependency_path = tmp_path / ".repoagent" / "memory" / "topics" / "dependency-facts.md"
+    report = json.loads(
+        agent.run_store.report_path(agent.current_task_state).read_text(
+            encoding="utf-8"
+        )
+    )
+    conventions_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    )
+    dependency_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "dependency-facts.md"
+    )
 
     assert report["durable_promotions"] == [
         "project-conventions: Use constrained tools instead of guessing.",
@@ -1690,7 +1935,9 @@ def test_explicit_memory_promotion_rejects_secret_shaped_and_transient_lines(tmp
         "key-decisions:transient_task_state",
         "dependency-facts:noisy_output",
     ]
-    assert "Use constrained tools instead of guessing." in conventions_path.read_text(encoding="utf-8")
+    assert "Use constrained tools instead of guessing." in conventions_path.read_text(
+        encoding="utf-8"
+    )
     assert not dependency_path.exists()
 
 
@@ -1703,11 +1950,23 @@ def test_explicit_memory_promotion_supersedes_matching_durable_fact(tmp_path):
         ],
     )
 
-    assert agent.ask("Capture this stable dependency fact into durable memory.") == "Dependency: Python runtime is 3.11."
-    assert agent.ask("Save the updated dependency fact into durable memory.") == "Dependency: Python runtime is 3.12."
+    assert (
+        agent.ask("Capture this stable dependency fact into durable memory.")
+        == "Dependency: Python runtime is 3.11."
+    )
+    assert (
+        agent.ask("Save the updated dependency fact into durable memory.")
+        == "Dependency: Python runtime is 3.12."
+    )
 
-    dependency_path = tmp_path / ".repoagent" / "memory" / "topics" / "dependency-facts.md"
-    report = json.loads(agent.run_store.report_path(agent.current_task_state).read_text(encoding="utf-8"))
+    dependency_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "dependency-facts.md"
+    )
+    report = json.loads(
+        agent.run_store.report_path(agent.current_task_state).read_text(
+            encoding="utf-8"
+        )
+    )
     text = dependency_path.read_text(encoding="utf-8")
 
     assert "Python runtime is 3.12." in text
@@ -1729,7 +1988,9 @@ def test_explicit_memory_promotion_dedupes_duplicate_durable_note(tmp_path):
     agent.ask("Capture the stable fact into durable memory.")
     agent.ask("Capture the stable fact into durable memory again.")
 
-    conventions_path = tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    conventions_path = (
+        tmp_path / ".repoagent" / "memory" / "topics" / "project-conventions.md"
+    )
     text = conventions_path.read_text(encoding="utf-8")
 
     assert text.count("Use constrained tools instead of guessing.") == 1
@@ -1761,7 +2022,10 @@ def test_agent_records_model_cache_metadata_in_last_prompt_metadata(tmp_path):
     assert agent.last_prompt_metadata["cached_tokens"] == 512
     assert agent.last_prompt_metadata["cache_hit"] is True
     assert agent.last_prompt_metadata["prefix_hash"]
-    assert agent.last_prompt_metadata["prompt_cache_key"] == agent.last_prompt_metadata["prefix_hash"]
+    assert (
+        agent.last_prompt_metadata["prompt_cache_key"]
+        == agent.last_prompt_metadata["prefix_hash"]
+    )
 
 
 def test_recent_transcript_entries_stay_richer_than_older_ones(tmp_path):
@@ -1769,14 +2033,58 @@ def test_recent_transcript_entries_stay_richer_than_older_ones(tmp_path):
     old_text = "OLD-" + ("A" * 320)
     recent_text = "RECENT-" + ("B" * 320)
 
-    agent.record({"role": "user", "content": old_text, "created_at": "2026-04-07T09:00:00+00:00"})
-    agent.record({"role": "assistant", "content": old_text, "created_at": "2026-04-07T09:01:00+00:00"})
-    agent.record({"role": "user", "content": recent_text, "created_at": "2026-04-07T09:02:00+00:00"})
-    agent.record({"role": "assistant", "content": recent_text, "created_at": "2026-04-07T09:03:00+00:00"})
-    agent.record({"role": "user", "content": recent_text, "created_at": "2026-04-07T09:04:00+00:00"})
-    agent.record({"role": "assistant", "content": recent_text, "created_at": "2026-04-07T09:05:00+00:00"})
-    agent.record({"role": "user", "content": recent_text, "created_at": "2026-04-07T09:06:00+00:00"})
-    agent.record({"role": "assistant", "content": recent_text, "created_at": "2026-04-07T09:07:00+00:00"})
+    agent.record(
+        {"role": "user", "content": old_text, "created_at": "2026-04-07T09:00:00+00:00"}
+    )
+    agent.record(
+        {
+            "role": "assistant",
+            "content": old_text,
+            "created_at": "2026-04-07T09:01:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "user",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:02:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "assistant",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:03:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "user",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:04:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "assistant",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:05:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "user",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:06:00+00:00",
+        }
+    )
+    agent.record(
+        {
+            "role": "assistant",
+            "content": recent_text,
+            "created_at": "2026-04-07T09:07:00+00:00",
+        }
+    )
 
     assert agent.ask("Check the transcript") == "Done."
 
