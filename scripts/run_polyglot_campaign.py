@@ -41,6 +41,8 @@ def build_arg_parser():
     parser.add_argument("--hard-cost-cap-usd", type=float, required=True)
     parser.add_argument("--input-cost-per-1m-usd", type=float, required=True)
     parser.add_argument("--output-cost-per-1m-usd", type=float, required=True)
+    parser.add_argument("--cache-read-cost-per-1m-usd", type=float, default=None)
+    parser.add_argument("--cache-write-cost-per-1m-usd", type=float, default=None)
     parser.add_argument("--pricing-source", required=True)
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--image", required=True)
@@ -70,6 +72,8 @@ def main(argv=None):
         args.input_cost_per_1m_usd,
         args.output_cost_per_1m_usd,
         args.pricing_source,
+        cache_read_per_1m_usd=args.cache_read_cost_per_1m_usd,
+        cache_write_per_1m_usd=args.cache_write_cost_per_1m_usd,
     )
     base_agent_args = build_agent_arg_parser().parse_args([])
     base_agent_args.profile = args.profile
@@ -82,6 +86,8 @@ def main(argv=None):
     base_agent_args.context_token_budget = args.context_token_budget
     base_agent_args.input_cost_per_1m_usd = args.input_cost_per_1m_usd
     base_agent_args.output_cost_per_1m_usd = args.output_cost_per_1m_usd
+    base_agent_args.cache_read_cost_per_1m_usd = args.cache_read_cost_per_1m_usd
+    base_agent_args.cache_write_cost_per_1m_usd = args.cache_write_cost_per_1m_usd
     base_agent_args.pricing_source = args.pricing_source
     base_agent_args.sandbox_backend = "docker"
     base_agent_args.sandbox_docker_executable = args.docker

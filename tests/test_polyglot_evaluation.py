@@ -29,6 +29,7 @@ from repoagent.evaluation.provider_probe import (
     ProviderProbeResult,
 )
 from repoagent.atomic_io import file_lock
+from scripts.run_polyglot_campaign import build_arg_parser as campaign_arg_parser
 
 
 def _exercise(root: Path, language: str, name: str, *, bad_solution=None):
@@ -63,6 +64,36 @@ def _dataset(tmp_path):
         _exercise(tmp_path, language, "alpha")
         _exercise(tmp_path, language, "beta")
     return tmp_path
+
+
+def test_live_campaign_parser_preserves_explicit_cache_pricing():
+    args = campaign_arg_parser().parse_args(
+        [
+            "--dataset",
+            "dataset",
+            "--output",
+            "output",
+            "--max-input-tokens-per-call",
+            "12000",
+            "--hard-cost-cap-usd",
+            "0.13",
+            "--input-cost-per-1m-usd",
+            "0.44",
+            "--output-cost-per-1m-usd",
+            "1.32",
+            "--cache-read-cost-per-1m-usd",
+            "0.014",
+            "--cache-write-cost-per-1m-usd",
+            "0",
+            "--pricing-source",
+            "official",
+            "--image",
+            "polyglot:1",
+        ]
+    )
+
+    assert args.cache_read_cost_per_1m_usd == 0.014
+    assert args.cache_write_cost_per_1m_usd == 0
 
 
 def test_polyglot_adapter_separates_runner_and_grader_inputs(tmp_path):

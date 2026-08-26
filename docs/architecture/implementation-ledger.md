@@ -2477,6 +2477,12 @@ gate instead of being interpreted as zero spend. A benchmark-keyed process lock
 prevents concurrent paid writers, and source provenance is captured before the
 campaign and compared again after execution.
 
+The live campaign CLI accepts separate cache-read and cache-write rates and passes
+the same complete pricing snapshot to both budget evidence and the Agent call
+ledger. This matters for Providers such as DeepSeek that report cached tokens
+separately: a campaign with cache usage and no corresponding rate must fail cost
+completeness instead of presenting cached input as free.
+
 The live task and campaign entry points now force both model-directed shell tools
 and hidden-test grading through the configured Docker runtime with isolation
 required. The Docker executable, image and resource limits are shared across both
