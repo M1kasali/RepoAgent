@@ -118,6 +118,7 @@ Copy this section for each completed capability.
 | Structured conversation replay | `repoagent/conversation.py`, `repoagent/agent_loop.py`, `repoagent/providers/clients.py` | budgeted cross-Turn Tool/Reasoning replay with prompt-only compatibility | TECH-077 |
 | Responses reasoning recovery | `repoagent/providers/clients.py`, `repoagent/agent_loop.py` | normalized reasoning-only output, opaque replay, and bounded structured prefill | TECH-078 |
 | Prompt-only overflow recovery | `repoagent/context_overflow.py`, `repoagent/context_manager.py`, `repoagent/agent_loop.py` | emergency history snapshot and token-budget reduction for legacy/Ollama prompts | TECH-079 |
+| Live Polyglot acceptance | local ignored evidence under `artifacts/polyglot-live/` | source-bound DeepSeek/Docker single-task pass and retained failure | TECH-080 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -2619,6 +2620,39 @@ after one call. A focused Agent test verifies that the retry's actual prompt is
 shorter, while the no-elision test verifies that an unchanged prompt is never
 retried. Final verification passed 590 tests with six pre-existing metrics
 deprecation warnings; Ruff and whitespace checks passed.
+
+## TECH-080 - Bounded Live Polyglot Acceptance
+
+- Area: real-provider coding task, isolation, grading, and cost evidence
+- Status: single-task acceptance passed; 24-task canary pending
+- Executed: 2026-08-26
+- Source commit: `5a3b54b95d9912c1415af88e663c03ba7e3fab35`
+- Benchmark: Aider Polyglot commit `7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f`, task `python/affine-cipher`
+- Local evidence: `artifacts/polyglot-live/deepseek-affine-5a3b54b-live-pass-20260826/`
+
+A clean-source live campaign used `deepseek-v4-flash` and the isolated
+`repoagent-polyglot-python:20260825` Docker image. Provider preflight resolved the
+requested model without fallback, returned the exact native Tool call, and
+reported actual usage. The Agent then completed five model calls and four Tool
+steps in the sequence `list_files`, `read_file`, `write_file`, `run_shell`, and
+final answer. The Turn converged with `final_answer_returned`; the hidden Docker
+grader passed all 16 tests.
+
+All aggregate gates passed: the planned denominator was 1/1, worst-case admission
+was $0.122665 under a $0.13 cap, observed task calls were 5 under a limit of 14,
+source identity remained stable, and the five task calls had complete estimated
+cost of $0.002248288 using the recorded official peak-rate snapshot. Usage was
+2,005 fresh input, 17,152 cache-read, and 853 output tokens. The separate
+preflight request is not included in the task-call cost total, so this number must
+not be represented as an account-billing total.
+
+The evidence validator recomputed the result schema and every referenced evidence
+digest successfully. A preceding independent run on source commit `43983c8`
+converged but failed one hidden test (15/16): the generated coprimality check only
+tested divisibility by 26. Its failure bundle is also retained locally. The two
+runs demonstrate why convergence and code correctness are separate gates, but
+they are not a general quality estimate. The successful run has effective N=1
+and a Wilson 95% pass-rate interval of approximately [20.65%, 100%].
 
 ## 5. Decision Index
 

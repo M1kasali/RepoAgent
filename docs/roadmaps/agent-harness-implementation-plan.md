@@ -421,8 +421,9 @@ are forced through the configured Docker runtime in the live entry points.
 The active slice is `P11-06`: CI now runs and uploads a credential-free two-task,
 two-repetition fixture campaign, then validates the aggregate result and per-row
 evidence. The remaining work is the bounded 24-task six-language live canary outside
-PR CI. Live DeepSeek diagnostics previously produced three 16/16 patches but failed
-the convergence gate, while an 8k-context run exposed malformed streamed native-tool
-JSON. The `json_repair` fallback and strict post-repair object/Schema checks cover
-that protocol failure offline; paid canary expansion still requires a bounded live
-replay confirming both protocol recovery and normal Turn convergence.
+PR CI. A clean-source DeepSeek V4 Flash replay on `python/affine-cipher` now passed
+provider preflight, normal Turn convergence, Docker shell execution, complete cost
+accounting and all 16 hidden tests; a preceding independent repetition converged
+but passed only 15/16. This completes the single-task live acceptance gate without
+claiming general quality. Paid expansion to the frozen 24-task, six-language canary
+remains required before `P11-06` can close.
