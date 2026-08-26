@@ -1,0 +1,8 @@
+{
+  "blurb": "Deterministic fixture alpha",
+  "files": {
+    "solution": ["src/answer.txt"],
+    "test": ["tests/expected.txt"],
+    "example": []
+  }
+}

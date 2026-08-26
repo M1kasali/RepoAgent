@@ -144,9 +144,11 @@ from .subagents import (
 from .security import NetworkPolicy, NetworkPolicyError
 from .sandbox import (
     DirectSandboxAdapter,
+    DockerSandboxAdapter,
     IsolatedSandboxAdapter,
     SandboxAdapter,
     SandboxConfigurationError,
+    build_sandbox_adapter,
 )
 from .skills import (
     ActivatedSkill,
@@ -250,6 +252,7 @@ __all__ = [
     "EvaluationResult",
     "EvaluationRow",
     "DirectSandboxAdapter",
+    "DockerSandboxAdapter",
     "DirectoryChannel",
     "DeliveryResult",
     "FallbackModelClient",
@@ -319,6 +322,7 @@ __all__ = [
     "build_arg_parser",
     "build_product_parser",
     "build_welcome",
+    "build_sandbox_adapter",
     "capability_token_digest",
     "compare_results",
     "inspect_release_source",

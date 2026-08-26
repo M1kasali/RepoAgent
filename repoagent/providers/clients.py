@@ -11,9 +11,12 @@ from http.client import RemoteDisconnected
 import urllib.error
 import urllib.request
 
+import json_repair
+
 from .base import (
     CancellationToken,
     ModelEvent,
+    ModelMessage,
     ModelRequest,
     ModelResult,
     ModelUsage,
@@ -28,12 +31,119 @@ from .base import (
 OPENAI_COMPATIBLE_USER_AGENT = "repoagent/0.1"
 
 
+def _provider_name(client) -> str:
+    profile = getattr(client, "profile", None)
+    return str(getattr(profile, "provider", "") or type(client).__name__)
+
+
+def _request_messages(request: ModelRequest) -> tuple[ModelMessage, ...]:
+    return request.messages or (ModelMessage(role="user", content=request.prompt),)
+
+
+def _openai_response_input(request: ModelRequest) -> list[dict]:
+    items = []
+    for index, message in enumerate(_request_messages(request)):
+        if message.role in {"system", "user"}:
+            items.append(
+                {
+                    "role": message.role,
+                    "content": [{"type": "input_text", "text": message.content}],
+                }
+            )
+        elif message.role == "assistant":
+            for block in message.thinking_blocks:
+                block = dict(block)
+                if block.get("type") != "reasoning":
+                    continue
+                replay = {
+                    key: block[key]
+                    for key in (
+                        "type",
+                        "id",
+                        "status",
+                        "summary",
+                        "encrypted_content",
+                    )
+                    if key in block
+                }
+                # Responses reasoning items are opaque server-issued values. Do not
+                # fabricate an input item from a display-only reasoning summary.
+                if replay.get("id") or replay.get("encrypted_content"):
+                    items.append(replay)
+            if message.content:
+                items.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": message.content}],
+                        "status": "completed",
+                        "id": f"msg_{index}",
+                    }
+                )
+            for call in message.tool_calls:
+                items.append(
+                    {
+                        "type": "function_call",
+                        "id": f"fc_{index}",
+                        "call_id": call.id,
+                        "name": call.name,
+                        "arguments": json.dumps(
+                            dict(call.arguments), sort_keys=True, separators=(",", ":")
+                        ),
+                    }
+                )
+        else:
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id,
+                    "output": message.content,
+                }
+            )
+    return items
+
+
+def _anthropic_messages(request: ModelRequest) -> list[dict]:
+    projected = []
+
+    def append(role, blocks):
+        if projected and projected[-1]["role"] == role:
+            projected[-1]["content"].extend(blocks)
+        else:
+            projected.append({"role": role, "content": blocks})
+
+    for message in _request_messages(request):
+        if message.role == "system":
+            append("user", [{"type": "text", "text": message.content}])
+        elif message.role in {"user", "assistant"}:
+            blocks = []
+            if message.role == "assistant":
+                blocks.extend(dict(block) for block in message.thinking_blocks)
+            if message.content:
+                blocks.append({"type": "text", "text": message.content})
+            if message.role == "assistant":
+                blocks.extend(
+                    {
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": dict(call.arguments),
+                    }
+                    for call in message.tool_calls
+                )
+            append(message.role, blocks)
+        else:
+            block = {
+                "type": "tool_result",
+                "tool_use_id": message.tool_call_id,
+                "content": message.content or "(empty)",
+            }
+            append("user", [block])
+    return projected
+
+
 def _usage_source(values, *keys):
-    return (
-        "actual"
-        if any(values.get(key) is not None for key in keys)
-        else "missing"
-    )
+    return "actual" if any(values.get(key) is not None for key in keys) else "missing"
 
 
 def _raise_if_cancelled(token: CancellationToken | None, provider: str) -> None:
@@ -76,9 +186,11 @@ class _TypedModelClient:
         return ModelResult(
             text=str(text),
             tool_calls=tuple(getattr(self, "last_tool_calls", ()) or ()),
+            reasoning_content=str(getattr(self, "last_reasoning_content", "") or ""),
+            thinking_blocks=tuple(getattr(self, "last_thinking_blocks", ()) or ()),
             finish_reason=str(getattr(self, "last_finish_reason", "stop")),
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=str(getattr(self, "model", "")),
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,
@@ -96,26 +208,47 @@ class _TypedModelClient:
 
 def _http_provider_error(provider, label, exc, body):
     status = int(exc.code)
-    if status == 429:
+    lowered = str(body).lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "context length",
+            "context window",
+            "maximum context",
+            "too many tokens",
+            "reduce the length",
+        )
+    ):
+        category, retryable, should_fallback = "context_overflow", False, False
+        should_compress = True
+    elif status == 429:
         category, retryable, should_fallback = "rate_limit", True, True
+        should_compress = False
     elif status >= 500:
         category, retryable, should_fallback = "server", True, True
+        should_compress = False
     elif status == 408:
         category, retryable, should_fallback = "timeout", True, True
+        should_compress = False
     elif status == 402:
         category, retryable, should_fallback = "billing", False, True
+        should_compress = False
     elif status == 404:
         category, retryable, should_fallback = "model_unavailable", False, True
+        should_compress = False
     elif status in {401, 403}:
         category, retryable, should_fallback = "auth", False, False
+        should_compress = False
     else:
         category, retryable, should_fallback = "request", False, False
+        should_compress = False
     return ProviderError(
         f"{label} request failed with HTTP {status}: {body}",
         category=category,
         provider=provider,
         retryable=retryable,
         should_fallback=should_fallback,
+        should_compress=should_compress,
         status_code=status,
     )
 
@@ -305,7 +438,7 @@ class OllamaModelClient(_TypedModelClient):
         result = ModelResult(
             text="".join(parts),
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=self.model,
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,
@@ -348,6 +481,30 @@ def _extract_openai_text(data):
     return ""
 
 
+def _extract_openai_reasoning(data):
+    blocks = tuple(
+        dict(item)
+        for item in data.get("output", [])
+        if isinstance(item, dict) and item.get("type") == "reasoning"
+    )
+    summary_parts = []
+    for block in blocks:
+        for part in block.get("summary") or []:
+            if not isinstance(part, dict) or part.get("type") != "summary_text":
+                continue
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                summary_parts.append(text)
+
+    choices = data.get("choices") or []
+    if not summary_parts and choices:
+        message = choices[0].get("message") or {}
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            summary_parts.append(reasoning)
+    return "\n".join(summary_parts).strip(), blocks
+
+
 def _decode_tool_arguments(value, *, provider):
     if isinstance(value, dict):
         return value
@@ -358,11 +515,14 @@ def _decode_tool_arguments(value, *, provider):
         )
     try:
         arguments = json.loads(value or "{}")
-    except json.JSONDecodeError as exc:
-        raise ProviderProtocolError(
-            "native tool arguments are not valid JSON",
-            provider=provider,
-        ) from exc
+    except json.JSONDecodeError:
+        try:
+            arguments = json_repair.loads(value or "{}")
+        except Exception as exc:
+            raise ProviderProtocolError(
+                "native tool arguments are not repairable JSON",
+                provider=provider,
+            ) from exc
     if not isinstance(arguments, dict):
         raise ProviderProtocolError(
             "native tool arguments must decode to an object",
@@ -409,7 +569,7 @@ def _extract_openai_text_from_sse(body_text):
         line = line.strip()
         if not line.startswith("data:"):
             continue
-        payload = line[len("data:"):].strip()
+        payload = line[len("data:") :].strip()
         if not payload or payload == "[DONE]":
             continue
         try:
@@ -459,7 +619,7 @@ def _extract_openai_response_from_sse(body_text):
         line = line.strip()
         if not line.startswith("data:"):
             continue
-        payload = line[len("data:"):].strip()
+        payload = line[len("data:") :].strip()
         if not payload or payload == "[DONE]":
             continue
         try:
@@ -499,7 +659,9 @@ def _extract_usage_cache_details(data):
     usage = data.get("usage") or {}
     input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
     output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
-    input_details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    input_details = (
+        usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+    )
     cached_tokens = int(input_details.get("cached_tokens") or 0)
     return {
         "input_tokens": input_tokens,
@@ -520,6 +682,8 @@ def _extract_usage_cache_details(data):
 
 
 class OpenAICompatibleModelClient(_TypedModelClient):
+    supports_structured_messages = True
+
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model
         self.base_url = _normalize_versioned_base_url(base_url)
@@ -528,10 +692,14 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         self.timeout = timeout
         # 当前只在明确支持 prompt cache 语义的后端上启用这条链路，
         # 避免对不支持的后端传一个“看起来统一、其实没意义”的伪参数。
-        self.supports_prompt_cache = any(host in self.base_url for host in ("openai.com", "right.codes"))
+        self.supports_prompt_cache = any(
+            host in self.base_url for host in ("openai.com", "right.codes")
+        )
         self.last_completion_metadata = {}
         self.last_tool_calls = ()
         self.last_finish_reason = "stop"
+        self.last_reasoning_content = ""
+        self.last_thinking_blocks = ()
 
     def complete(
         self,
@@ -562,6 +730,8 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         self.last_completion_metadata = {}
         self.last_tool_calls = ()
         self.last_finish_reason = "stop"
+        self.last_reasoning_content = ""
+        self.last_thinking_blocks = ()
         _raise_if_cancelled(cancellation_token, type(self).__name__)
         payload = {
             "model": self.model,
@@ -579,6 +749,8 @@ class OpenAICompatibleModelClient(_TypedModelClient):
             "max_output_tokens": max_new_tokens,
             "stream": False,
         }
+        if self.supports_prompt_cache:
+            payload["include"] = ["reasoning.encrypted_content"]
         if self.temperature is not None:
             payload["temperature"] = self.temperature
         if tools:
@@ -653,7 +825,9 @@ class OpenAICompatibleModelClient(_TypedModelClient):
 
         # 有些兼容后端返回普通 JSON，有些返回 SSE。
         # 这里两种都接住，并尽量统一抽取文本和 usage/cache 元数据。
-        if content_type.startswith("text/event-stream") or body_text.lstrip().startswith("data:"):
+        if content_type.startswith(
+            "text/event-stream"
+        ) or body_text.lstrip().startswith("data:"):
             text, response_data = _extract_openai_response_from_sse(body_text)
             if isinstance(response_data, dict) and response_data:
                 # 这些元数据会一路传回 runtime，进入 trace 和 report，
@@ -667,6 +841,10 @@ class OpenAICompatibleModelClient(_TypedModelClient):
                 self.last_tool_calls = _extract_openai_tool_calls(
                     response_data, provider=type(self).__name__
                 )
+                (
+                    self.last_reasoning_content,
+                    self.last_thinking_blocks,
+                ) = _extract_openai_reasoning(response_data)
                 self.last_finish_reason = (
                     "tool_calls" if self.last_tool_calls else "stop"
                 )
@@ -698,6 +876,10 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         self.last_tool_calls = _extract_openai_tool_calls(
             data, provider=type(self).__name__
         )
+        (
+            self.last_reasoning_content,
+            self.last_thinking_blocks,
+        ) = _extract_openai_reasoning(data)
         choices = data.get("choices") or []
         self.last_finish_reason = str(
             (choices[0].get("finish_reason") if choices else None)
@@ -709,15 +891,12 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         started_at = time.monotonic()
         payload = {
             "model": self.model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": request.prompt}],
-                }
-            ],
+            "input": _openai_response_input(request),
             "max_output_tokens": request.max_output_tokens,
             "stream": True,
         }
+        if self.supports_prompt_cache:
+            payload["include"] = ["reasoning.encrypted_content"]
         if self.temperature is not None:
             payload["temperature"] = self.temperature
         if self.supports_prompt_cache and request.prompt_cache_key:
@@ -748,6 +927,7 @@ class OpenAICompatibleModelClient(_TypedModelClient):
             method="POST",
         )
         parts = []
+        reasoning_parts = []
         final_data = None
         token = request.cancellation_token
         _raise_if_cancelled(token, type(self).__name__)
@@ -785,6 +965,10 @@ class OpenAICompatibleModelClient(_TypedModelClient):
                             if text:
                                 parts.append(text)
                                 yield ModelEvent(kind="text_delta", text=text)
+                        elif event_type == "response.reasoning_summary_text.delta":
+                            reasoning = event.get("delta") or ""
+                            if reasoning:
+                                reasoning_parts.append(reasoning)
                         elif event_type == "response.completed":
                             final_data = event.get("response") or {}
                 finally:
@@ -823,6 +1007,8 @@ class OpenAICompatibleModelClient(_TypedModelClient):
             )
             usage_payload = final_data
             final_text = _extract_openai_text(final_data) or "".join(parts)
+            reasoning_content, thinking_blocks = _extract_openai_reasoning(final_data)
+            reasoning_content = reasoning_content or "".join(reasoning_parts)
         metadata = {
             "prompt_cache_supported": self.supports_prompt_cache,
             "prompt_cache_key": request.prompt_cache_key,
@@ -832,9 +1018,11 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         result = ModelResult(
             text=final_text,
             tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
             finish_reason="tool_calls" if tool_calls else "stop",
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=self.model,
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,
@@ -853,9 +1041,8 @@ class OpenAICompatibleModelClient(_TypedModelClient):
                 provider=type(self).__name__,
             )
         text = _extract_openai_text(data)
-        tool_calls = _extract_openai_tool_calls(
-            data, provider=type(self).__name__
-        )
+        tool_calls = _extract_openai_tool_calls(data, provider=type(self).__name__)
+        reasoning_content, thinking_blocks = _extract_openai_reasoning(data)
         metadata = {
             "prompt_cache_supported": self.supports_prompt_cache,
             "prompt_cache_key": request.prompt_cache_key,
@@ -869,9 +1056,11 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         result = ModelResult(
             text=text,
             tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
             finish_reason="tool_calls" if tool_calls else "stop",
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=self.model,
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,
@@ -891,6 +1080,16 @@ def _extract_anthropic_text(data):
     return ""
 
 
+def _extract_anthropic_thinking(data):
+    blocks = tuple(
+        dict(item)
+        for item in data.get("content", [])
+        if isinstance(item, dict) and item.get("type") == "thinking"
+    )
+    reasoning = "\n".join(str(block.get("thinking") or "") for block in blocks).strip()
+    return reasoning, blocks
+
+
 def _extract_anthropic_tool_calls(data, *, provider):
     return tuple(
         ToolCall(
@@ -906,6 +1105,8 @@ def _extract_anthropic_tool_calls(data, *, provider):
 
 
 class AnthropicCompatibleModelClient(_TypedModelClient):
+    supports_structured_messages = True
+
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model
         self.base_url = _normalize_versioned_base_url(base_url)
@@ -1054,19 +1255,14 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
             return text
         raise ProviderProtocolError(
             "Anthropic-compatible error: could not extract text from response",
-            provider=type(self).__name__,
+            provider=_provider_name(self),
         )
 
     def stream(self, request: ModelRequest):
         started_at = time.monotonic()
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": request.prompt}],
-                }
-            ],
+            "messages": _anthropic_messages(request),
             "max_tokens": request.max_output_tokens,
             "stream": True,
         }
@@ -1094,6 +1290,8 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         )
         parts = []
         blocks = {}
+        thinking_parts = []
+        thinking_blocks = {}
         usage = {}
         finish_reason = "stop"
         saw_stop = False
@@ -1141,6 +1339,11 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
                                     "name": block.get("name"),
                                     "arguments": "",
                                 }
+                            elif block.get("type") == "thinking":
+                                thinking = str(block.get("thinking") or "")
+                                thinking_blocks[index] = dict(block)
+                                if thinking:
+                                    thinking_parts.append(thinking)
                             elif block.get("type") == "text" and block.get("text"):
                                 text = str(block["text"])
                                 parts.append(text)
@@ -1153,6 +1356,21 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
                                 if text:
                                     parts.append(text)
                                     yield ModelEvent(kind="text_delta", text=text)
+                            elif delta.get("type") == "thinking_delta":
+                                thinking = str(delta.get("thinking") or "")
+                                if thinking:
+                                    thinking_parts.append(thinking)
+                                    block = thinking_blocks.setdefault(
+                                        index, {"type": "thinking", "thinking": ""}
+                                    )
+                                    block["thinking"] = (
+                                        str(block.get("thinking") or "") + thinking
+                                    )
+                            elif delta.get("type") == "signature_delta":
+                                block = thinking_blocks.setdefault(
+                                    index, {"type": "thinking", "thinking": ""}
+                                )
+                                block["signature"] = str(delta.get("signature") or "")
                             elif delta.get("type") == "input_json_delta":
                                 block = blocks.setdefault(
                                     index,
@@ -1234,9 +1452,11 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         result = ModelResult(
             text="".join(parts),
             tool_calls=tool_calls,
+            reasoning_content="".join(thinking_parts),
+            thinking_blocks=tuple(thinking_blocks.values()),
             finish_reason=finish_reason,
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=self.model,
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,
@@ -1255,9 +1475,8 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
                 provider=type(self).__name__,
             )
         text = _extract_anthropic_text(data)
-        tool_calls = _extract_anthropic_tool_calls(
-            data, provider=type(self).__name__
-        )
+        reasoning_content, thinking_blocks = _extract_anthropic_thinking(data)
+        tool_calls = _extract_anthropic_tool_calls(data, provider=type(self).__name__)
         usage = data.get("usage") or {}
         metadata = {
             "input_tokens": usage.get("input_tokens"),
@@ -1282,15 +1501,16 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         for tool_call in tool_calls:
             yield ModelEvent(kind="tool_call", tool_call=tool_call)
         finish_reason = str(
-            data.get("stop_reason")
-            or ("tool_calls" if tool_calls else "stop")
+            data.get("stop_reason") or ("tool_calls" if tool_calls else "stop")
         )
         result = ModelResult(
             text=text,
             tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
             finish_reason=finish_reason,
             usage=ModelUsage.from_metadata(metadata),
-            provider=type(self).__name__,
+            provider=_provider_name(self),
             model=self.model,
             latency_ms=int((time.monotonic() - started_at) * 1000),
             metadata=metadata,

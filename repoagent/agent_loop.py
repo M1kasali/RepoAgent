@@ -1,6 +1,7 @@
 """Agent control loop extracted from the runtime facade."""
 
 import time
+from dataclasses import replace
 
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
 from .checkpoint import (
@@ -8,8 +9,26 @@ from .checkpoint import (
     CHECKPOINT_PARTIAL_STALE_STATUS,
     CHECKPOINT_WORKSPACE_MISMATCH_STATUS,
 )
+from .empty_recovery import (
+    POST_TOOL_NUDGE,
+    RecoveryAction,
+    classify_empty_response,
+    has_thinking,
+    visible_text,
+)
+from .context_overflow import (
+    OVERFLOW_MAX_COMPRESS_RETRIES,
+    emergency_shrink_history,
+    emergency_shrink_messages,
+)
+from .conversation import (
+    build_structured_history,
+    model_messages_token_count,
+    wrap_untrusted_tool_result,
+)
 from .providers.base import (
     CancellationToken,
+    ModelMessage,
     ModelRequest,
     ModelUsage,
     ModelUsageAggregate,
@@ -19,9 +38,27 @@ from .providers.base import (
 )
 from .providers.tool_schema import model_tools_from_registry
 from .task_state import TaskState
+from .tool_loop_break import (
+    TOOL_LOOP_BREAK_MAX_NUDGES,
+    TOOL_LOOP_BREAK_THRESHOLD,
+    is_hard_tool_failure,
+    loop_break_nudge,
+)
 from .tool_gateway import compatibility_metadata
 from .tracing import current_trace_context
 from .workspace import clip, now
+
+
+_MAX_STEP_SYNTHESIS_PROMPT = (
+    "The tool-call budget is exhausted. Do not call any tools. Based only on "
+    "the work and evidence already available, provide a concise final response "
+    "summarizing what was completed, what was verified, and anything still "
+    "unfinished. Reply in the same language as the user."
+)
+_MAX_STEP_STATIC_FALLBACK = (
+    "Stopped after reaching the step limit. The workspace may contain partial "
+    "changes; review the retained run evidence before continuing."
+)
 
 
 def _pricing_for_client(client, provider, model):
@@ -124,6 +161,20 @@ class AgentLoop:
         run_started_at = time.monotonic()
         usage_rows = []
         call_entries = []
+        provider_messages = []
+        use_structured_history = bool(
+            getattr(agent.model_client, "supports_structured_messages", False)
+        )
+        history_selection_metadata = {
+            "mode": "structured-provider-messages",
+            "token_count": 0,
+            "source_entry_count": 0,
+            "included_entry_count": 0,
+            "dropped_entry_count": 0,
+            "dropped_turn_count": 0,
+            "clipped_message_count": 0,
+            "message_count": 0,
+        }
         agent.last_completion_metadata = {}
         agent.last_model_result = None
         agent.last_prompt_metadata = {}
@@ -198,6 +249,218 @@ class AgentLoop:
             }
             return aggregate_metadata
 
+        def account_completed_model_call(
+            model_request, model_result, prompt_metadata, model_started_at
+        ):
+            call_completion_metadata = model_result.completion_metadata()
+            fallback = call_completion_metadata.get("fallback")
+            fallback_attempts = ()
+            if isinstance(fallback, dict):
+                fallback_attempts = _validated_fallback_attempts(
+                    fallback.get("attempts"),
+                    statuses={"completed", "failed"},
+                )
+                if (
+                    sum(
+                        attempt["status"] == "completed"
+                        for attempt in fallback_attempts
+                    )
+                    != 1
+                ):
+                    fallback_attempts = ()
+                failed_attempts = sum(
+                    1 for attempt in fallback_attempts if attempt["status"] == "failed"
+                )
+                usage_rows.extend(ModelUsage() for _ in range(failed_attempts))
+                for attempt in fallback_attempts:
+                    status = str(attempt.get("status", ""))
+                    record_model_call(
+                        model_request,
+                        provider_attempt=int(attempt.get("index", 0)),
+                        provider=attempt.get("provider", model_result.provider),
+                        model=attempt.get("model", model_result.model),
+                        status=status,
+                        duration_ms=int(attempt.get("duration_ms", 0)),
+                        usage=(
+                            model_result.usage
+                            if status == "completed"
+                            else ModelUsage()
+                        ),
+                        finish_reason=(
+                            model_result.finish_reason if status == "completed" else ""
+                        ),
+                        error_category=attempt.get("category", ""),
+                    )
+            if not isinstance(fallback, dict) or not fallback_attempts:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=(
+                        model_result.provider or type(agent.model_client).__name__
+                    ),
+                    model=(
+                        model_result.model
+                        or str(getattr(agent.model_client, "model", ""))
+                    ),
+                    status="completed",
+                    duration_ms=(
+                        model_result.latency_ms
+                        or int((time.monotonic() - model_started_at) * 1000)
+                    ),
+                    usage=model_result.usage,
+                    finish_reason=model_result.finish_reason,
+                )
+            usage_rows.append(model_result.usage)
+            usage_aggregate = ModelUsageAggregate.from_usages(usage_rows)
+            completion_metadata = {
+                **call_completion_metadata,
+                **usage_aggregate.to_metadata(),
+                "last_call_usage": model_result.usage.to_metadata(),
+            }
+            prompt_metadata.update(completion_metadata)
+            agent.last_completion_metadata = completion_metadata
+            agent.last_model_result = model_result
+            agent.last_prompt_metadata = prompt_metadata
+            routing_decision = model_result.metadata.get("routing_decision")
+            if isinstance(routing_decision, dict):
+                agent.emit_trace(
+                    task_state,
+                    "model_routed",
+                    {"routing_decision": routing_decision},
+                )
+            if isinstance(fallback, dict) and fallback.get("used"):
+                agent.emit_trace(task_state, "model_fallback", fallback)
+            return completion_metadata, usage_aggregate
+
+        def synthesize_final_on_exhaustion():
+            prompt, prompt_metadata = agent._build_prompt_and_metadata(
+                user_message,
+                include_history=not use_structured_history,
+                history_override=prompt_history_override,
+                segment_budget_overrides=prompt_segment_budget_overrides,
+            )
+            synthesis_prompt = f"{prompt}\n\n{_MAX_STEP_SYNTHESIS_PROMPT}"
+            task_state.record_attempt()
+            agent.run_store.write_task_state(task_state)
+            timeout_seconds = (
+                max(0.001, deadline - time.monotonic())
+                if deadline is not None
+                else None
+            )
+            synthesis_messages = tuple(provider_messages) + (
+                ModelMessage(role="user", content=_MAX_STEP_SYNTHESIS_PROMPT),
+            )
+            if use_structured_history:
+                synthesis_tokens = model_messages_token_count(
+                    synthesis_messages, agent.context_manager.token_counter
+                )
+                agent._apply_provider_message_metadata(
+                    prompt_metadata,
+                    projected_tokens=synthesis_tokens,
+                    history_metadata={
+                        **history_selection_metadata,
+                        "provider_message_count": len(synthesis_messages),
+                    },
+                )
+            model_request = ModelRequest(
+                prompt=synthesis_prompt,
+                max_output_tokens=agent.max_new_tokens,
+                turn_id=str(turn_request.turn_id)
+                if turn_request
+                else task_state.run_id,
+                session_id=str(turn_request.session_id)
+                if turn_request
+                else agent.session["id"],
+                request_id=(
+                    str(turn_request.request_id) if turn_request else task_state.task_id
+                ),
+                attempt=task_state.attempts,
+                tools=(),
+                messages=synthesis_messages,
+                cancellation_token=cancellation_token,
+                timeout_seconds=timeout_seconds,
+            )
+            agent.emit_trace(
+                task_state,
+                "exhaustion_synthesis_requested",
+                {
+                    "attempts": task_state.attempts,
+                    "tool_steps": task_state.tool_steps,
+                    "tools_enabled": False,
+                },
+            )
+            model_started_at = time.monotonic()
+            try:
+                model_result = stream_model(agent.model_client, model_request)
+            except ProviderCancelledError as exc:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=exc.provider or type(agent.model_client).__name__,
+                    model=str(getattr(agent.model_client, "model", "")),
+                    status="cancelled",
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
+                    error_category=exc.category,
+                )
+                raise
+            except ProviderError as exc:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=exc.provider or type(agent.model_client).__name__,
+                    model=str(getattr(agent.model_client, "model", "")),
+                    status="failed",
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
+                    error_category=exc.category,
+                )
+                record_missing_model_calls(1, prompt_metadata)
+                agent.emit_trace(
+                    task_state,
+                    "exhaustion_synthesis_failed",
+                    {**exc.to_dict(), "fallback": "static"},
+                )
+                return _MAX_STEP_STATIC_FALLBACK
+            except Exception:
+                record_model_call(
+                    model_request,
+                    provider_attempt=0,
+                    provider=type(agent.model_client).__name__,
+                    model=str(getattr(agent.model_client, "model", "")),
+                    status="failed",
+                    duration_ms=int((time.monotonic() - model_started_at) * 1000),
+                    error_category="unexpected",
+                )
+                record_missing_model_calls(1, prompt_metadata)
+                agent.emit_trace(
+                    task_state,
+                    "exhaustion_synthesis_failed",
+                    {"category": "unexpected", "fallback": "static"},
+                )
+                return _MAX_STEP_STATIC_FALLBACK
+
+            account_completed_model_call(
+                model_request, model_result, prompt_metadata, model_started_at
+            )
+            kind, payload = (
+                ("tools", None)
+                if model_result.tool_calls
+                else agent.parse(model_result.text)
+            )
+            final = (
+                str(payload).strip()
+                if kind == "final" and str(payload).strip()
+                else _MAX_STEP_STATIC_FALLBACK
+            )
+            agent.emit_trace(
+                task_state,
+                "exhaustion_synthesis_completed",
+                {
+                    "tools_enabled": False,
+                    "used_static_fallback": final == _MAX_STEP_STATIC_FALLBACK,
+                },
+            )
+            return final
+
         agent.memory.set_task_summary(user_message)
         agent.record({"role": "user", "content": user_message, "created_at": now()})
 
@@ -237,7 +500,26 @@ class AgentLoop:
 
         tool_steps = 0
         attempts = 0
-        max_attempts = max(agent.max_steps * 3, agent.max_steps + 4)
+        recovery_limits = agent.empty_recovery_limits
+        post_tool_nudges = 0
+        prefill_retries = 0
+        empty_retries = 0
+        prev_had_tool_calls = False
+        overflow_compress_retries = 0
+        prompt_history_override = None
+        prompt_segment_budget_overrides = None
+        loop_fail_tool = None
+        loop_fail_streak = 0
+        loop_nudges = 0
+        max_attempts = max(
+            agent.max_steps * 3,
+            agent.max_steps + 4,
+            agent.max_steps
+            + recovery_limits.post_tool_empty_max_nudges
+            + recovery_limits.thinking_prefill_max_retries
+            + recovery_limits.empty_content_max_retries
+            + 1,
+        )
 
         # 这是 agent 的主循环，可以按“感知 -> 决策 -> 行动 -> 记录”来理解：
         # 1. 感知：重新组 prompt，把当前状态整理给模型看
@@ -254,7 +536,46 @@ class AgentLoop:
             task_state.record_attempt()
             agent.run_store.write_task_state(task_state)
             prompt_started_at = time.monotonic()
-            prompt, prompt_metadata = agent._build_prompt_and_metadata(user_message)
+            if not use_structured_history and prompt_history_override is not None:
+                prompt_history_override, _ = emergency_shrink_history(
+                    agent.session["history"]
+                )
+            prompt, prompt_metadata = agent._build_prompt_and_metadata(
+                user_message,
+                include_history=not use_structured_history,
+                history_override=prompt_history_override,
+                segment_budget_overrides=prompt_segment_budget_overrides,
+            )
+            if not provider_messages:
+                current_message = ModelMessage(role="user", content=prompt)
+                if use_structured_history:
+                    current_tokens = model_messages_token_count(
+                        (current_message,), agent.context_manager.token_counter
+                    )
+                    history = list(agent.session["history"][:-1])
+                    structured_history = build_structured_history(
+                        history,
+                        agent.context_manager.token_counter,
+                        max(
+                            0,
+                            agent.context_manager.total_token_budget - current_tokens,
+                        ),
+                    )
+                    provider_messages.extend(structured_history.messages)
+                    history_selection_metadata = structured_history.to_metadata()
+                provider_messages.append(current_message)
+            if use_structured_history:
+                projected_tokens = model_messages_token_count(
+                    provider_messages, agent.context_manager.token_counter
+                )
+                agent._apply_provider_message_metadata(
+                    prompt_metadata,
+                    projected_tokens=projected_tokens,
+                    history_metadata={
+                        **history_selection_metadata,
+                        "provider_message_count": len(provider_messages),
+                    },
+                )
             agent.emit_trace(
                 task_state,
                 "prompt_built",
@@ -356,6 +677,7 @@ class AgentLoop:
                 ),
                 attempt=task_state.attempts,
                 tools=model_tools_from_registry(agent.tools),
+                messages=tuple(provider_messages),
                 cancellation_token=cancellation_token,
                 timeout_seconds=timeout_seconds,
             )
@@ -435,6 +757,57 @@ class AgentLoop:
                 usage_aggregate = record_missing_model_calls(
                     missing_calls or 1, prompt_metadata
                 )
+                if (
+                    exc.should_compress
+                    and overflow_compress_retries < OVERFLOW_MAX_COMPRESS_RETRIES
+                ):
+                    if use_structured_history:
+                        shrunk, elided = emergency_shrink_messages(provider_messages)
+                    else:
+                        current_history = (
+                            agent.session["history"]
+                            if prompt_history_override is None
+                            else prompt_history_override
+                        )
+                        shrunk, elided = emergency_shrink_history(current_history)
+                        history_tokens = int(
+                            prompt_metadata["sections"]["history"]["rendered_tokens"]
+                        )
+                        target_history_tokens = max(1, history_tokens // 2)
+                        if target_history_tokens >= history_tokens:
+                            elided = 0
+                    if elided:
+                        if use_structured_history:
+                            provider_messages[:] = shrunk
+                        else:
+                            prompt_history_override = shrunk
+                            prompt_segment_budget_overrides = {
+                                "history": target_history_tokens
+                            }
+                        overflow_compress_retries += 1
+                        agent.emit_trace(
+                            task_state,
+                            "context_overflow_recovered",
+                            {
+                                **error_evidence,
+                                "elided_tool_results": elided,
+                                "history_before_tokens": history_tokens
+                                if not use_structured_history
+                                else None,
+                                "history_target_tokens": target_history_tokens
+                                if not use_structured_history
+                                else None,
+                                "reduction_target": (
+                                    "provider_messages"
+                                    if use_structured_history
+                                    else "prompt_history"
+                                ),
+                                "compress_retries": overflow_compress_retries,
+                                "max_compress_retries": OVERFLOW_MAX_COMPRESS_RETRIES,
+                                "usage_aggregate": usage_aggregate,
+                            },
+                        )
+                        continue
                 agent.emit_trace(
                     task_state,
                     "model_failed",
@@ -480,86 +853,75 @@ class AgentLoop:
                 )
                 raise
             raw = model_result.text
-            call_completion_metadata = model_result.completion_metadata()
-            fallback = call_completion_metadata.get("fallback")
-            if isinstance(fallback, dict):
-                fallback_attempts = _validated_fallback_attempts(
-                    fallback.get("attempts"),
-                    statuses={"completed", "failed"},
+            call_completion_metadata, usage_aggregate = account_completed_model_call(
+                model_request, model_result, prompt_metadata, model_started_at
+            )
+            visible = visible_text(raw)
+            if not model_result.tool_calls and (
+                not raw.strip() or (has_thinking(model_result) and not visible)
+            ):
+                action = classify_empty_response(
+                    model_result,
+                    visible,
+                    prev_had_tool_calls=prev_had_tool_calls,
+                    nudges_done=post_tool_nudges,
+                    prefill_retries=prefill_retries,
+                    empty_retries=empty_retries,
+                    limits=recovery_limits,
                 )
-                if (
-                    sum(
-                        attempt["status"] == "completed"
-                        for attempt in fallback_attempts
+                recovery_payload = {
+                    "action": action.value,
+                    "post_tool_nudges": post_tool_nudges,
+                    "prefill_retries": prefill_retries,
+                    "empty_retries": empty_retries,
+                    "had_thinking": has_thinking(model_result),
+                    "previous_response_had_tool_calls": prev_had_tool_calls,
+                }
+                if action is RecoveryAction.PREFILL:
+                    prefill_retries += 1
+                    provider_messages.append(
+                        ModelMessage(
+                            role="assistant",
+                            content=raw,
+                            reasoning_content=model_result.reasoning_content,
+                            thinking_blocks=model_result.thinking_blocks,
+                        )
                     )
-                    != 1
-                ):
-                    fallback_attempts = ()
-                failed_attempts = sum(
-                    1 for attempt in fallback_attempts if attempt["status"] == "failed"
-                )
-                usage_rows.extend(ModelUsage() for _ in range(failed_attempts))
-                for attempt in fallback_attempts:
-                    status = str(attempt.get("status", ""))
-                    record_model_call(
-                        model_request,
-                        provider_attempt=int(attempt.get("index", 0)),
-                        provider=attempt.get("provider", model_result.provider),
-                        model=attempt.get("model", model_result.model),
-                        status=status,
-                        duration_ms=int(attempt.get("duration_ms", 0)),
-                        usage=(
-                            model_result.usage
-                            if status == "completed"
-                            else ModelUsage()
-                        ),
-                        finish_reason=(
-                            model_result.finish_reason if status == "completed" else ""
-                        ),
-                        error_category=attempt.get("category", ""),
+                    prev_had_tool_calls = False
+                    agent.emit_trace(
+                        task_state,
+                        "empty_response_recovered",
+                        {**recovery_payload, "next_prefill_retries": prefill_retries},
                     )
-            if not isinstance(fallback, dict) or not fallback_attempts:
-                record_model_call(
-                    model_request,
-                    provider_attempt=0,
-                    provider=(
-                        model_result.provider or type(agent.model_client).__name__
-                    ),
-                    model=(
-                        model_result.model
-                        or str(getattr(agent.model_client, "model", ""))
-                    ),
-                    status="completed",
-                    duration_ms=(
-                        model_result.latency_ms
-                        or int((time.monotonic() - model_started_at) * 1000)
-                    ),
-                    usage=model_result.usage,
-                    finish_reason=model_result.finish_reason,
-                )
-            usage_rows.append(model_result.usage)
-            usage_aggregate = ModelUsageAggregate.from_usages(usage_rows)
-            completion_metadata = {
-                **call_completion_metadata,
-                **usage_aggregate.to_metadata(),
-                "last_call_usage": model_result.usage.to_metadata(),
-            }
-            if completion_metadata:
-                # 把后端返回的 usage/cache 统计并回 prompt_metadata，
-                # 方便统一写入 report 和 trace。
-                prompt_metadata.update(completion_metadata)
-            agent.last_completion_metadata = completion_metadata
-            agent.last_model_result = model_result
-            agent.last_prompt_metadata = prompt_metadata
-            routing_decision = model_result.metadata.get("routing_decision")
-            if isinstance(routing_decision, dict):
+                    continue
+                if action is RecoveryAction.NUDGE:
+                    post_tool_nudges += 1
+                    provider_messages.extend(
+                        (
+                            ModelMessage(role="assistant", content="(empty)"),
+                            ModelMessage(role="user", content=POST_TOOL_NUDGE),
+                        )
+                    )
+                    prev_had_tool_calls = False
+                    agent.emit_trace(
+                        task_state,
+                        "empty_response_recovered",
+                        {**recovery_payload, "next_post_tool_nudges": post_tool_nudges},
+                    )
+                    continue
+                if action is RecoveryAction.RETRY:
+                    empty_retries += 1
+                    prev_had_tool_calls = False
+                    agent.emit_trace(
+                        task_state,
+                        "empty_response_recovered",
+                        {**recovery_payload, "next_empty_retries": empty_retries},
+                    )
+                    continue
+                raw = "<final>I have no response to give.</final>"
                 agent.emit_trace(
-                    task_state,
-                    "model_routed",
-                    {"routing_decision": routing_decision},
+                    task_state, "empty_response_recovery_exhausted", recovery_payload
                 )
-            if isinstance(fallback, dict) and fallback.get("used"):
-                agent.emit_trace(task_state, "model_fallback", fallback)
             if model_result.tool_calls:
                 kind, payload = (
                     "tools",
@@ -601,6 +963,44 @@ class AgentLoop:
                         origin="model",
                     )
                     prepared.append((request, name, args))
+                native_calls = tuple(
+                    call
+                    for call in model_result.tool_calls
+                    if any(request.call_id == call.id for request, _, _ in prepared)
+                )
+                native_call_ids = {call.id for call in native_calls}
+                if native_calls:
+                    provider_messages.append(
+                        ModelMessage(
+                            role="assistant",
+                            content=raw,
+                            tool_calls=native_calls,
+                            reasoning_content=model_result.reasoning_content,
+                            thinking_blocks=model_result.thinking_blocks,
+                        )
+                    )
+                    history_message = {
+                        "role": "assistant",
+                        "content": raw,
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "name": call.name,
+                                "args": dict(call.arguments),
+                            }
+                            for call in native_calls
+                        ],
+                        "created_at": now(),
+                    }
+                    if model_result.reasoning_content:
+                        history_message["reasoning_content"] = (
+                            model_result.reasoning_content
+                        )
+                    if model_result.thinking_blocks:
+                        history_message["thinking_blocks"] = [
+                            dict(block) for block in model_result.thinking_blocks
+                        ]
+                    agent.record(history_message)
                 details = {
                     id(request): (name, args) for request, name, args in prepared
                 }
@@ -643,6 +1043,24 @@ class AgentLoop:
                         name, args = details[id(tool_request)]
                         tool_call_id = tool_request.call_id
                         result = tool_result.content
+                        if tool_call_id in native_call_ids:
+                            provider_messages.append(
+                                ModelMessage(
+                                    role="tool",
+                                    content=wrap_untrusted_tool_result(name, result),
+                                    tool_call_id=tool_call_id,
+                                    name=name,
+                                )
+                            )
+                        if is_hard_tool_failure(tool_result):
+                            if name == loop_fail_tool:
+                                loop_fail_streak += 1
+                            else:
+                                loop_fail_tool = name
+                                loop_fail_streak = 1
+                        else:
+                            loop_fail_tool = None
+                            loop_fail_streak = 0
                         agent.record(
                             {
                                 "role": "tool",
@@ -699,9 +1117,7 @@ class AgentLoop:
                         task_state,
                         "tool_batch_completed",
                         {
-                            "tool_call_ids": [
-                                request.call_id for request in batch
-                            ],
+                            "tool_call_ids": [request.call_id for request in batch],
                             "result_call_ids": [
                                 result.call_id for result in tool_results
                             ],
@@ -717,16 +1133,52 @@ class AgentLoop:
                         },
                     )
                     if cancelled and cancellation_token is not None:
-                        task_state.stop_tool_cancelled(
-                            "Tool execution cancelled."
-                        )
+                        task_state.stop_tool_cancelled("Tool execution cancelled.")
                         agent.run_store.write_task_state(task_state)
                         cancellation_token.raise_if_cancelled(
                             provider=type(agent.model_client).__name__
                         )
+                if (
+                    loop_fail_streak >= TOOL_LOOP_BREAK_THRESHOLD
+                    and loop_nudges < TOOL_LOOP_BREAK_MAX_NUDGES
+                    and provider_messages
+                    and provider_messages[-1].role == "tool"
+                ):
+                    failures = loop_fail_streak
+                    nudge = loop_break_nudge(str(loop_fail_tool), failures)
+                    provider_messages[-1] = replace(
+                        provider_messages[-1],
+                        content=provider_messages[-1].content + "\n\n" + nudge,
+                    )
+                    tool_call_id = provider_messages[-1].tool_call_id
+                    for item in reversed(agent.session["history"]):
+                        if (
+                            item.get("role") == "tool"
+                            and item.get("tool_call_id") == tool_call_id
+                        ):
+                            item["content"] = (
+                                str(item.get("content", "")) + "\n\n" + nudge
+                            )
+                            agent.session_path = agent.session_store.save(agent.session)
+                            break
+                    loop_nudges += 1
+                    loop_fail_streak = 0
+                    agent.emit_trace(
+                        task_state,
+                        "tool_failure_loop_nudged",
+                        {
+                            "tool": loop_fail_tool,
+                            "consecutive_failures": failures,
+                            "loop_nudges": loop_nudges,
+                            "max_loop_nudges": TOOL_LOOP_BREAK_MAX_NUDGES,
+                            "tool_call_id": tool_call_id,
+                        },
+                    )
+                prev_had_tool_calls = True
                 continue
 
             if kind == "retry":
+                prev_had_tool_calls = False
                 agent.record(
                     {"role": "assistant", "content": payload, "created_at": now()}
                 )
@@ -738,12 +1190,36 @@ class AgentLoop:
                 cancellation_token.raise_if_cancelled(
                     provider=type(agent.model_client).__name__
                 )
-            agent.record({"role": "assistant", "content": final, "created_at": now()})
+            history_message = {
+                "role": "assistant",
+                "content": final,
+                "created_at": now(),
+            }
+            if model_result.reasoning_content:
+                history_message["reasoning_content"] = model_result.reasoning_content
+            if model_result.thinking_blocks:
+                history_message["thinking_blocks"] = [
+                    dict(block) for block in model_result.thinking_blocks
+                ]
+            agent.record(history_message)
             task_state.finish_success(final)
             agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
                 call_entries, turn_succeeded=True
             ).to_dict()
             agent.promote_durable_memory(user_message, final)
+            workspace_checkpoint = agent.snapshot_workspace(task_state, "run_finished")
+            if workspace_checkpoint is not None:
+                agent.run_store.write_task_state(task_state)
+                agent.emit_trace(
+                    task_state,
+                    "workspace_checkpoint_completed",
+                    {
+                        "status": workspace_checkpoint.status,
+                        "checkpoint_id": workspace_checkpoint.checkpoint_id,
+                        "edited_files": list(workspace_checkpoint.edited_files),
+                        "error": workspace_checkpoint.error,
+                    },
+                )
             checkpoint = agent.create_checkpoint(
                 task_state, user_message, trigger="run_finished"
             )
@@ -776,13 +1252,30 @@ class AgentLoop:
             final = "Stopped after too many malformed model responses without a valid tool call or final answer."
             task_state.stop_retry_limit(final)
         else:
-            final = "Stopped after reaching the step limit without a final answer."
+            final = synthesize_final_on_exhaustion()
             task_state.stop_step_limit(final)
+            if model_text_sink is not None:
+                model_text_sink(final)
         agent.record({"role": "assistant", "content": final, "created_at": now()})
         agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
             call_entries, turn_succeeded=False
         ).to_dict()
         agent.promote_durable_memory(user_message, final)
+        workspace_checkpoint = agent.snapshot_workspace(
+            task_state, task_state.stop_reason or "run_stopped"
+        )
+        if workspace_checkpoint is not None:
+            agent.run_store.write_task_state(task_state)
+            agent.emit_trace(
+                task_state,
+                "workspace_checkpoint_completed",
+                {
+                    "status": workspace_checkpoint.status,
+                    "checkpoint_id": workspace_checkpoint.checkpoint_id,
+                    "edited_files": list(workspace_checkpoint.edited_files),
+                    "error": workspace_checkpoint.error,
+                },
+            )
         agent.run_store.write_task_state(task_state)
         checkpoint = agent.create_checkpoint(
             task_state, user_message, trigger=task_state.stop_reason or "run_stopped"

@@ -7,6 +7,7 @@ from .campaigns import (
     paired_campaign_matrix,
     paired_campaign_result,
 )
+from .container import ContainerConfigurationError, DockerContainerRunner, wsl_windows_path
 from .faults import FaultInjector, FaultPlan, InjectedFault, run_fault_matrix
 from .paired import (
     EvaluationCase,
@@ -15,6 +16,20 @@ from .paired import (
     PairedEvaluator,
     TrialOutput,
 )
+from .polyglot import (
+    POLYGLOT_LANGUAGES,
+    POLYGLOT_TEST_COMMANDS,
+    PolyglotAdapter,
+    PolyglotContainerGrader,
+    PolyglotInstance,
+    PolyglotRunnerInput,
+    polyglot_plan_payload,
+    polyglot_workspace_context,
+    prepare_polyglot_runner_workspace,
+)
+from .polyglot_campaign import PolyglotSingleTaskCampaign
+from .polyglot_suite import CampaignBudget, PolyglotCampaign
+from .provider_probe import ProviderProbeError, ProviderProbeResult, run_provider_probe
 from .tracing import TRACING_EXPERIMENT_SCHEMA, measure_tracing_overhead
 from .red_team import RedTeamCampaign, RedTeamCase, RedTeamObservation
 from .release import ReleaseEvidenceBuilder, compare_results, verify_release_bundle
@@ -36,11 +51,24 @@ __all__ = [
     "EvaluationResult",
     "EvaluationRow",
     "EVALUATION_RESULT_SCHEMA",
+    "ContainerConfigurationError",
+    "DockerContainerRunner",
     "FaultInjector",
     "FaultPlan",
     "Grade",
     "PairedEvaluator",
     "PAIRED_CAMPAIGN_KINDS",
+    "POLYGLOT_LANGUAGES",
+    "POLYGLOT_TEST_COMMANDS",
+    "PolyglotAdapter",
+    "PolyglotContainerGrader",
+    "PolyglotInstance",
+    "PolyglotRunnerInput",
+    "PolyglotSingleTaskCampaign",
+    "CampaignBudget",
+    "PolyglotCampaign",
+    "ProviderProbeError",
+    "ProviderProbeResult",
     "RawRowWriter",
     "RedTeamCampaign",
     "RedTeamCase",
@@ -65,7 +93,12 @@ __all__ = [
     "paired_campaign_result",
     "paired_campaign_matrix",
     "paired_win_tie_loss",
+    "polyglot_plan_payload",
+    "polyglot_workspace_context",
+    "prepare_polyglot_runner_workspace",
     "run_fault_matrix",
+    "run_provider_probe",
     "verify_release_bundle",
     "wilson_interval",
+    "wsl_windows_path",
 ]

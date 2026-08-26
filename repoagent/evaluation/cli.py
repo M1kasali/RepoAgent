@@ -7,29 +7,53 @@ import json
 from pathlib import Path
 
 from .campaigns import RuntimeContractCampaign
+from .polyglot import PolyglotAdapter, polyglot_plan_payload
 from .release import ReleaseEvidenceBuilder, compare_results
-from .schema import validate_result_payload
+from .schema import validate_result_evidence, validate_result_payload
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser(description="Run and validate RepoAgent evaluations.")
+    parser = argparse.ArgumentParser(
+        description="Run and validate RepoAgent evaluations."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    contract = commands.add_parser("contract", help="Run the deterministic runtime-contract campaign.")
+    contract = commands.add_parser(
+        "contract", help="Run the deterministic runtime-contract campaign."
+    )
     contract.add_argument("--repo-root", default=".")
     contract.add_argument("--benchmark", default="benchmarks/coding_tasks.json")
     contract.add_argument("--output", required=True)
 
-    validate = commands.add_parser("validate", help="Validate an evaluation-result artifact.")
+    polyglot = commands.add_parser(
+        "polyglot-plan",
+        help="Inspect an Aider Polyglot checkout and create a deterministic canary plan.",
+    )
+    polyglot.add_argument("--dataset", required=True)
+    polyglot.add_argument("--output", required=True)
+    polyglot.add_argument("--limit", type=int, default=24)
+    polyglot.add_argument(
+        "--languages",
+        default="cpp,go,java,javascript,python,rust",
+        help="Comma-separated benchmark languages.",
+    )
+
+    validate = commands.add_parser(
+        "validate", help="Validate an evaluation-result artifact."
+    )
     validate.add_argument("result")
     validate.add_argument("--require-evidence", action="store_true")
 
-    compare = commands.add_parser("compare", help="Compare candidate results with a baseline.")
+    compare = commands.add_parser(
+        "compare", help="Compare candidate results with a baseline."
+    )
     compare.add_argument("baseline")
     compare.add_argument("candidate")
     compare.add_argument("--max-pass-rate-drop", type=float, default=0.0)
 
-    release = commands.add_parser("release", help="Build a self-contained release evidence directory.")
+    release = commands.add_parser(
+        "release", help="Build a self-contained release evidence directory."
+    )
     release.add_argument("result")
     release.add_argument("destination")
     release.add_argument("--tag", required=True)
@@ -51,9 +75,28 @@ def main(argv=None):
             output_root=args.output,
         ).run()
         payload = result.to_dict()
+    elif args.command == "polyglot-plan":
+        languages = tuple(
+            item.strip() for item in args.languages.split(",") if item.strip()
+        )
+        loaded = PolyglotAdapter().load(
+            args.dataset,
+            languages=languages,
+            limit=args.limit,
+        )
+        payload = polyglot_plan_payload(loaded)
+        destination = Path(args.output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     elif args.command == "validate":
-        payload = validate_result_payload(
-            _load(args.result), require_evidence=args.require_evidence
+        raw_payload = _load(args.result)
+        payload = (
+            validate_result_evidence(raw_payload, Path(args.result).resolve().parent)
+            if args.require_evidence
+            else validate_result_payload(raw_payload)
         )
     elif args.command == "compare":
         payload = compare_results(

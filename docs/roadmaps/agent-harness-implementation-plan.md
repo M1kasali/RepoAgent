@@ -52,6 +52,12 @@ The default implementation strategy is **reuse, adapt, and verify** rather than 
 - Adapt product identity, configuration paths, state paths, imports, and RepoAgent compatibility at explicit seams.
 - Rewrite only when the existing interface conflicts with RepoAgent's product boundary, security model, or required compatibility.
 - Do not perform a one-shot repository overlay; migrate one dependency-closed module slice per commit.
+- A same-named capability is not migration evidence. Before marking a migrated
+  slice complete, update the local, ignored parity audit with source/tests,
+  behavioral differences, and an `ALIGN`, `ADAPT`, or `DEFER` disposition.
+- `ADAPT` requires a documented incompatibility or measured improvement plus
+  focused failure-path tests. Without that evidence, preserve the upstream
+  implementation and tests.
 
 ### 3.3 Compatibility rule
 
@@ -358,6 +364,27 @@ Gate:
 - A clean clone can install, run offline smoke tests, and reproduce the release contract suite.
 - Public claims identify workload, denominator, model, code commit, and limitations.
 
+### P11 - Public Coding Benchmark Evidence
+
+Goal: measure the complete coding runtime on a frozen public workload instead of
+inferring coding quality from scripted runtime contracts.
+
+- [x] `P11-01` Define an Aider Polyglot adapter that separates model-visible instructions and solution files from tests and reference examples.
+- [x] `P11-02` Add deterministic, language-balanced canary selection and a non-executing inspection CLI bound to the dataset digest and commit.
+- [x] `P11-03` Add a benchmark container backend and refuse Polyglot execution without verified isolation.
+- [x] `P11-04` Execute one scripted task through the public RepoAgent runtime, capture its patch, and grade it inside the isolated benchmark workspace.
+- [x] `P11-05` Persist per-attempt tests, patch, trace, usage, cost, latency, failure category, and checksummed evidence.
+- [ ] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (CI fixture implemented; live canary pending.)
+- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration.
+- [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
+
+Gate:
+
+- Untrusted generated code never executes on the direct host adapter.
+- Runner input contains no test content, example solution, or grader command.
+- Every public result identifies the RepoAgent commit, Polyglot commit/digest, model configuration, task denominator, and all errors or skips.
+- A Harness improvement claim requires paired quality non-inferiority; cost or latency improvement alone is insufficient.
+
 ## 8. Per-Feature Workflow
 
 For each TODO:
@@ -382,3 +409,20 @@ The completed implementation slice is `P1-01` through `P1-05`:
 - document the design and verify terminal outcomes.
 
 Provider runtime phase `P2`, tool execution/security phase `P3`, context/memory/Skill phase `P4`, tracing/evidence phase `P5`, evaluation-platform phase `P6`, bounded-specialization phase `P7`, product-surface phase `P8`, controlled-evolution phase `P9`, and release-hardening phase `P10` are complete. Release `v0.1.1` is bound to commit `49e016a4c27361ff5f7613edd723620d730da837`; its workflow artifact contains the installable distributions, 12-task contract results, 12 self-contained evidence directories, a checksummed release manifest, and release-only resume claims. The earlier `v0.1.0` attempt remains immutable evidence of the clean-checkout documentation-test failure that was corrected before `v0.1.1`.
+
+`P11-05` is complete: the campaign runner executes a deterministic task-by-repetition
+matrix and persists each patch, grade, Agent bundle, provider preflight, raw row,
+latency, usage, call cost and failure category under one aggregate result. Pre-run
+worst-case cost admission happens before output creation or Agent construction;
+actual call count, cost completeness, source integrity, errors and skipped attempts
+remain explicit gates and rows. Both Agent shell execution and hidden-test grading
+are forced through the configured Docker runtime in the live entry points.
+
+The active slice is `P11-06`: CI now runs and uploads a credential-free two-task,
+two-repetition fixture campaign, then validates the aggregate result and per-row
+evidence. The remaining work is the bounded 24-task six-language live canary outside
+PR CI. Live DeepSeek diagnostics previously produced three 16/16 patches but failed
+the convergence gate, while an 8k-context run exposed malformed streamed native-tool
+JSON. The `json_repair` fallback and strict post-repair object/Schema checks cover
+that protocol failure offline; paid canary expansion still requires a bounded live
+replay confirming both protocol recovery and normal Turn convergence.

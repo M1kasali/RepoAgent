@@ -31,6 +31,19 @@ def test_runtime_assembly_is_separate_from_argument_parser(tmp_path):
 
     assert agent.workspace.repo_root == str(tmp_path)
     assert agent.recovered_turn_ids == ()
+    assert agent.checkpoint_policy == "interactive"
+    assert agent.workspace_checkpoint_service is not None
+
+    one_shot_args = build_arg_parser().parse_args(
+        ["--cwd", str(tmp_path), "--approval", "auto", "inspect"]
+    )
+    one_shot = RuntimeAssembly.from_arguments(
+        one_shot_args,
+        model_client_factory=client_factory,
+        secret_names_factory=lambda _args: (),
+    ).build()
+    assert one_shot.interactive is False
+    assert one_shot.workspace_checkpoint_service is None
 
 
 def test_doctor_provider_and_sandbox_commands_are_structured(tmp_path, capsys):
@@ -54,6 +67,42 @@ def test_doctor_provider_and_sandbox_commands_are_structured(tmp_path, capsys):
     sandbox = json.loads(capsys.readouterr().out)
     assert sandbox["status"] == "fail"
     assert sandbox["is_isolated"] is False
+    assert sandbox["available"] is True
+
+
+def test_sandbox_status_reports_unavailable_docker_without_claiming_success(
+    tmp_path, capsys, monkeypatch
+):
+    from repoagent import product_commands
+
+    def unavailable(self):
+        raise ValueError("daemon unavailable")
+
+    monkeypatch.setattr(
+        product_commands.DockerSandboxAdapter,
+        "verify_available",
+        unavailable,
+    )
+
+    assert (
+        main(
+            [
+                "sandbox",
+                "status",
+                "--backend",
+                "docker",
+                "--cwd",
+                str(tmp_path),
+                "--require-isolation",
+            ]
+        )
+        == 0
+    )
+    sandbox = json.loads(capsys.readouterr().out)
+    assert sandbox["is_isolated"] is True
+    assert sandbox["available"] is False
+    assert sandbox["status"] == "fail"
+    assert sandbox["error"] == "daemon unavailable"
 
 
 def test_session_and_skill_commands_are_read_only_summaries(tmp_path, capsys):

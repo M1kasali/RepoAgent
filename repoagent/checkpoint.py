@@ -40,6 +40,8 @@ RUNTIME_IDENTITY_KEYS = (
     "workspace_fingerprint",
     "tool_signature",
     "capability_scope",
+    "checkpoint_policy",
+    "workspace_checkpoint_active",
 )
 
 
@@ -93,6 +95,9 @@ def current_runtime_identity(agent):
             "tools": list(capability_scope.get("tools", [])),
             "valid": bool(capability_scope.get("valid")),
         },
+        "checkpoint_policy": agent.checkpoint_policy,
+        "workspace_checkpoint_active": agent.workspace_checkpoint_service
+        is not None,
     }
 
 
@@ -178,6 +183,18 @@ def render_checkpoint_text(agent):
         lines.append("- Excluded: " + " | ".join(str(item) for item in checkpoint.get("excluded", [])))
     if agent.resume_state.get("stale_paths"):
         lines.append("- Stale paths: " + ", ".join(agent.resume_state["stale_paths"]))
+    edited_files = [
+        str(path).strip()
+        for path in checkpoint.get("edited_files", [])
+        if str(path).strip()
+    ]
+    if edited_files:
+        lines.append("- Workspace files from previous turn: " + ", ".join(edited_files))
+    workspace_checkpoint_id = str(
+        checkpoint.get("workspace_checkpoint_id", "")
+    ).strip()
+    if workspace_checkpoint_id:
+        lines.append(f"- Workspace checkpoint: {workspace_checkpoint_id}")
     summary = str(checkpoint.get("summary", "")).strip()
     if summary:
         lines.append(f"- Summary: {summary}")
@@ -218,6 +235,9 @@ def create_checkpoint(agent, task_state, user_message, trigger):
         "freshness": freshness,
         "summary": f"{trigger}: {clip(str(user_message), 120)}",
         "runtime_identity": current_runtime_identity(agent),
+        "workspace_checkpoint_id": task_state.workspace_checkpoint_id,
+        "workspace_checkpoint_status": task_state.workspace_checkpoint_status,
+        "edited_files": list(task_state.edited_files),
     }
     state["items"][checkpoint_id] = checkpoint
     state["current_id"] = checkpoint_id

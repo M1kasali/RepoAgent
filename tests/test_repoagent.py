@@ -20,6 +20,7 @@ from repoagent import (
     WorkspaceContext,
     build_welcome,
 )
+from repoagent.providers import ModelEvent, ModelResult, ToolCall
 
 
 def build_workspace(tmp_path):
@@ -266,12 +267,10 @@ def test_agent_retries_after_empty_model_output(tmp_path):
     answer = agent.ask("Do the task")
 
     assert answer == "Recovered after retry."
-    notices = [
-        item["content"]
+    assert all(
+        "empty response" not in item.get("content", "")
         for item in agent.session["history"]
-        if item["role"] == "assistant"
-    ]
-    assert any("empty response" in item for item in notices)
+    )
 
 
 def test_agent_retries_after_malformed_tool_payload(tmp_path):
@@ -329,6 +328,103 @@ def test_retries_do_not_consume_the_whole_budget(tmp_path):
     answer = agent.ask("Do the task")
 
     assert answer == "Recovered after several retries."
+
+
+def test_step_exhaustion_synthesizes_with_tools_disabled(tmp_path):
+    class ToolThenSynthesisProvider:
+        supports_prompt_cache = False
+        model = "test-model"
+
+        def __init__(self):
+            self.requests = []
+
+        def stream(self, request):
+            self.requests.append(request)
+            result = (
+                ModelResult(
+                    tool_calls=(ToolCall("call-1", "list_files", {"path": "."}),),
+                    finish_reason="tool_use",
+                    provider="test",
+                    model=self.model,
+                )
+                if request.tools
+                else ModelResult(
+                    text="Implemented the available changes; hidden verification remains.",
+                    finish_reason="stop",
+                    provider="test",
+                    model=self.model,
+                )
+            )
+            yield ModelEvent(kind="completed", result=result)
+
+    provider = ToolThenSynthesisProvider()
+    workspace = build_workspace(tmp_path)
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=workspace,
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+        max_steps=1,
+    )
+
+    answer = agent.ask("Implement the task")
+
+    assert answer == "Implemented the available changes; hidden verification remains."
+    assert len(provider.requests) == 2
+    assert provider.requests[0].tools
+    assert provider.requests[1].tools == ()
+    assert "same language as the user" in provider.requests[1].prompt
+    assert agent.current_task_state.status == "stopped"
+    assert agent.current_task_state.stop_reason == "step_limit_reached"
+    assert agent.current_task_state.attempts == 2
+    assert agent.current_task_state.tool_steps == 1
+    assert agent.session["history"][-1] == {
+        "role": "assistant",
+        "content": answer,
+        "created_at": agent.session["history"][-1]["created_at"],
+    }
+    calls = [
+        json.loads(line)
+        for line in agent.run_store.call_ledger_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(calls) == 2
+    trace = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(event["event"] == "exhaustion_synthesis_requested" for event in trace)
+    completed = next(
+        event for event in trace if event["event"] == "exhaustion_synthesis_completed"
+    )
+    assert completed["tools_enabled"] is False
+    assert completed["used_static_fallback"] is False
+
+
+def test_step_exhaustion_uses_static_fallback_when_synthesis_fails(tmp_path):
+    agent = build_agent(
+        tmp_path,
+        ['<tool>{"name":"list_files","args":{"path":"."}}</tool>'],
+        max_steps=1,
+    )
+
+    answer = agent.ask("Implement the task")
+
+    assert answer.startswith("Stopped after reaching the step limit.")
+    assert agent.current_task_state.stop_reason == "step_limit_reached"
+    trace = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(agent.current_task_state.run_id)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    failed = next(
+        event for event in trace if event["event"] == "exhaustion_synthesis_failed"
+    )
+    assert failed["fallback"] == "static"
 
 
 def test_agent_saves_and_resumes_session(tmp_path):
@@ -563,6 +659,7 @@ def test_openai_compatible_client_posts_expected_responses_payload():
                 ],
             }
         ],
+        "include": ["reasoning.encrypted_content"],
         "max_output_tokens": 42,
         "stream": False,
         "temperature": 0.2,

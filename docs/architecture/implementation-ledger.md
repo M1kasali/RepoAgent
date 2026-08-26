@@ -72,13 +72,14 @@ Copy this section for each completed capability.
 | Task state | `repoagent/task_state.py` | implemented baseline | TECH-002 |
 | Session persistence | `repoagent/session_store.py`, `repoagent/atomic_io.py` | atomic and versioned | TECH-010 |
 | Run evidence | `repoagent/run_store.py`, `repoagent/atomic_io.py` | crash-recoverable Turn evidence | TECH-010 |
-| Checkpoint projection | `repoagent/checkpoint.py` | partial | TECH-003 |
+| Checkpoint and workspace recovery | `repoagent/checkpoint.py`, `repoagent/workspace_checkpoint.py` | semantic projection plus out-of-band file snapshots | TECH-003, TECH-072 |
 | Tool execution lifecycle | `repoagent/tool_execution.py`, `repoagent/tool_gateway.py`, `repoagent/tools.py` | deadlines, cancellation, bounded output, and process-tree convergence implemented | TECH-021 |
 | Tool batch scheduling | `repoagent/tool_gateway.py`, `repoagent/agent_loop.py` | bounded safe-read parallelism with deterministic result and evidence order | TECH-022 |
 | Mutation conflict policy | `repoagent/tool_scheduling.py`, `repoagent/tool_gateway.py` | explicit serial policy and auditable scheduling decisions | TECH-023 |
 | MCP runtime | `repoagent/mcp.py`, `repoagent/runtime.py` | namespaced discovery, schema validation, capability-scoped Gateway execution | TECH-024 |
 | Sandbox adapters | `repoagent/sandbox.py`, `repoagent/tools.py` | explicit direct-host identity and injected isolated-backend contract | TECH-025 |
 | Isolation enforcement | `repoagent/tool_gateway.py`, `repoagent/runtime.py` | definition- and task-level fail-closed isolation gate | TECH-026 |
+| Agent shell sandbox | `repoagent/sandbox.py`, `repoagent/runtime_assembly.py` | direct-host declaration plus fail-closed Docker isolation backend | TECH-073 |
 | Network and adversarial security | `repoagent/security.py`, `tests/test_security_adversarial.py` | secret redaction, network policy, and attack-path regressions | TECH-027 |
 | Git/worktree extension | `repoagent/tools.py` | argv-only repository inspection and managed worktree lifecycle | TECH-028 |
 | Context segments and reduction | `repoagent/context_manager.py` | immutable sourced segment manifest with token-aware reduction | TECH-029, TECH-030 |
@@ -111,6 +112,12 @@ Copy this section for each completed capability.
 | Call efficiency | `repoagent/pricing.py`, `repoagent/call_efficiency.py`, `repoagent/run_store.py` | explicit price snapshots and per-attempt cost evidence implemented | TECH-014 |
 | Cache and compaction accounting | `repoagent/providers/base.py`, `repoagent/pricing.py`, `repoagent/call_efficiency.py` | provider-aware cache cost and compaction call classification implemented | TECH-015 |
 | Provider replay and live acceptance | `repoagent/call_replay.py`, `live_tests/test_live_providers.py` | deterministic offline verification and explicit live opt-in implemented | TECH-016 |
+| Paid campaign preflight | `repoagent/evaluation/provider_probe.py`, `repoagent/evaluation/polyglot_campaign.py` | bounded native-tool probe bound to source, suite, runtime, sandbox, and budget identity | TECH-074 |
+| Polyglot campaign orchestration | `repoagent/evaluation/polyglot_suite.py`, `scripts/run_polyglot_campaign.py` | budget-admitted task/repetition matrix with complete denominator and isolated execution | TECH-075 |
+| Polyglot CI fixture | `scripts/run_polyglot_fixture_campaign.py`, `.github/workflows/ci.yml` | credential-free campaign, result validation, and uploaded evidence artifact | TECH-076 |
+| Structured conversation replay | `repoagent/conversation.py`, `repoagent/agent_loop.py`, `repoagent/providers/clients.py` | budgeted cross-Turn Tool/Reasoning replay with prompt-only compatibility | TECH-077 |
+| Responses reasoning recovery | `repoagent/providers/clients.py`, `repoagent/agent_loop.py` | normalized reasoning-only output, opaque replay, and bounded structured prefill | TECH-078 |
+| Prompt-only overflow recovery | `repoagent/context_overflow.py`, `repoagent/context_manager.py`, `repoagent/agent_loop.py` | emergency history snapshot and token-budget reduction for legacy/Ollama prompts | TECH-079 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -1993,6 +2000,610 @@ The current architecture document presents the unified ingress, Scheduler/Turn r
 ### P10 Release Readiness Verification
 
 Full local verification passed 488 tests. The final main-branch CI run `32825640141` passed Ruff and the full suite on Python 3.10, 3.11, and 3.12 across Ubuntu and Windows, plus the independent wheel-install smoke job. Release run `32827010946` repeated the clean-tag preflight, Ruff, full tests, build, 12-task offline contract campaign, bundle construction, and release-only claim generation. The downloaded artifact was reverified against all manifest checksums. Six existing `datetime.utcnow()` deprecation warnings remain in the legacy metrics writer.
+
+## TECH-062 - Aider Polyglot Dataset and Canary Contract
+
+- Plan items: `P11-01`, `P11-02`
+- Status: implemented adapter and inspection plan; no benchmark execution claim
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/polyglot.py`, `repoagent/evaluation/cli.py`
+- Tests: `tests/test_polyglot_evaluation.py`
+
+`PolyglotAdapter` consumes a caller-supplied checkout of the official
+`Aider-AI/polyglot-benchmark` layout. It validates every declared relative path,
+loads introduction/instruction/append text, exposes only editable solution files
+to `PolyglotRunnerInput`, and retains test files, example/reference files, test
+commands, and the exercise root behind `PolyglotInstance.grader_payload()`.
+This is an information-flow boundary for the runner API, not protection against
+a model that can bypass RepoAgent and inspect the host filesystem.
+
+Selection is sorted and round-robin across the canonical C++, Go, Java,
+JavaScript, Python, and Rust order. A 24-task canary therefore selects four per
+language when the official corpus is complete, without randomness or
+cherry-picking after results are known. The plan records the complete dataset
+digest, source commit and dirty state when available, complete-corpus and
+selected per-language denominators, selected task IDs, solution paths,
+instruction digests, and fixture digests. It contains no
+test path, test content, example path, reference content, or grader command.
+
+`repoagent-eval polyglot-plan` only writes this frozen inspection artifact and
+marks execution `not_run` plus `requires_isolation=true`. The official Aider
+harness warns that generated solutions are untrusted and runs them in Docker;
+RepoAgent follows that threat boundary. P11-03 must supply a concrete isolated
+container backend before P11-04 is allowed to execute or grade a task.
+
+Local verification is also retained by `scripts/record_verification.py`. Its
+non-publishable bundle stores pytest JUnit, per-command stdout/stderr, duration,
+exit status, source/environment provenance, and checksums, plus the frozen
+Polyglot plan when a dataset checkout is supplied. Failed commands remain in the
+bundle instead of disappearing from the denominator. These ignored local
+artifacts are debugging and claim-preparation inputs; only clean-tag release
+evidence may generate resume claims.
+
+## TECH-063 - Isolated Polyglot Grading Boundary
+
+- Plan item: `P11-03`
+- Status: implemented and locally container-probed
+- Implemented: 2026-08-25
+- Owning modules: `repoagent/evaluation/container.py`, `repoagent/evaluation/polyglot.py`
+- Tests: `tests/test_evaluation_container.py`, `tests/test_polyglot_evaluation.py`
+
+`DockerContainerRunner` copies a benchmark grading workspace into a disposable
+Docker-accessible staging directory and never bind-mounts the source repository.
+Git metadata, RepoAgent/Pico state, environment files, prior artifacts, dependency
+trees, and build targets are excluded. Symlinked inputs fail closed. Containers
+run without network, Linux capabilities, or privilege escalation, with a read-only
+root filesystem, bounded temporary storage, CPU, memory, PID, time, and retained
+output. A unique named container is force-removed after success, failure,
+timeout, or cancellation. Container writes affect only the disposable staging
+copy and are never synchronized to the source workspace.
+
+`prepare_polyglot_runner_workspace` physically copies only declared editable
+solution files. Tests, `.meta` references, grader commands, and build support are
+absent rather than merely hidden in a prompt. `PolyglotContainerGrader` later
+recreates a private grading workspace from the frozen source exercise, overlays
+only those produced solution files, and refuses any backend lacking an explicit
+isolation claim. A real Docker Desktop 29.6.2 probe executed an Alpine container
+with the production flags and returned `grader-container-ok`. This proves the
+container boundary and grading path, not model coding quality.
+
+`polyglot_workspace_context` additionally fixes both `cwd` and `repo_root` to
+the isolated trial directory. This is mandatory even when a trial is stored
+under another Git checkout: ordinary workspace auto-discovery would otherwise
+walk upward and grant file-tool authority over the parent repository.
+
+## TECH-064 - Single-task Polyglot Runtime Smoke
+
+- Plan item: `P11-04`
+- Status: scripted runtime/grader smoke passed; live model not run
+- Implemented: 2026-08-25
+- Evidence: local ignored bundle `artifacts/polyglot-smoke/scripted-affine-20260825-03`
+
+The official `python/affine-cipher` fixture was reduced to its declared solution
+file, passed through a normal RepoAgent Turn with a scripted `FakeModelClient`,
+modified through the public `write_file` ToolGateway path, and graded against
+the restored hidden tests inside the pinned local Python grader image. The
+container collected 16 tests and passed 16/16 in 1.575 seconds. The evidence
+bundle retains the Turn state/events, trace, call ledger, report, generated
+patch, raw pytest output, fixture digest, image ID, source provenance, and file
+checksums. It declares `run_kind=scripted` and `coding_quality_claim=false`.
+
+Two failed precursors were retained locally. The first revealed that container-
+created pytest cache files on a Windows staging mount could not be removed by
+WSL; container-side staging scrubbing now runs on every exit. The second revealed
+that ordinary Git root auto-discovery could escape a nested trial and write the
+parent RepoAgent checkout; the mandatory explicit trial-root context fixed that
+authority bug. Neither failed run is counted as a benchmark pass. No provider
+credential or local Ollama service was available, so this result is not evidence
+of real-model Polyglot performance.
+
+## TECH-065 - Live Polyglot Result Semantics and Provider Findings
+
+- Plan item: `P11-05` (partial)
+- Status: single-task campaign implemented; live convergence gate failing
+- Implemented/tested: 2026-08-25
+- Owning modules: `repoagent/evaluation/polyglot_campaign.py`, `scripts/run_polyglot_task.py`, `repoagent/providers/clients.py`
+- Dependency: `json-repair>=0.61.7,<1` (locked by `uv.lock`)
+- Tests: `tests/test_polyglot_evaluation.py`, `tests/test_provider_runtime.py`
+- Evidence: local ignored bundles under `artifacts/polyglot-live/`
+
+`PolyglotSingleTaskCampaign` retains the generated patch, isolated grader output,
+Turn evidence bundle, raw row, normalized result, usage, call-efficiency, latency,
+failure category, and SHA-256 references. A campaign pass now requires both hidden
+tests and `final_answer_returned`; `code_passed` and `turn_converged` remain separate
+so a correct patch cannot hide a failed runtime lifecycle.
+
+Three DeepSeek runs generated independent implementations of
+`python/affine-cipher` that each passed all 16 hidden tests. They did not count as
+complete campaign passes: with a 3,000-token input budget the model repeatedly
+read the completed file until `step_limit_reached`. Trace evidence showed the
+mandatory checkpoint consuming about 1,170 tokens and squeezing the runtime
+prefix from 900 tokens to roughly 258-294 tokens in later rounds. A subsequent
+8,000-token diagnostic failed before grading because the Anthropic-compatible
+stream contained malformed native-tool argument JSON. This is useful failure
+evidence, not a coding-quality score or resume claim. Further paid runs are
+blocked until protocol recovery and convergence regressions are fixed offline.
+The provider boundary now tries `json_repair` after strict JSON decoding fails,
+while still requiring an object
+and passing repaired arguments through the normal Tool Schema and policy gates.
+Offline stream regressions cover a repairable trailing comma and rejection of a
+repaired non-object payload; another paid run is still required to verify the
+exact live failure no longer aborts the Turn.
+
+The provider parsing order is deliberately bounded:
+
+1. Already-decoded mapping arguments are accepted without rewriting.
+2. String arguments first use standard-library `json.loads()` so valid provider
+   output retains strict JSON semantics.
+3. Only a `JSONDecodeError` activates `json_repair.loads()`; transport failures
+   and non-string payloads are not disguised as repairable JSON.
+4. The decoded value must still be an object. Arrays, scalars, and null remain
+   protocol errors even when the repair library can parse them.
+5. The resulting object enters the existing `ToolDefinition` argument Schema,
+   effect approval, capability, sandbox, and execution gates. JSON repair does
+   not authorize a tool, add missing business arguments, or bypass policy.
+
+The focused provider tests construct Anthropic-compatible SSE
+`input_json_delta` streams. One verifies that `{"path":"README.md",}` becomes
+the expected `read_file` argument object; another verifies that a repairable
+array is rejected before it can reach ToolGateway. The full suite after this
+change initially passed 506 tests; after removing the temporary project-specific
+terminal tool, the provider/runtime/checkpoint/Polyglot focused regression passed
+117 tests. Six pre-existing `datetime.utcnow()` deprecation warnings remain. No
+additional paid provider call was made after adding the repair path, so live
+recovery remains unverified and is not counted as a pass.
+
+Tool-loop exhaustion now uses one tools-disabled synthesis request while the Turn
+remains interrupted through
+`TaskState(status=stopped, stop_reason=step_limit_reached)`; see TECH-066.
+
+## TECH-066 - Tools-disabled Exhaustion Synthesis
+
+- Area: Agent-loop max-iteration exhaustion
+- Status: implemented and regression-tested
+- Implemented/tested: 2026-08-26
+- Owning module: `repoagent/agent_loop.py`
+- Tests: `tests/test_repoagent.py`
+
+When the normal tool budget is exhausted, AgentLoop builds one final request from
+the retained context plus a bounded synthesis instruction and sends it with an
+empty tool tuple. The instruction requires a concise summary of completed,
+verified, and unfinished work in the user's language. The synthesis request is
+counted as another model attempt, enters `calls.jsonl`, contributes to aggregate
+usage and cost completeness, and emits explicit requested/completed/failed trace
+events.
+
+A useful synthesis answer is persisted to session history and delivered to the
+caller, but it does not convert the Turn into success. TaskState remains stopped
+with `step_limit_reached`, so evaluation continues to report
+`turn_converged=false`. Provider cancellation still propagates. Provider failure,
+an empty response, or an unexpected tool call falls back to a deterministic
+message without discarding prior workspace changes or run evidence. No custom
+terminal tool is exposed to the model.
+
+Focused Provider/Agent/Polyglot tests passed 111 cases before the full suite
+passed 507 tests. Ruff and whitespace validation passed; six legacy
+`datetime.utcnow()` deprecation warnings remain.
+
+## TECH-067 - Fail-closed Provider Campaign Preflight
+
+- Area: live Provider campaign admission
+- Status: first strict gate implemented; immutable campaign binding pending
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/evaluation/provider_probe.py`, `repoagent/evaluation/polyglot_campaign.py`
+- Tests: `tests/test_provider_probe.py`, `tests/test_polyglot_evaluation.py`
+
+Live Polyglot execution now performs a bounded native Tool Calling probe before
+the Agent or hidden grader can run. The probe requires the exact echo call,
+stable Provider and model identities, actual usage accounting with all normalized
+token fields, a frozen tokenizer identity, an explicit pricing source, and no
+fallback model. A failure creates a checksummed `provider-preflight.json`, an
+explicit `provider_preflight_failed` row category, and a failed result gate;
+Agent execution and grading remain `not_run`.
+
+The first gate does not yet bind an immutable preflight cache to commit, suite,
+approval, and runtime configuration digests; scope an independent logical-call
+budget and timeout; or recheck clean-worktree identity after preflight. Those
+invariants remain required before a multi-task paid campaign. Focused Provider
+probe and Polyglot campaign tests passed 18 cases.
+
+## TECH-068 - Native Tool Transcript Continuity
+
+- Area: Provider-neutral assistant/tool message protocol
+- Status: current-Turn continuity implemented; cross-Turn structured replay pending
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_provider_runtime.py`, `tests/test_repoagent.py`, `tests/test_usage_accounting.py`
+
+`ModelRequest` can now carry validated `ModelMessage` values in addition to its
+compatibility prompt. During a native Tool Calling Turn, AgentLoop retains the
+initial assembled request, the assistant message with exact Tool Call IDs and
+arguments, and one matched result per executed call. Tool outputs are enclosed
+in nonce-paired untrusted-data boundaries before being returned to the model.
+The raw execution result remains available to the existing session, trace, and
+evidence paths.
+
+Anthropic-compatible projection emits assistant `tool_use` blocks and coalesced
+user `tool_result` blocks; consecutive user blocks are merged so a tools-disabled
+exhaustion instruction remains protocol-valid. OpenAI Responses projection emits
+`function_call` and matching `function_call_output` input items. The existing
+plain-prompt path remains for text-only and legacy clients.
+
+This implementation currently preserves structured continuity inside one Turn.
+A later Turn still receives deterministically compacted text history rather than
+a reconstructed native transcript, and context token admission is still based
+on the compatibility prompt rather than the final Provider-specific projection.
+Those limitations must be addressed before claiming complete message-protocol
+parity or measuring context savings. Provider, AgentLoop, accounting, preflight,
+and Polyglot focused tests passed 128 cases; an additional real-adapter preflight
+contract verifies that configured DeepSeek identity survives Anthropic-compatible
+normalization. The complete suite collected and passed 518 tests. Ruff, the
+Polyglot CLI help smoke, and `git diff --check` passed.
+
+## TECH-069 - Bounded Empty-response Recovery
+
+- Area: AgentLoop empty and thinking-only response handling
+- Status: implemented for generic and Anthropic-compatible model results
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/empty_recovery.py`, `repoagent/agent_loop.py`, `repoagent/providers/base.py`, `repoagent/providers/clients.py`
+- Tests: `tests/test_empty_recovery.py`, `tests/test_provider_runtime.py`, `tests/test_repoagent.py`
+
+Empty-response handling is now a pure, independently tested decision policy with
+per-Turn counters. A thinking-only response is replayed at most twice, an empty
+response immediately following Tool Calls receives one user nudge, and an
+ordinary empty response is retried at most three times. Thinking recovery takes
+priority over the post-Tool nudge; after prefill exhaustion, the plain retry
+budget remains available. Recovery can be disabled through a validated
+`RecoveryLimits` value on `RepoAgent`.
+
+Recovery messages exist only in the current Provider transcript. Reasoning
+replay, the synthetic `(empty)` assistant message, and the post-Tool user nudge
+are never appended to persisted session history. Each action and exhausted
+budget emits an explicit trace event. Persistent empty output returns a bounded
+fallback after four total calls under the default policy rather than consuming
+the general malformed-response limit.
+
+`ModelResult` now retains structured reasoning text and immutable thinking
+blocks. The Anthropic-compatible SSE adapter collects `thinking_delta` and
+`signature_delta`, making real structured thinking available to the same
+recovery classifier used by scripted Providers. OpenAI Responses reasoning
+items are not yet normalized, so that transport currently falls back to plain
+empty retry instead of reasoning prefill. Focused recovery, Provider, AgentLoop,
+accounting, and preflight tests passed 128 cases.
+
+## TECH-070 - Context-overflow Classification and Recovery
+
+- Area: live Provider context-window overflow
+- Status: implemented for structured native transcripts; legacy prompt reduction pending
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/context_overflow.py`, `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/providers/fallback.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_context_overflow.py`, `tests/test_provider_runtime.py`
+
+`ProviderError` now carries an independent `should_compress` verdict. HTTP error
+classification detects context-length markers before the generic 400 bucket and
+marks the call non-retryable and non-fallbackable while allowing transcript
+reduction. Fallback chains never switch Provider on an overflow, and a final
+overflow after an earlier legitimate fallback preserves the compression verdict
+through the exhausted-chain wrapper.
+
+AgentLoop responds by replacing older native Tool-result bodies with a fixed,
+content-free placeholder while preserving message order, call IDs, assistant
+Tool Calls, and the three most recent complete Tool results. Recovery is limited
+to two reductions per Turn and only retries if at least one non-placeholder body
+was actually elided. Failed Provider calls remain in call-efficiency and usage
+completeness evidence; successful recovery and unrecoverable failure have
+separate trace events.
+
+The reducer acts on structured `ModelMessage` transcripts used by the
+Anthropic-compatible and OpenAI Responses transports. Ollama and legacy
+text-tool clients still rely on a rebuilt compatibility prompt and currently
+fail closed when no structured Tool results are available; their deterministic
+history compaction needs a separate overflow retry path. Focused overflow,
+Provider, AgentLoop, usage, and preflight tests passed 130 cases.
+
+## TECH-071 - Deterministic Tool-failure Loop Break
+
+- Area: repeated Tool failure recovery
+- Status: implemented and regression-tested
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/tool_loop_break.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_tool_loop_break.py`
+
+AgentLoop now tracks consecutive deterministic failures by Tool name across
+iterations. After two failures in a row, it appends a runtime-owned `[loop]`
+instruction requiring the model to stop unchanged retries and reconsider the
+path, Tool, command, external dependency, or offline strategy. A fresh streak
+may trigger again, but no Turn receives more than two nudges.
+
+Classification uses the structured `ToolResult` status, error code, workspace
+effects, and content. Cancellation, timeout, rate limiting, 502/503 responses,
+partial success, workspace-changing outcomes, and successful empty searches do
+not count as deterministic failures. Unknown Tools, invalid arguments,
+non-changing shell failures, structured error payloads, and other stable
+rejections do count. This policy complements the existing identical-call
+rejection: it also detects a model varying arguments while repeatedly choosing
+the same broken Tool.
+
+The nudge is appended after the nonce-bounded untrusted Tool output, persisted
+with the matching Tool result, projected into the next Provider request, and
+recorded as a trace event with Tool name, call ID, streak, and Turn-level nudge
+count. Focused loop-break, Provider, AgentLoop, and usage tests passed 131 cases.
+
+## TECH-072 - Out-of-band Workspace Checkpoints
+
+- Area: per-Turn filesystem recovery and interrupted-work evidence
+- Status: implemented for local interactive/always policies
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/workspace_checkpoint.py`, `repoagent/agent_loop.py`, `repoagent/checkpoint.py`, `repoagent/runtime.py`
+- Tests: `tests/test_workspace_checkpoint.py`, `tests/test_checkpoint.py`, `tests/test_task_state.py`
+
+RepoAgent now keeps task-semantic JSON checkpoints and filesystem checkpoints as
+separate contracts. The filesystem service uses the workspace as a Git work tree
+and an isolated Git directory under the selected RepoAgent state root. Its fixed
+identity and explicit `--git-dir`/`--work-tree` arguments never update the user's
+branch, index, configuration, or commit history.
+
+The runtime establishes a baseline before accepting a Turn, then snapshots the
+terminal workspace with `git add -A`. This makes the reported `edited_files`
+represent the current Turn even on a new workspace-checkpoint lineage, and it
+captures writes, patches, shell-driven edits, renames, and deletions without
+depending on a particular Tool implementation. Workspace `.gitignore` rules are
+honored and a second exclude layer rejects runtime state, build outputs, virtual
+environments, dotenv files, likely credential files, logs, and editor state.
+
+Policy is `always`, `interactive`, or `never`; the CLI default enables snapshots
+for persistent interactive sessions and skips them for one-shot requests. A Git
+failure or timeout returns `unavailable` evidence and cannot fail the protected
+Turn. Successful, unchanged, and unavailable outcomes are distinguished in
+`task_state.json`, trace, report, and the semantic checkpoint. When an interrupted
+Turn changed files, the next prompt contains the file list and short shadow commit
+ID so the model must reason from the retained workspace rather than treating the
+previous answer as completion.
+
+Focused checkpoint, TaskState, AgentLoop, and runtime tests passed 93 cases. They
+cover first-Turn baselining, user-Git isolation, deletion capture, layered ignore
+rules, Unicode and symlink paths, unsafe shadow paths, missing workspaces, missing
+or timed-out Git, same-service concurrency, GC configuration/heartbeat,
+structured evidence, and next-Turn recovery injection. Cross-process locking and
+an operator-facing restore command remain outside this slice. The complete suite
+passed 563 tests with six pre-existing metrics deprecation warnings; Ruff, CLI
+help/configuration smoke, and whitespace checks passed.
+
+## TECH-073 - Docker Agent Shell Sandbox
+
+- Area: real isolation for model-requested shell execution
+- Status: implemented; real daemon smoke blocked by local Docker service state
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/sandbox.py`, `repoagent/runtime_assembly.py`, `repoagent/cli.py`, `repoagent/product_commands.py`
+- Tests: `tests/test_sandbox.py`, `tests/test_product_cli.py`, `tests/test_safety_invariants.py`
+
+The sandbox interface now has a CLI-selectable production backend instead of
+only an injection seam. `--sandbox-backend docker` mounts the configured
+workspace read-write at `/workspace` so Agent edits persist, while the container
+root is read-only, networking is disabled, Linux capabilities are dropped,
+`no-new-privileges` is set, PID/CPU/memory limits are enforced, and `/tmp` is a
+bounded tmpfs. On POSIX hosts the container runs with the caller's UID/GID to
+avoid leaving root-owned workspace files.
+
+Only locale/terminal variables cross the container boundary; provider keys and
+the rest of the host environment do not. The existing monotonic timeout,
+cancellation callback, process-group reap, and bounded-output contract wraps the
+Docker CLI. Every execution uses a unique name and attempts `docker rm --force
+--volumes` in `finally`, including timeout and cancellation paths. A command cwd
+outside the configured workspace is rejected before Docker invocation.
+
+Selecting Docker performs `docker info` during runtime assembly. A missing CLI
+or daemon is therefore reported before any model call and never falls back to
+direct-host execution. `repoagent sandbox status --backend docker` distinguishes
+an isolated backend from an available isolated runtime, so an installed but
+stopped Docker service produces `is_isolated=true`, `available=false`, and a
+failed status rather than a false readiness claim.
+
+Offline sandbox, CLI, and security verification passed 32 focused tests. A real
+probe on this WSL host correctly failed because `/var/run/docker.sock` was absent;
+there was no container execution to claim. Persistent container reuse, network
+allowlists, sandboxed stdio MCP processes, and a BoxLite MicroVM backend remain
+future slices. The complete suite passed 568 tests with six pre-existing metrics
+deprecation warnings; Ruff and whitespace checks passed.
+
+## TECH-074 - Source-bound Provider Campaign Preflight
+
+- Area: paid/live evaluation admission and provenance
+- Status: implemented for the Polyglot single-task campaign
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/evaluation/provider_probe.py`, `repoagent/evaluation/polyglot_campaign.py`, `scripts/run_polyglot_task.py`
+- Tests: `tests/test_provider_probe.py`, `tests/test_polyglot_evaluation.py`
+
+The native Tool-call preflight remains bounded to two attempts, 128 output tokens
+and a 60-second per-call timeout by default. It still requires exact provider and
+model identity, one exact echo Tool call, actual complete usage fields, explicit
+tokenizer/pricing provenance, and no fallback. Those transport checks are now
+part of a canonical approval digest rather than a reusable global capability
+claim.
+
+For a formal Polyglot campaign the digest also binds the source commit and tree,
+dirty state, benchmark definition digest, secret-free runtime configuration,
+Tool signature, sandbox identity/isolation, attempt budget, output ceiling and
+timeout. The complete approval identity and digest are persisted in
+`provider-preflight.json`. After the paid probe and before the Agent Turn, the
+campaign recollects source provenance and fails the gate if commit, tree or dirty
+state changed.
+
+`scripts/run_polyglot_task.py` now requires a clean committed source by default.
+`--allow-dirty-source` is an explicit development-only override; dirty runs retain
+their exact tree digest but are not silently treated as formal evidence. Invalid
+or incomplete approval identity fails before the first Provider call.
+
+Provider and Polyglot focused verification passed 23 tests, covering bound
+identity, explicit timeouts, missing fields, source drift after probe, and clean
+commit admission. The campaign also uses a cross-process non-blocking lock keyed
+by benchmark digest, acquired before Agent construction or Provider calls. An
+exact approval cache under workspace state reuses a successful probe only when
+both the approval digest and a canonical whole-record digest validate; malformed,
+tampered, or identity-drifted cache records fail closed. The complete suite
+passed 577 tests with six pre-existing metrics deprecation warnings; Ruff, both
+CLI help smokes, and whitespace checks passed. Aggregate cost reservation and
+multi-task campaign orchestration remain pending.
+
+## TECH-075 - Budgeted Polyglot Campaign Orchestration
+
+- Area: public coding benchmark execution and evidence
+- Status: implemented for multi-task canary campaigns
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/evaluation/polyglot_suite.py`, `repoagent/evaluation/polyglot_campaign.py`, `scripts/run_polyglot_campaign.py`, `repoagent/sandbox.py`
+- Tests: `tests/test_polyglot_evaluation.py`, `tests/test_sandbox.py`
+
+`PolyglotCampaign` executes the selected task and repetition matrix through the
+single-attempt evidence boundary. It retains aggregate `rows.jsonl` and
+`results.json` files while each attempt keeps its patch, isolated grade, provider
+preflight and checksummed Agent evidence bundle. Provider preflight failure aborts
+further paid execution, but all remaining planned identities are written as
+explicit `skipped` rows and remain in the reported denominator.
+
+`CampaignBudget` requires an explicit pricing snapshot and computes a conservative
+worst-case call, input-token, output-token and USD ceiling before the output
+directory or Agent exists. Aggregate results separately gate observed per-attempt
+call counts and actual partial cost. Missing price coverage fails the actual-cost
+gate instead of being interpreted as zero spend. A benchmark-keyed process lock
+prevents concurrent paid writers, and source provenance is captured before the
+campaign and compared again after execution.
+
+The live task and campaign entry points now force both model-directed shell tools
+and hidden-test grading through the configured Docker runtime with isolation
+required. The Docker executable, image and resource limits are shared across both
+boundaries; unavailable isolation fails before model execution rather than falling
+back to the host.
+
+Focused Provider, runtime, sandbox and Polyglot verification passed 88 tests. The
+complete suite passed 581 tests with six pre-existing metrics deprecation warnings;
+Ruff, the product CLI and both Polyglot CLI help smokes, and whitespace checks
+passed. No paid Provider or benchmark campaign was run in this implementation
+slice.
+
+## TECH-076 - Credential-free Polyglot CI Campaign
+
+- Area: public benchmark pipeline regression
+- Status: implemented; live canary remains pending
+- Implemented/tested: 2026-08-26
+- Owning modules: `scripts/run_polyglot_fixture_campaign.py`, `benchmarks/fixtures/polyglot-mini/`, `.github/workflows/ci.yml`
+- Tests: `tests/test_polyglot_evaluation.py`; CI campaign and schema-validation commands
+
+The CI workflow now runs a two-task Python fixture with two repetitions through the
+real RepoAgent Turn, Tool Gateway, patch capture, grade and evidence-bundle paths.
+The provider is deterministic and the fixture grader compares fixed text without
+executing generated code, so the job needs no model credential or Docker daemon.
+It validates `results.json` with per-row evidence required and uploads the complete
+campaign directory as `polyglot-fixture-evidence`. Evidence validation resolves
+every relative path under the result directory, rejects traversal and symlinks,
+requires the matching digest field, and recomputes each file or bundle-manifest
+SHA256.
+
+The result schema explicitly states that scripted campaigns verify orchestration
+and evidence rather than model coding quality. A local reproduction produced four
+planned rows, four passes, no skips, eight recorded scripted calls and four complete
+attempt evidence trees; the result validator accepted every row. This is a CI
+contract only. It does not complete `P11-06`, which still requires the bounded
+six-language live canary outside pull-request CI. Final local verification passed
+582 tests with six pre-existing metrics deprecation warnings; full Ruff and
+whitespace checks passed.
+
+## TECH-077 - Structured Cross-Turn Conversation Replay
+
+- Area: Provider conversation protocol and context admission
+- Status: offline contract implemented; live replay pending
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/conversation.py`, `repoagent/agent_loop.py`, `repoagent/context_manager.py`, `repoagent/providers/base.py`, `repoagent/providers/clients.py`, `repoagent/providers/fallback.py`
+- Tests: `tests/test_conversation.py`, `tests/test_provider_runtime.py`
+
+Providers that declare structured-message support now receive persisted history as
+native `ModelMessage` values before the current user request. Assistant Tool calls
+retain their call ids, names and arguments; Tool results retain the matching id and
+are wrapped again as untrusted data. The same sequence survives a new Turn and a
+session reload. Legacy sessions containing a Tool result without its preceding
+assistant Tool-call record are repaired into a valid pair rather than emitting an
+orphan result.
+
+History admission operates on complete user-turn groups. It selects the newest
+groups within the input budget, clips oversized message content while retaining
+closed untrusted boundaries, and drops a whole older group instead of splitting a
+Tool call from its result. Canonical projected-message token estimates include
+roles, content, Tool ids, names, arguments, reasoning text and thinking blocks.
+Those tokens replace the former prompt-only count in context-window admission and
+are retained in prompt metadata and traces. Structured history is no longer also
+rendered into the text prompt, eliminating duplicate context.
+
+Anthropic-compatible history additionally persists and replays signed thinking
+blocks before assistant text and Tool-use blocks, which covers the built-in
+DeepSeek protocol. OpenAI/Anthropic clients advertise this capability explicitly;
+a fallback chain enables it only when every candidate supports it. Ollama,
+FakeModelClient and other prompt-only clients keep deterministic flattened history,
+so native alignment does not remove their conversation context.
+
+Focused conversation, Provider, context, recovery, accounting and Agent tests
+passed 157 cases. The complete suite passed 586 tests with six pre-existing metrics
+deprecation warnings; Ruff and whitespace checks passed. A real DeepSeek replay is
+still required before this audit item can be marked fully aligned.
+
+## TECH-078 - OpenAI Responses Reasoning Recovery
+
+- Area: Provider response normalization and empty-response recovery
+- Status: offline contract implemented
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/providers/clients.py`, `repoagent/providers/base.py`, `repoagent/agent_loop.py`, `repoagent/empty_recovery.py`
+- Tests: `tests/test_provider_runtime.py`, `tests/test_empty_recovery.py`, `tests/test_repoagent.py`
+
+OpenAI Responses output items with `type=reasoning` now cross the Provider boundary
+as both a display-neutral reasoning summary and the original structured item. The
+normalizer handles ordinary JSON and completed SSE responses, while streamed
+`response.reasoning_summary_text.delta` values provide a bounded fallback when the
+terminal response omits a summary. Chat-Completions-compatible
+`reasoning_content` remains supported independently.
+
+For OpenAI/compatible endpoints with the existing Responses capability flag,
+requests ask for `reasoning.encrypted_content`. A later assistant message replays
+only server-issued reasoning items that contain an id or encrypted payload, and
+only the Responses fields accepted by the projection. It does not fabricate an
+opaque item from plain reasoning text and does not project Anthropic thinking
+blocks into an OpenAI request.
+
+Thinking-only recovery now preserves `reasoning_content` and `thinking_blocks` on
+the synthetic assistant message instead of converting internal reasoning into
+ordinary assistant text. An end-to-end offline test exercises a reasoning-only
+Responses result followed by a successful retry, verifies the encrypted item in
+the second HTTP request, and confirms that recovery scaffolding is absent from
+persisted session history. These tests establish transport and bounded-recovery
+contracts; they do not claim improved answer quality from a live model. Final
+verification passed 589 tests with six pre-existing metrics deprecation warnings;
+Ruff and whitespace checks passed.
+
+## TECH-079 - Prompt-Only Context-Overflow Recovery
+
+- Area: Provider-neutral context overflow recovery
+- Status: implemented
+- Implemented/tested: 2026-08-26
+- Owning modules: `repoagent/context_overflow.py`, `repoagent/context_manager.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py`
+- Tests: `tests/test_context_overflow.py`, `tests/test_context_manager.py`, `tests/test_provider_runtime.py`, `tests/test_repoagent.py`
+
+Structured OpenAI and Anthropic transports already recover from a classified
+context overflow by replacing older Tool-result bodies in the native Provider
+message sequence while retaining the three newest results. Prompt-only clients
+such as Ollama and complete-only compatibility adapters consume
+`ModelRequest.prompt`, so changing only `ModelRequest.messages` did not reduce the
+actual request they transmitted.
+
+The prompt-only branch now creates a copied history snapshot, elides older Tool
+results without mutating persisted session history, and halves the emergency
+history token budget for the retry. Context assembly accepts both overrides only
+for that local request. A later Tool call refreshes the snapshot from current
+session history so new evidence is retained. Exhaustion synthesis uses the same
+reduced view instead of silently restoring the overflowing prompt.
+
+Recovery remains fail-closed and bounded. With three or fewer Tool results there
+is nothing eligible for this policy, so the original Provider error is retained
+after one call. A focused Agent test verifies that the retry's actual prompt is
+shorter, while the no-elision test verifies that an unchanged prompt is never
+retried. Final verification passed 590 tests with six pre-existing metrics
+deprecation warnings; Ruff and whitespace checks passed.
 
 ## 5. Decision Index
 

@@ -21,6 +21,7 @@ from .tool_execution import (
 )
 from .workspace import IGNORED_PATH_NAMES
 
+
 def _object_schema(properties, required):
     return {
         "type": "object",
@@ -34,9 +35,7 @@ BASE_TOOL_DEFINITIONS = {
     "list_files": ToolDefinition(
         name="list_files",
         description="List files in the workspace.",
-        parameters=_object_schema(
-            {"path": {"type": "string", "default": "."}}, []
-        ),
+        parameters=_object_schema({"path": {"type": "string", "default": "."}}, []),
         effect=ToolEffect.READ,
         concurrency_safe=True,
     ),
@@ -123,9 +122,7 @@ BASE_TOOL_DEFINITIONS = {
     "git_diff": ToolDefinition(
         name="git_diff",
         description="Show the unstaged Git diff, optionally for one workspace path.",
-        parameters=_object_schema(
-            {"path": {"type": "string", "default": ""}}, []
-        ),
+        parameters=_object_schema({"path": {"type": "string", "default": ""}}, []),
         effect=ToolEffect.READ,
         concurrency_safe=True,
     ),
@@ -198,6 +195,7 @@ def normalize_tool_arguments(name, args):
     if definition is None:
         raise ValueError(f"unknown tool: {name}")
     return validate_tool_arguments(definition, args or {})
+
 
 TOOL_EXAMPLES = {
     "list_files": '<tool>{"name":"list_files","args":{"path":"."}}</tool>',
@@ -328,7 +326,10 @@ def tool_list_files(context, args, control=None):
     if not path.is_dir():
         raise ValueError("path is not a directory")
     entries = [
-        item for item in sorted(path.iterdir(), key=lambda item: (item.is_file(), item.name.lower()))
+        item
+        for item in sorted(
+            path.iterdir(), key=lambda item: (item.is_file(), item.name.lower())
+        )
         if item.name not in IGNORED_PATH_NAMES
     ]
     lines = []
@@ -347,7 +348,10 @@ def tool_read_file(context, args, control=None):
     if start < 1 or end < start:
         raise ValueError("invalid line range")
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    body = "\n".join(f"{number:>4}: {line}" for number, line in enumerate(lines[start - 1:end], start=start))
+    body = "\n".join(
+        f"{number:>4}: {line}"
+        for number, line in enumerate(lines[start - 1 : end], start=start)
+    )
     return f"# {path.relative_to(context.root)}\n{body}"
 
 
@@ -374,17 +378,29 @@ def tool_search(context, args, control=None):
         return ToolRunnerOutput(content, outcome.metadata())
 
     matches = []
-    files = [path] if path.is_file() else [
-        item for item in path.rglob("*")
-        if item.is_file() and not any(part in IGNORED_PATH_NAMES for part in item.relative_to(context.root).parts)
-    ]
+    files = (
+        [path]
+        if path.is_file()
+        else [
+            item
+            for item in path.rglob("*")
+            if item.is_file()
+            and not any(
+                part in IGNORED_PATH_NAMES
+                for part in item.relative_to(context.root).parts
+            )
+        ]
+    )
     for file_path in files:
         if control is not None and control.status() != "running":
             return ToolRunnerOutput(
                 "search interrupted before completion",
                 {"execution_status": control.status()},
             )
-        for number, line in enumerate(file_path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        for number, line in enumerate(
+            file_path.read_text(encoding="utf-8", errors="replace").splitlines(),
+            start=1,
+        ):
             if pattern.lower() in line.lower():
                 matches.append(f"{file_path.relative_to(context.root)}:{number}:{line}")
                 if len(matches) >= 200:
@@ -470,9 +486,7 @@ def tool_delegate(context, args, control=None):
 
 
 def _run_git(context, command, control, operation):
-    control = control or ToolExecutionControl(
-        timeout_seconds=60, max_output_chars=4000
-    )
+    control = control or ToolExecutionControl(timeout_seconds=60, max_output_chars=4000)
     outcome = run_bounded_process(
         command,
         cwd=context.root,
@@ -524,7 +538,7 @@ def tool_git_worktree_create(context, args, control=None):
 
 
 def tool_git_worktree_remove(context, args, control=None):
-    target = context.path(f'.repoagent/worktrees/{args["name"]}')
+    target = context.path(f".repoagent/worktrees/{args['name']}")
     return _run_git(
         context,
         ["git", "worktree", "remove", str(target)],

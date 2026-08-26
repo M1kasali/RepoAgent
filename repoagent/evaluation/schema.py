@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..evidence import sha256_file
+
 
 EVALUATION_RESULT_SCHEMA = "repoagent.evaluation-result/v1"
 RUN_KINDS = frozenset({"scripted", "synthetic", "live"})
@@ -74,7 +76,11 @@ def collect_source_provenance(repo_root) -> dict[str, Any]:
 def collect_environment_provenance(repo_root=None) -> dict[str, Any]:
     root = Path(repo_root or ".")
     lock = next(
-        (root / name for name in ("uv.lock", "requirements.lock", "poetry.lock") if (root / name).is_file()),
+        (
+            root / name
+            for name in ("uv.lock", "requirements.lock", "poetry.lock")
+            if (root / name).is_file()
+        ),
         None,
     )
     return {
@@ -151,10 +157,14 @@ class EvaluationResult:
         }
         for name, value in required_sections.items():
             if not isinstance(value, Mapping) or not value:
-                raise ValueError(f"evaluation result {name} must be a non-empty mapping")
+                raise ValueError(
+                    f"evaluation result {name} must be a non-empty mapping"
+                )
         run_kind = str(self.model.get("run_kind", ""))
         if run_kind not in RUN_KINDS:
-            raise ValueError("model.run_kind must distinguish scripted, synthetic, or live")
+            raise ValueError(
+                "model.run_kind must distinguish scripted, synthetic, or live"
+            )
         if not self.rows:
             raise ValueError("evaluation result must contain raw rows")
         identities = set()
@@ -232,6 +242,61 @@ def validate_result_payload(payload, *, require_evidence=False) -> dict[str, Any
     return result.to_dict()
 
 
+def validate_result_evidence(payload, evidence_root) -> dict[str, Any]:
+    """Verify relative evidence paths and their declared content digests."""
+
+    validated = validate_result_payload(payload, require_evidence=True)
+    root = Path(evidence_root).resolve()
+    for row in validated["rows"]:
+        evidence = row["evidence"]
+        path_keys = [key for key in evidence if not key.endswith("sha256")]
+        if not path_keys:
+            raise ValueError(f"evaluation row {row['task_id']} has no evidence paths")
+        for key in path_keys:
+            relative = Path(str(evidence[key]))
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(
+                    f"evaluation row {row['task_id']} has unsafe evidence path: {relative}"
+                )
+            candidate = root / relative
+            current = root
+            for part in relative.parts:
+                current /= part
+                if current.is_symlink():
+                    raise ValueError(
+                        f"evaluation row {row['task_id']} evidence must not use symlinks"
+                    )
+            if not candidate.exists():
+                raise ValueError(
+                    f"evaluation row {row['task_id']} evidence is missing: {relative}"
+                )
+            if candidate.is_dir():
+                candidate = candidate / "manifest.json"
+                digest_key = (
+                    "manifest_sha256"
+                    if key == "bundle"
+                    else f"{key.removesuffix('_bundle')}_manifest_sha256"
+                )
+            else:
+                digest_key = f"{key}_sha256"
+            if candidate.is_symlink():
+                raise ValueError(
+                    f"evaluation row {row['task_id']} evidence must not use symlinks"
+                )
+            if not candidate.is_file():
+                raise ValueError(
+                    f"evaluation row {row['task_id']} evidence file is missing: {candidate}"
+                )
+            declared = str(evidence.get(digest_key, ""))
+            if not declared:
+                raise ValueError(f"evaluation row {row['task_id']} lacks {digest_key}")
+            if sha256_file(candidate) != declared:
+                raise ValueError(
+                    f"evaluation row {row['task_id']} evidence checksum mismatch: {relative}"
+                )
+    return validated
+
+
 __all__ = [
     "EVALUATION_RESULT_SCHEMA",
     "EvaluationResult",
@@ -241,5 +306,6 @@ __all__ = [
     "collect_source_provenance",
     "digest_path",
     "new_experiment",
+    "validate_result_evidence",
     "validate_result_payload",
 ]

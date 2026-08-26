@@ -25,6 +25,7 @@ from .approval import EffectApprovalPolicy
 from .capabilities import CapabilityAuthority, capability_token_digest
 from .context_manager import ContextManager, DEFAULT_TOTAL_TOKEN_BUDGET
 from .context_window import ContextWindowBudget, DEFAULT_CONTEXT_WINDOW_TOKENS
+from .empty_recovery import RecoveryLimits
 from .checkpoint import CHECKPOINT_NONE_STATUS
 from .prompt_prefix import build_prompt_prefix, tool_signature
 from .providers.base import ProviderCancelledError
@@ -55,6 +56,10 @@ from .tracing import (
 )
 from . import tools as toolkit
 from .workspace import IGNORED_PATH_NAMES, MAX_HISTORY, WorkspaceContext, clip, now
+from .workspace_checkpoint import (
+    WorkspaceCheckpointService,
+    checkpoint_policy_active,
+)
 
 DEFAULT_SHELL_ENV_ALLOWLIST = (
     "ComSpec",
@@ -119,6 +124,9 @@ class RepoAgent:
         memory_backend=None,
         skill_roots=None,
         plugin_manager=None,
+        empty_recovery=None,
+        checkpoint_policy="interactive",
+        interactive=False,
     ):
         self.model_client = model_client
         self.workspace = workspace
@@ -140,6 +148,14 @@ class RepoAgent:
         except (TypeError, ValueError) as exc:
             raise ValueError("unsupported mutation conflict policy") from exc
         self.max_new_tokens = max_new_tokens
+        self.empty_recovery_limits = empty_recovery or RecoveryLimits()
+        if not isinstance(self.empty_recovery_limits, RecoveryLimits):
+            raise TypeError("empty_recovery must be RecoveryLimits or None")
+        self.checkpoint_policy = str(checkpoint_policy)
+        self.interactive = bool(interactive)
+        checkpoint_active = checkpoint_policy_active(
+            self.checkpoint_policy, interactive=self.interactive
+        )
         self.depth = depth
         self.max_depth = max_depth
         self.read_only = read_only
@@ -160,6 +176,16 @@ class RepoAgent:
             workspace_state_root(workspace.repo_root) / "runs"
         )
         self.run_store.set_redactor(self.redact_artifact)
+        self.workspace_checkpoint_service = (
+            WorkspaceCheckpointService(
+                self.root,
+                state_root=workspace_state_root(self.root),
+            )
+            if checkpoint_active
+            else None
+        )
+        if self.workspace_checkpoint_service is not None:
+            self.workspace_checkpoint_service.commit_turn("session baseline")
         self.session = session or {
             "id": datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
             "created_at": now(),
@@ -199,9 +225,7 @@ class RepoAgent:
         self.active_skills = ()
         self.plugin_manager = plugin_manager
         self.network_policy = network_policy or securitylib.NetworkPolicy()
-        self.mcp_manager = MCPManager(
-            mcp_servers, network_policy=self.network_policy
-        )
+        self.mcp_manager = MCPManager(mcp_servers, network_policy=self.network_policy)
         self.tools = self.build_tools()
         discovered_mcp_tools = self.mcp_manager.discover(self.tools)
         self.tools.update(discovered_mcp_tools)
@@ -252,14 +276,10 @@ class RepoAgent:
             if context_token_budget is not None
             else DEFAULT_TOTAL_TOKEN_BUDGET
         )
-        configured_window_source = (
-            context_window_source
-            or (
-                "runtime-argument"
-                if context_window_tokens is not None
-                else getattr(profile, "context_window_source", None)
-                or "runtime-default"
-            )
+        configured_window_source = context_window_source or (
+            "runtime-argument"
+            if context_window_tokens is not None
+            else getattr(profile, "context_window_source", None) or "runtime-default"
         )
         self.context_window_budget = ContextWindowBudget(
             context_window_tokens=int(configured_window),
@@ -524,7 +544,14 @@ class RepoAgent:
             self.context_manager.section_budgets = segment_token_budgets
         return self.context_window_budget.to_dict()
 
-    def _build_prompt_and_metadata(self, user_message):
+    def _build_prompt_and_metadata(
+        self,
+        user_message,
+        *,
+        include_history=True,
+        history_override=None,
+        segment_budget_overrides=None,
+    ):
         refresh = self.refresh_prefix()
         self.skill_watcher.poll()
         self.active_skills = (
@@ -533,7 +560,12 @@ class RepoAgent:
             else ()
         )
         self.resume_state = self.evaluate_resume_state()
-        prompt, metadata = self.context_manager.build(user_message)
+        prompt, metadata = self.context_manager.build(
+            user_message,
+            include_history=include_history,
+            history_override=history_override,
+            segment_budget_overrides=segment_budget_overrides,
+        )
         admission = self.context_window_budget.admit(metadata["prompt_tokens"])
         # 这里把“这轮 prompt 是怎么拼出来的”连同缓存相关状态一起记下来，
         # 后面 trace/report 才能解释清楚：为什么这一轮 prefix 变了、缓存有没有命中。
@@ -579,6 +611,30 @@ class RepoAgent:
         )
         metadata.update(self.detected_secret_env_summary())
         return prompt, metadata
+
+    def _apply_provider_message_metadata(
+        self, metadata, *, projected_tokens, history_metadata
+    ):
+        metadata["prompt_text_tokens"] = int(metadata["prompt_tokens"])
+        metadata["prompt_tokens"] = int(projected_tokens)
+        metadata["provider_message_tokens"] = int(projected_tokens)
+        metadata["provider_message_count"] = int(
+            history_metadata.get("provider_message_count", 0)
+        )
+        metadata["history"].update(dict(history_metadata))
+        metadata["sections"]["history"]["rendered_tokens"] = int(
+            history_metadata.get("token_count", 0)
+        )
+        admission = self.context_window_budget.admit(int(projected_tokens))
+        metadata.update(
+            {
+                "context_window": admission.to_dict(),
+                "request_admission_tokens": admission.total_reserved_tokens,
+                "context_window_headroom_tokens": admission.headroom_tokens,
+                "context_window_admitted": admission.admitted,
+            }
+        )
+        return metadata
 
     def emit_trace(self, task_state, event, payload=None):
         payload = self.redact_artifact(payload or {})
@@ -636,6 +692,18 @@ class RepoAgent:
 
     def create_checkpoint(self, task_state, user_message, trigger):
         return checkpointlib.create_checkpoint(self, task_state, user_message, trigger)
+
+    def snapshot_workspace(self, task_state, trigger):
+        service = self.workspace_checkpoint_service
+        if service is None:
+            return None
+        result = service.commit_turn(
+            f"{task_state.run_id}: {str(trigger or 'turn finished')}"
+        )
+        task_state.workspace_checkpoint_status = result.status
+        task_state.workspace_checkpoint_id = result.checkpoint_id
+        task_state.edited_files = list(result.edited_files)
+        return result
 
     def infer_next_step(self, task_state):
         return checkpointlib.infer_next_step(task_state)
@@ -699,13 +767,17 @@ class RepoAgent:
             if metadata.get("tool_error_code") == "tool_output_truncated":
                 text = f"{name} output truncated; narrow the request before retry"
             else:
-                text = f"{name} partial_success on {path_text}; inspect diff before retry"
+                text = (
+                    f"{name} partial_success on {path_text}; inspect diff before retry"
+                )
         elif status == "error":
             text = f"{name} error on {path_text}; check the failure before retry"
         elif status == "cancelled":
             text = f"{name} cancelled on {path_text}; verify cleanup before retry"
         elif status == "timeout":
-            text = f"{name} timeout on {path_text}; inspect partial effects before retry"
+            text = (
+                f"{name} timeout on {path_text}; inspect partial effects before retry"
+            )
         else:
             text = f"{name} rejected; choose a different action before retry"
         tags = ["process", status, *affected_paths]
@@ -716,9 +788,7 @@ class RepoAgent:
         return self.memory_consolidator.reject_reason(note_text)
 
     def extract_durable_promotions(self, user_message, final_answer):
-        result = self.memory_consolidator.consolidate(
-            user_message, final_answer
-        )
+        result = self.memory_consolidator.consolidate(user_message, final_answer)
         self.last_memory_consolidation = result.to_dict()
         return (
             [(item.topic, item.text) for item in result.candidates],
@@ -976,6 +1046,11 @@ class RepoAgent:
             "attempts": task_state.attempts,
             "checkpoint_id": task_state.checkpoint_id,
             "resume_status": task_state.resume_status,
+            "workspace_checkpoint": {
+                "status": task_state.workspace_checkpoint_status,
+                "checkpoint_id": task_state.workspace_checkpoint_id,
+                "edited_files": list(task_state.edited_files),
+            },
             "task_state": task_state.to_dict(),
             "prompt_metadata": self.last_prompt_metadata,
             "usage": {
@@ -1061,7 +1136,9 @@ class RepoAgent:
         role = str(args.get("role", "reviewer"))
         profile = ROLE_PROFILES[role]
         child_allowed_tools = tuple(
-            name for name in profile["tools"] if name in self.tools and name != "delegate"
+            name
+            for name in profile["tools"]
+            if name in self.tools and name != "delegate"
         )
         if not child_allowed_tools:
             return "delegate_result:\nerror: no delegated read capabilities available"
@@ -1257,9 +1334,7 @@ class RepoAgent:
         if entry is None:
             return False
         request = self.build_tool_request(name, args)
-        return self.approval_engine.decide(
-            entry["definition"], request, args
-        ).allowed
+        return self.approval_engine.decide(entry["definition"], request, args).allowed
 
     @staticmethod
     def parse(raw):

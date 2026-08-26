@@ -4,6 +4,7 @@ from .base import (
     CancellationToken,
     InputTokenSemantics,
     ModelEvent,
+    ModelMessage,
     ModelProvider,
     ModelRequest,
     ModelResult,
@@ -21,8 +22,17 @@ from .base import (
     stream_model,
 )
 from .tool_schema import model_tools_from_registry
-from .clients import AnthropicCompatibleModelClient, FakeModelClient, OllamaModelClient, OpenAICompatibleModelClient
-from .fallback import FallbackModelClient, ProviderAttempt, ProviderFallbackExhaustedError
+from .clients import (
+    AnthropicCompatibleModelClient,
+    FakeModelClient,
+    OllamaModelClient,
+    OpenAICompatibleModelClient,
+)
+from .fallback import (
+    FallbackModelClient,
+    ProviderAttempt,
+    ProviderFallbackExhaustedError,
+)
 from .profiles import BUILTIN_MODEL_PROFILES, ModelProfile, get_model_profile
 
 __all__ = [
@@ -33,6 +43,7 @@ __all__ = [
     "FallbackModelClient",
     "InputTokenSemantics",
     "ModelEvent",
+    "ModelMessage",
     "ModelProfile",
     "ModelProvider",
     "ModelRequest",

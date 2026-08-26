@@ -16,6 +16,7 @@ from .gateway import GatewayLease
 from .paths import workspace_state_root
 from .providers.profiles import BUILTIN_MODEL_PROFILES
 from .session_store import SessionStore
+from .sandbox import DockerSandboxAdapter
 from .skills import SkillCatalog
 from .workspace import WorkspaceContext
 
@@ -115,14 +116,40 @@ def session_report(cwd=".", session_id=None):
     }
 
 
-def sandbox_report(*, require_isolation=False):
-    isolated = False
+def sandbox_report(
+    *,
+    backend="direct",
+    cwd=".",
+    image="python:3.12-slim",
+    require_isolation=False,
+):
+    backend = str(backend)
+    available = True
+    error = ""
+    if backend == "docker":
+        adapter = DockerSandboxAdapter(cwd, image=image)
+        isolated = True
+        identity = adapter.identity
+        try:
+            adapter.verify_available()
+        except ValueError as exc:
+            available = False
+            error = str(exc)
+    elif backend == "direct":
+        isolated = False
+        identity = "direct_host"
+    else:
+        raise ValueError(f"unsupported sandbox backend: {backend}")
+    passed = available and (not require_isolation or isolated)
     return {
         "schema": "repoagent.sandbox/v1",
-        "identity": "direct_host",
+        "backend": backend,
+        "identity": identity,
         "is_isolated": isolated,
+        "available": available,
         "isolation_required": bool(require_isolation),
-        "status": "pass" if not require_isolation or isolated else "fail",
+        "status": "pass" if passed else "fail",
+        "error": error,
     }
 
 

@@ -113,8 +113,10 @@ class ModelUsage:
             )
         )
         source_value = values.get("usage_source")
-        source = UsageSource(source_value) if source_value else (
-            UsageSource.ACTUAL if has_usage else UsageSource.MISSING
+        source = (
+            UsageSource(source_value)
+            if source_value
+            else (UsageSource.ACTUAL if has_usage else UsageSource.MISSING)
         )
         semantics_value = values.get("input_token_semantics")
         semantics = (
@@ -129,9 +131,7 @@ class ModelUsage:
             cache_read_tokens=_non_negative_int(
                 values.get("cache_read_tokens", values.get("cached_tokens", 0))
             ),
-            cache_write_tokens=_non_negative_int(
-                values.get("cache_write_tokens", 0)
-            ),
+            cache_write_tokens=_non_negative_int(values.get("cache_write_tokens", 0)),
             source=source,
             input_token_semantics=semantics,
         )
@@ -193,8 +193,7 @@ class ModelUsageAggregate:
             source=source,
             input_token_semantics=(
                 next(iter({row.input_token_semantics for row in rows}))
-                if rows
-                and len({row.input_token_semantics for row in rows}) == 1
+                if rows and len({row.input_token_semantics for row in rows}) == 1
                 else InputTokenSemantics.AMBIGUOUS
             ),
         )
@@ -259,6 +258,50 @@ class ModelTool:
 
 
 @dataclass(frozen=True)
+class ModelMessage:
+    role: str
+    content: str = ""
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call_id: str = ""
+    name: str = ""
+    reasoning_content: str = ""
+    thinking_blocks: tuple[Mapping[str, Any], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.role not in {"system", "user", "assistant", "tool"}:
+            raise ValueError(f"unsupported model message role: {self.role!r}")
+        object.__setattr__(self, "content", str(self.content))
+        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
+        object.__setattr__(self, "reasoning_content", str(self.reasoning_content))
+        object.__setattr__(
+            self,
+            "thinking_blocks",
+            tuple(MappingProxyType(dict(block)) for block in self.thinking_blocks),
+        )
+        if (
+            self.role == "assistant"
+            and not self.content
+            and not self.tool_calls
+            and not self.reasoning_content
+            and not self.thinking_blocks
+        ):
+            raise ValueError(
+                "assistant model message must contain text, reasoning, or tool calls"
+            )
+        if self.role != "assistant" and self.tool_calls:
+            raise ValueError("only assistant model messages may contain tool calls")
+        if self.role != "assistant" and (
+            self.reasoning_content or self.thinking_blocks
+        ):
+            raise ValueError("only assistant model messages may contain reasoning")
+        if self.role == "tool":
+            if not self.tool_call_id or not self.name:
+                raise ValueError("tool model message requires call id and name")
+        elif self.tool_call_id or self.name:
+            raise ValueError("only tool model messages may identify a tool call")
+
+
+@dataclass(frozen=True)
 class ModelRequest:
     prompt: str
     max_output_tokens: int
@@ -270,6 +313,7 @@ class ModelRequest:
     request_id: str = ""
     attempt: int = 1
     tools: tuple[ModelTool, ...] = ()
+    messages: tuple[ModelMessage, ...] = ()
     cancellation_token: CancellationToken | None = None
     call_kind: str = "agent"
 
@@ -285,12 +329,17 @@ class ModelRequest:
         if self.call_kind not in {"agent", "compaction"}:
             raise ValueError("call_kind must be agent or compaction")
         object.__setattr__(self, "tools", tuple(self.tools))
+        object.__setattr__(self, "messages", tuple(self.messages))
+        if any(not isinstance(message, ModelMessage) for message in self.messages):
+            raise TypeError("model request messages must contain ModelMessage values")
 
 
 @dataclass(frozen=True)
 class ModelResult:
     text: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
+    reasoning_content: str = ""
+    thinking_blocks: tuple[Mapping[str, Any], ...] = ()
     finish_reason: str = "stop"
     usage: ModelUsage = field(default_factory=ModelUsage)
     provider: str = ""
@@ -301,6 +350,12 @@ class ModelResult:
     def __post_init__(self) -> None:
         if self.latency_ms < 0:
             raise ValueError("latency_ms must not be negative")
+        object.__setattr__(self, "reasoning_content", str(self.reasoning_content))
+        object.__setattr__(
+            self,
+            "thinking_blocks",
+            tuple(MappingProxyType(dict(block)) for block in self.thinking_blocks),
+        )
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
@@ -332,6 +387,7 @@ class ProviderError(RuntimeError):
         provider: str = "",
         retryable: bool = False,
         should_fallback: bool = False,
+        should_compress: bool = False,
         status_code: int | None = None,
     ) -> None:
         super().__init__(message)
@@ -339,6 +395,7 @@ class ProviderError(RuntimeError):
         self.provider = provider
         self.retryable = retryable
         self.should_fallback = should_fallback
+        self.should_compress = should_compress
         self.status_code = status_code
 
     def to_dict(self) -> dict[str, Any]:
@@ -347,6 +404,7 @@ class ProviderError(RuntimeError):
             "provider": self.provider,
             "retryable": self.retryable,
             "should_fallback": self.should_fallback,
+            "should_compress": self.should_compress,
             "status_code": self.status_code,
         }
 
@@ -484,6 +542,7 @@ def stream_model(
 __all__ = [
     "CancellationToken",
     "ModelEvent",
+    "ModelMessage",
     "ModelProvider",
     "ModelRequest",
     "ModelResult",

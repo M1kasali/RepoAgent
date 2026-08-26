@@ -41,3 +41,20 @@ jobs:
       - run: /tmp/repoagent-smoke/bin/repoagent-eval --help
       - run: /tmp/repoagent-smoke/bin/repoagent-release-check
       - run: /tmp/repoagent-smoke/bin/repoagent-demo --help
+
+  polyglot-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --dev
+      - run: uv run python scripts/run_polyglot_fixture_campaign.py --output /tmp/repoagent-polyglot-fixture
+      - run: uv run repoagent-eval validate --require-evidence /tmp/repoagent-polyglot-fixture/results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyglot-fixture-evidence
+          path: /tmp/repoagent-polyglot-fixture
+          if-no-files-found: error

@@ -9,6 +9,24 @@
 
 Every pull request runs Ruff and the full test suite across the supported matrix. A separate job builds the package, installs the wheel into a fresh virtual environment, and smokes all public command entry points.
 
+## Local Verification Evidence
+
+Development verification can be retained without turning a dirty checkout into
+a public claim:
+
+```bash
+uv run python scripts/record_verification.py \
+  --polyglot-dataset /path/to/polyglot-benchmark
+```
+
+The command writes a timestamped directory under `artifacts/verifications/`
+containing pytest JUnit output, command stdout/stderr, a Polyglot canary plan when
+requested, source/environment provenance, exit codes, durations, and SHA-256
+records. `artifacts/` is intentionally ignored because local logs can contain
+machine paths or sensitive command output. These bundles support debugging and
+later evidence selection; they are not resume evidence. Resume claims continue
+to require the clean-tag release flow below.
+
 ## Tag Contract
 
 The package version `X.Y.Z` must be released from tag `vX.Y.Z`. The tag must point to clean `HEAD`, and `uv.lock` must be tracked. Verify locally before tagging:

@@ -28,7 +28,9 @@ def tool_signature(tools):
         if not isinstance(definition, ToolDefinition):
             raise ValueError(f"tool registry entry {name!r} has no ToolDefinition")
         payload.append(definition.to_dict())
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def build_prompt_prefix(workspace, tools, built_at=None):
@@ -43,12 +45,9 @@ def build_prompt_prefix(workspace, tools, built_at=None):
             if key not in required and "default" in property_schema:
                 declaration += f"={property_schema['default']!r}"
             fields.append(f"{key}: {declaration}")
-        risk = (
-            "approval required" if definition.requires_approval else "safe"
-        )
+        risk = "approval required" if definition.requires_approval else "safe"
         tool_lines.append(
-            f"- {name}({', '.join(fields)}) [{risk}] "
-            f"{definition.description}"
+            f"- {name}({', '.join(fields)}) [{risk}] {definition.description}"
         )
     tool_text = "\n".join(tool_lines)
     examples = "\n".join(

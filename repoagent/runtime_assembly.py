@@ -8,6 +8,7 @@ from .config import load_project_env, load_user_env
 from .paths import workspace_state_root
 from .run_store import RunStore
 from .runtime import RepoAgent
+from .sandbox import build_sandbox_adapter
 from .session_store import SessionStore
 from .workspace import WorkspaceContext
 
@@ -24,7 +25,10 @@ class RuntimeAssembly:
 
     @classmethod
     def from_arguments(cls, args, *, model_client_factory, secret_names_factory):
-        workspace = WorkspaceContext.build(args.cwd)
+        workspace = WorkspaceContext.build(
+            args.cwd,
+            repo_root_override=getattr(args, "repo_root_override", None),
+        )
         load_user_env()
         load_project_env(workspace.repo_root)
         state_root = workspace_state_root(workspace.repo_root)
@@ -57,11 +61,23 @@ class RuntimeAssembly:
                 args, "mutation_conflict_policy", "serial"
             ),
             "require_isolation": getattr(args, "require_isolation", False),
+            "sandbox_adapter": build_sandbox_adapter(
+                getattr(args, "sandbox_backend", "direct"),
+                self.workspace.repo_root,
+                docker_executable=getattr(args, "sandbox_docker_executable", "docker"),
+                docker_image=getattr(args, "sandbox_image", "python:3.12-slim"),
+                docker_memory=getattr(args, "sandbox_memory", "2g"),
+                docker_cpus=getattr(args, "sandbox_cpus", 2.0),
+                docker_pids_limit=getattr(args, "sandbox_pids_limit", 256),
+                verify=getattr(args, "sandbox_backend", "direct") == "docker",
+            ),
             "max_new_tokens": profile.max_output_tokens,
             "context_token_budget": getattr(args, "context_token_budget", 3000),
             "context_window_tokens": profile.context_window_tokens,
             "context_window_source": profile.context_window_source,
             "secret_env_names": self.secret_env_names,
+            "checkpoint_policy": getattr(args, "checkpoint_policy", "interactive"),
+            "interactive": not bool(getattr(args, "prompt", [])),
         }
         agent = (
             RepoAgent.from_session(session_id=session_id, **options)

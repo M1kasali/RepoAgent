@@ -4,7 +4,7 @@
 这个对象会被不断写入 task_state.json，供运行中观察和运行后复盘。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import uuid4
 
@@ -38,6 +38,9 @@ class TaskState:
     final_answer: str = ""
     checkpoint_id: str = ""
     resume_status: str = ""
+    workspace_checkpoint_id: str = ""
+    edited_files: list[str] = field(default_factory=list)
+    workspace_checkpoint_status: str = "disabled"
 
     @classmethod
     def create(cls, task_id, user_request, run_id=""):
@@ -59,6 +62,13 @@ class TaskState:
             final_answer=str(data.get("final_answer", "")),
             checkpoint_id=str(data.get("checkpoint_id", "")),
             resume_status=str(data.get("resume_status", "")),
+            workspace_checkpoint_id=str(
+                data.get("workspace_checkpoint_id", "")
+            ),
+            edited_files=[str(path) for path in data.get("edited_files", [])],
+            workspace_checkpoint_status=str(
+                data.get("workspace_checkpoint_status", "disabled")
+            ),
         )
 
     def record_attempt(self):
@@ -111,4 +121,7 @@ class TaskState:
             "final_answer": self.final_answer,
             "checkpoint_id": self.checkpoint_id,
             "resume_status": self.resume_status,
+            "workspace_checkpoint_id": self.workspace_checkpoint_id,
+            "edited_files": list(self.edited_files),
+            "workspace_checkpoint_status": self.workspace_checkpoint_status,
         }

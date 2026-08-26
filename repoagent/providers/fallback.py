@@ -61,6 +61,7 @@ class ProviderFallbackExhaustedError(ProviderError):
             provider=last_error.provider,
             retryable=last_error.retryable,
             should_fallback=False,
+            should_compress=last_error.should_compress,
             status_code=last_error.status_code,
         )
         self.attempts = attempts
@@ -83,6 +84,10 @@ class FallbackModelClient:
         self.model = str(getattr(self.providers[0], "model", ""))
         self.supports_prompt_cache = all(
             bool(getattr(provider, "supports_prompt_cache", False))
+            for provider in self.providers
+        )
+        self.supports_structured_messages = all(
+            bool(getattr(provider, "supports_structured_messages", False))
             for provider in self.providers
         )
 
@@ -161,9 +166,7 @@ class FallbackModelClient:
             except ProviderCancelledError:
                 raise
             except ProviderError as error:
-                failures.append(
-                    self._failure(index, provider, error, started_at)
-                )
+                failures.append(self._failure(index, provider, error, started_at))
                 self._raise_or_continue(
                     index=index,
                     error=error,
@@ -185,9 +188,7 @@ class FallbackModelClient:
                 except ProviderCancelledError:
                     raise
                 except ProviderError as error:
-                    failures.append(
-                        self._failure(index, provider, error, started_at)
-                    )
+                    failures.append(self._failure(index, provider, error, started_at))
                     self._raise_or_continue(
                         index=index,
                         error=error,
@@ -195,9 +196,7 @@ class FallbackModelClient:
                         emitted=False,
                     )
                     continue
-                result = self._result(
-                    raw_result, index, provider, failures, started_at
-                )
+                result = self._result(raw_result, index, provider, failures, started_at)
                 if result.text:
                     yield ModelEvent(kind="text_delta", text=result.text)
                 for tool_call in result.tool_calls:
@@ -242,9 +241,7 @@ class FallbackModelClient:
             except ProviderCancelledError:
                 raise
             except ProviderError as error:
-                failures.append(
-                    self._failure(index, provider, error, started_at)
-                )
+                failures.append(self._failure(index, provider, error, started_at))
                 self._raise_or_continue(
                     index=index,
                     error=error,

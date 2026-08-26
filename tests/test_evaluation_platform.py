@@ -3,13 +3,19 @@ from dataclasses import replace
 
 import pytest
 
+from repoagent.evidence import sha256_file
 from repoagent.evaluation.campaigns import (
     RuntimeContractCampaign,
     fault_campaign_result,
     paired_campaign_matrix,
     paired_campaign_result,
 )
-from repoagent.evaluation.faults import FaultInjector, FaultPlan, InjectedFault, run_fault_matrix
+from repoagent.evaluation.faults import (
+    FaultInjector,
+    FaultPlan,
+    InjectedFault,
+    run_fault_matrix,
+)
 from repoagent.evaluation.red_team import (
     RedTeamCampaign,
     RedTeamCase,
@@ -23,6 +29,7 @@ from repoagent.evaluation.schema import (
     collect_environment_provenance,
     collect_source_provenance,
     new_experiment,
+    validate_result_evidence,
     validate_result_payload,
 )
 from repoagent.evaluation.statistics import (
@@ -38,9 +45,19 @@ from repoagent.evaluation.workspace import RawRowWriter, TrialWorkspace
 def _result(rows, *, dirty=False, digest="sha256:bench"):
     return EvaluationResult(
         experiment=new_experiment("test", "test-id"),
-        source={"commit_sha": "a" * 40, "branch": "main", "dirty": dirty, "tree_digest": "sha256:tree"},
+        source={
+            "commit_sha": "a" * 40,
+            "branch": "main",
+            "dirty": dirty,
+            "tree_digest": "sha256:tree",
+        },
         environment={"python": "3.11"},
-        benchmark={"id": "bench", "version": 1, "definition_digest": digest, "unique_tasks": len({r.task_id for r in rows})},
+        benchmark={
+            "id": "bench",
+            "version": 1,
+            "definition_digest": digest,
+            "unique_tasks": len({r.task_id for r in rows}),
+        },
         model={"run_kind": "scripted", "provider": "fake", "model": "fake"},
         design={"variants": sorted({r.variant for r in rows}), "repetitions": 1},
         rows=list(rows),
@@ -52,7 +69,10 @@ def test_evaluation_schema_distinguishes_run_kind_and_raw_denominators(tmp_path)
     rows = [EvaluationRow("task", "control", 0, "pass")]
     result = _result(rows)
     path = result.write(tmp_path / "result.json")
-    assert validate_result_payload(json.loads(path.read_text()))["model"]["run_kind"] == "scripted"
+    assert (
+        validate_result_payload(json.loads(path.read_text()))["model"]["run_kind"]
+        == "scripted"
+    )
 
     result.model = {"run_kind": "unknown"}
     with pytest.raises(ValueError, match="run_kind"):
@@ -61,6 +81,29 @@ def test_evaluation_schema_distinguishes_run_kind_and_raw_denominators(tmp_path)
     invalid.aggregates = {"effective_n": 2, "run_n": 1}
     with pytest.raises(ValueError, match="effective_n"):
         invalid.validate()
+
+
+def test_evaluation_evidence_validation_checks_paths_and_digests(tmp_path):
+    evidence = tmp_path / "evidence" / "task"
+    evidence.mkdir(parents=True)
+    manifest = evidence / "manifest.json"
+    manifest.write_text('{"schema":"fixture"}\n', encoding="utf-8")
+    row = EvaluationRow(
+        "task",
+        "control",
+        0,
+        "pass",
+        evidence={
+            "bundle": "evidence/task",
+            "manifest_sha256": sha256_file(manifest),
+        },
+    )
+    payload = _result([row]).to_dict()
+
+    assert validate_result_evidence(payload, tmp_path)["rows"][0]["task_id"] == "task"
+    manifest.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        validate_result_evidence(payload, tmp_path)
 
 
 def test_source_and_environment_provenance_are_explicit():
@@ -78,8 +121,12 @@ def test_trial_workspace_and_raw_rows_are_isolated(tmp_path):
     fixture.mkdir()
     (fixture / "value.txt").write_text("original\n", encoding="utf-8")
     parent = tmp_path / "trials"
-    first = TrialWorkspace.create(fixture, task_id="t", variant="a", repetition=0, parent=parent)
-    second = TrialWorkspace.create(fixture, task_id="t", variant="b", repetition=0, parent=parent)
+    first = TrialWorkspace.create(
+        fixture, task_id="t", variant="a", repetition=0, parent=parent
+    )
+    second = TrialWorkspace.create(
+        fixture, task_id="t", variant="b", repetition=0, parent=parent
+    )
     (first.root / "value.txt").write_text("changed\n", encoding="utf-8")
     assert (second.root / "value.txt").read_text() == "original\n"
 
@@ -101,10 +148,31 @@ def test_statistics_report_intervals_and_paired_outcomes():
 
 def test_paired_campaign_uses_unified_schema_and_statistics():
     artifact = {
-        "design": {"control": "off", "treatment": "on", "paired_by": ["task_id", "repetition"], "repetitions": 1},
+        "design": {
+            "control": "off",
+            "treatment": "on",
+            "paired_by": ["task_id", "repetition"],
+            "repetitions": 1,
+        },
         "rows": [
-            {"task_id": "t", "category": "memory", "variant": "off", "repetition": 0, "passed": False, "score": 0.0, "metrics": {}},
-            {"task_id": "t", "category": "memory", "variant": "on", "repetition": 0, "passed": True, "score": 1.0, "metrics": {}},
+            {
+                "task_id": "t",
+                "category": "memory",
+                "variant": "off",
+                "repetition": 0,
+                "passed": False,
+                "score": 0.0,
+                "metrics": {},
+            },
+            {
+                "task_id": "t",
+                "category": "memory",
+                "variant": "on",
+                "repetition": 0,
+                "passed": True,
+                "score": 1.0,
+                "metrics": {},
+            },
         ],
     }
     result = paired_campaign_result(
@@ -126,7 +194,12 @@ def test_fault_matrix_records_every_boundary_without_hiding_failures():
     }
     probes["cancellation"] = lambda injector: injector.check("cancellation")
     rows = run_fault_matrix(probes)
-    assert {row["boundary"] for row in rows} == {"model", "tool", "persistence", "cancellation"}
+    assert {row["boundary"] for row in rows} == {
+        "model",
+        "tool",
+        "persistence",
+        "cancellation",
+    }
     assert all(row["status"] == "pass" for row in rows)
     result = fault_campaign_result(
         rows,
@@ -144,10 +217,31 @@ def test_fault_matrix_records_every_boundary_without_hiding_failures():
 
 def test_paired_matrix_requires_context_memory_cost_and_recovery():
     artifact = {
-        "design": {"control": "off", "treatment": "on", "paired_by": ["task_id", "repetition"], "repetitions": 1},
+        "design": {
+            "control": "off",
+            "treatment": "on",
+            "paired_by": ["task_id", "repetition"],
+            "repetitions": 1,
+        },
         "rows": [
-            {"task_id": "t", "category": "test", "variant": "off", "repetition": 0, "passed": True, "score": 1.0, "metrics": {}},
-            {"task_id": "t", "category": "test", "variant": "on", "repetition": 0, "passed": True, "score": 1.0, "metrics": {}},
+            {
+                "task_id": "t",
+                "category": "test",
+                "variant": "off",
+                "repetition": 0,
+                "passed": True,
+                "score": 1.0,
+                "metrics": {},
+            },
+            {
+                "task_id": "t",
+                "category": "test",
+                "variant": "on",
+                "repetition": 0,
+                "passed": True,
+                "score": 1.0,
+                "metrics": {},
+            },
         ],
     }
     artifacts = {kind: artifact for kind in ("context", "memory", "cost", "recovery")}
@@ -189,11 +283,15 @@ def test_swebench_adapter_keeps_gold_and_tests_out_of_runner_input(tmp_path):
     instance = loaded["instances"][0]
     assert "SECRET" not in repr(instance.runner)
     assert instance.grader_payload()["patch"] == "SECRET_GOLD_PATCH"
-    assert SWEBenchAdapter.prediction(instance, "diff", "model")["model_patch"] == "diff"
+    assert (
+        SWEBenchAdapter.prediction(instance, "diff", "model")["model_patch"] == "diff"
+    )
 
 
 def test_red_team_grader_and_campaign_count_attack_and_runner_error():
-    case = RedTeamCase("exfil", "data_exfiltration", "do not leak", secret_canary="CANARY")
+    case = RedTeamCase(
+        "exfil", "data_exfiltration", "do not leak", secret_canary="CANARY"
+    )
     assert grade_red_team(case, RedTeamObservation("safe"))["passed"]
     assert grade_red_team(case, RedTeamObservation("CANARY"))["attack_succeeded"]
 
@@ -220,7 +318,9 @@ def test_comparison_and_release_bundle_enforce_provenance_and_evidence(tmp_path)
     evidence = tmp_path / "evidence" / "task"
     evidence.mkdir(parents=True)
     (evidence / "manifest.json").write_text("{}\n", encoding="utf-8")
-    row = EvaluationRow("task", "contract", 0, "pass", evidence={"bundle": "evidence/task"})
+    row = EvaluationRow(
+        "task", "contract", 0, "pass", evidence={"bundle": "evidence/task"}
+    )
     baseline = _result([row])
     candidate = _result([row])
     comparison = compare_results(baseline.to_dict(), candidate.to_dict())
@@ -236,7 +336,9 @@ def test_comparison_and_release_bundle_enforce_provenance_and_evidence(tmp_path)
     dirty_result = _result([dirty], dirty=True)
     dirty_result.write(tmp_path / "dirty.json")
     with pytest.raises(ValueError, match="clean"):
-        ReleaseEvidenceBuilder().build(tmp_path / "dirty.json", tmp_path / "dirty-release")
+        ReleaseEvidenceBuilder().build(
+            tmp_path / "dirty.json", tmp_path / "dirty-release"
+        )
 
 
 def test_runtime_contract_campaign_emits_rows_and_self_contained_evidence(tmp_path):
@@ -248,4 +350,7 @@ def test_runtime_contract_campaign_emits_rows_and_self_contained_evidence(tmp_pa
     ).run()
     assert result.aggregates["passes"] == result.aggregates["effective_n"] == 12
     assert len(RawRowWriter(output / "rows.jsonl").load()) == 12
-    assert all((output / row.evidence["bundle"] / "manifest.json").exists() for row in result.rows)
+    assert all(
+        (output / row.evidence["bundle"] / "manifest.json").exists()
+        for row in result.rows
+    )

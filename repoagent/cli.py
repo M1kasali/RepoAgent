@@ -15,7 +15,11 @@ import textwrap
 from .pricing import ModelPricing
 from .config import provider_env
 from .evaluation.cli import main as evaluation_main
-from .providers.clients import AnthropicCompatibleModelClient, OllamaModelClient, OpenAICompatibleModelClient
+from .providers.clients import (
+    AnthropicCompatibleModelClient,
+    OllamaModelClient,
+    OpenAICompatibleModelClient,
+)
 from .providers.profiles import BUILTIN_MODEL_PROFILES, get_model_profile
 from .product_commands import (
     cron_report,
@@ -96,11 +100,7 @@ def _effective_provider(args):
     # 3. 代码里的默认 provider
     explicit_profile = getattr(args, "profile", None)
     explicit_provider = getattr(args, "provider", None)
-    if (
-        explicit_profile
-        and explicit_provider
-        and explicit_profile != explicit_provider
-    ):
+    if explicit_profile and explicit_provider and explicit_profile != explicit_provider:
         raise ValueError(
             "--profile and --provider must select the same built-in profile"
         )
@@ -184,9 +184,7 @@ def _resolve_model_profile(args):
         model=_effective_model(args, provider),
         base_url=_profile_base_url(args, provider),
         timeout_seconds=timeout,
-        max_output_tokens=getattr(
-            args, "max_new_tokens", profile.max_output_tokens
-        ),
+        max_output_tokens=getattr(args, "max_new_tokens", profile.max_output_tokens),
         context_window_tokens=(
             getattr(args, "context_window_tokens", None)
             or profile.context_window_tokens
@@ -233,9 +231,7 @@ def _resolve_model_pricing(args, provider):
     if input_rate is None and output_rate is None:
         return None
     if input_rate is None or output_rate is None:
-        raise ValueError(
-            "input and output pricing rates must be configured together"
-        )
+        raise ValueError("input and output pricing rates must be configured together")
     cache_read_rate = getattr(args, "cache_read_cost_per_1m_usd", None)
     cache_write_rate = getattr(args, "cache_write_cost_per_1m_usd", None)
     if cache_read_rate is None:
@@ -252,9 +248,7 @@ def _resolve_model_pricing(args, provider):
         cache_write_rate = float(value) if value else None
     source = (
         getattr(args, "pricing_source", None)
-        or provider_env(
-            f"{prefix}_PRICING_SOURCE", ("REPOAGENT_PRICING_SOURCE",)
-        )
+        or provider_env(f"{prefix}_PRICING_SOURCE", ("REPOAGENT_PRICING_SOURCE",))
         or "user-configured"
     )
     return ModelPricing(
@@ -269,12 +263,12 @@ def _resolve_model_pricing(args, provider):
 def _configured_secret_names(args):
     configured_secret_names = set(DEFAULT_SECRET_ENV_NAMES)
     configured_secret_names.update(str(name).upper() for name in args.secret_env_names)
-    extra_names = os.environ.get(SECRET_ENV_NAMES_VAR) or os.environ.get(LEGACY_SECRET_ENV_NAMES_VAR, "")
+    extra_names = os.environ.get(SECRET_ENV_NAMES_VAR) or os.environ.get(
+        LEGACY_SECRET_ENV_NAMES_VAR, ""
+    )
     if extra_names.strip():
         configured_secret_names.update(
-            item.strip().upper()
-            for item in extra_names.split(",")
-            if item.strip()
+            item.strip().upper() for item in extra_names.split(",") if item.strip()
         )
     return sorted(configured_secret_names)
 
@@ -390,10 +384,26 @@ def build_arg_parser():
         default=None,
         help="Model name override. Defaults to qwen3.5:4b for Ollama, REPOAGENT_OPENAI_MODEL for openai, REPOAGENT_ANTHROPIC_MODEL for anthropic, and REPOAGENT_DEEPSEEK_MODEL for deepseek when set.",
     )
-    parser.add_argument("--host", default=DEFAULT_OLLAMA_HOST, help="Ollama server URL.")
-    parser.add_argument("--base-url", default=None, help="Provider API base URL for deepseek, openai, or anthropic.")
-    parser.add_argument("--ollama-timeout", type=int, default=300, help="Ollama request timeout in seconds.")
-    parser.add_argument("--openai-timeout", type=int, default=300, help="OpenAI-compatible request timeout in seconds.")
+    parser.add_argument(
+        "--host", default=DEFAULT_OLLAMA_HOST, help="Ollama server URL."
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Provider API base URL for deepseek, openai, or anthropic.",
+    )
+    parser.add_argument(
+        "--ollama-timeout",
+        type=int,
+        default=300,
+        help="Ollama request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--openai-timeout",
+        type=int,
+        default=300,
+        help="OpenAI-compatible request timeout in seconds.",
+    )
     parser.add_argument(
         "--input-cost-per-1m-usd",
         type=float,
@@ -423,8 +433,15 @@ def build_arg_parser():
         default=None,
         help="Explicit cache-write price snapshot in USD per one million tokens.",
     )
-    parser.add_argument("--resume", default=None, help="Session id to resume or 'latest'.")
-    parser.add_argument("--approval", choices=("ask", "auto", "never"), default="ask", help="Approval policy for risky tools.")
+    parser.add_argument(
+        "--resume", default=None, help="Session id to resume or 'latest'."
+    )
+    parser.add_argument(
+        "--approval",
+        choices=("ask", "auto", "never"),
+        default="ask",
+        help="Approval policy for risky tools.",
+    )
     parser.add_argument(
         "--secret-env-name",
         dest="secret_env_names",
@@ -432,7 +449,18 @@ def build_arg_parser():
         default=[],
         help="Extra environment variable names to treat as secrets for trace/report redaction.",
     )
-    parser.add_argument("--max-steps", type=int, default=20, help="Maximum tool/model iterations per request.")
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=20,
+        help="Maximum tool/model iterations per request.",
+    )
+    parser.add_argument(
+        "--checkpoint-policy",
+        choices=("always", "interactive", "never"),
+        default="interactive",
+        help="Create out-of-band workspace snapshots per completed Turn.",
+    )
     parser.add_argument(
         "--max-parallel-tools",
         type=int,
@@ -450,7 +478,45 @@ def build_arg_parser():
         action="store_true",
         help="Reject execute/external tools unless an isolated sandbox is active.",
     )
-    parser.add_argument("--max-new-tokens", type=int, default=4096, help="Maximum model output tokens per step.")
+    parser.add_argument(
+        "--sandbox-backend",
+        choices=("direct", "docker"),
+        default="direct",
+        help="Shell execution backend; docker is isolated and fail-closed.",
+    )
+    parser.add_argument(
+        "--sandbox-image",
+        default="python:3.12-slim",
+        help="OCI image used by the Docker Agent sandbox.",
+    )
+    parser.add_argument(
+        "--sandbox-docker-executable",
+        default="docker",
+        help="Docker-compatible CLI used by the Agent sandbox.",
+    )
+    parser.add_argument(
+        "--sandbox-memory",
+        default="2g",
+        help="Docker Agent sandbox memory limit.",
+    )
+    parser.add_argument(
+        "--sandbox-cpus",
+        type=float,
+        default=2.0,
+        help="Docker Agent sandbox CPU limit.",
+    )
+    parser.add_argument(
+        "--sandbox-pids-limit",
+        type=int,
+        default=256,
+        help="Docker Agent sandbox process limit.",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=4096,
+        help="Maximum model output tokens per step.",
+    )
     parser.add_argument(
         "--context-token-budget",
         type=int,
@@ -463,8 +529,15 @@ def build_arg_parser():
         default=None,
         help="Configured model context window used for request admission.",
     )
-    parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature sent to Ollama.")
-    parser.add_argument("--top-p", type=float, default=0.9, help="Top-p sampling value sent to Ollama.")
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.2,
+        help="Sampling temperature sent to Ollama.",
+    )
+    parser.add_argument(
+        "--top-p", type=float, default=0.9, help="Top-p sampling value sent to Ollama."
+    )
     return parser
 
 
@@ -513,6 +586,11 @@ def build_product_parser():
     sandbox = commands.add_parser("sandbox", help="Inspect sandbox enforcement.")
     sandbox_commands = sandbox.add_subparsers(dest="sandbox_command", required=True)
     sandbox_status = sandbox_commands.add_parser("status", help="Show sandbox status.")
+    sandbox_status.add_argument(
+        "--backend", choices=("direct", "docker"), default="direct"
+    )
+    sandbox_status.add_argument("--cwd", default=".")
+    sandbox_status.add_argument("--image", default="python:3.12-slim")
     sandbox_status.add_argument("--require-isolation", action="store_true")
 
     gateway = commands.add_parser("gateway", help="Inspect the local gateway.")
@@ -573,7 +651,12 @@ def run_product_command(argv):
                 args.session_id if args.session_command == "show" else None,
             )
         elif args.command == "sandbox":
-            payload = sandbox_report(require_isolation=args.require_isolation)
+            payload = sandbox_report(
+                backend=args.backend,
+                cwd=args.cwd,
+                image=args.image,
+                require_isolation=args.require_isolation,
+            )
         elif args.command == "gateway":
             payload = gateway_report(args.cwd)
         elif args.command == "channel":
@@ -610,8 +693,16 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     agent = build_agent(args)
 
-    model = getattr(agent.model_client, "model", getattr(args, "model", DEFAULT_OLLAMA_MODEL))
-    host = getattr(agent.model_client, "host", getattr(agent.model_client, "base_url", getattr(args, "host", DEFAULT_OLLAMA_HOST)))
+    model = getattr(
+        agent.model_client, "model", getattr(args, "model", DEFAULT_OLLAMA_MODEL)
+    )
+    host = getattr(
+        agent.model_client,
+        "host",
+        getattr(
+            agent.model_client, "base_url", getattr(args, "host", DEFAULT_OLLAMA_HOST)
+        ),
+    )
     print(build_welcome(agent, model=model, host=host))
 
     if args.prompt:

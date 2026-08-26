@@ -192,9 +192,7 @@ class ContextManager:
         if any(value < 0 for value in self.segment_token_budgets.values()):
             raise ValueError("segment token budgets must be non-negative")
         configured_segment_floors = (
-            segment_token_floors
-            if segment_token_floors is not None
-            else section_floors
+            segment_token_floors if segment_token_floors is not None else section_floors
         )
         self._section_floor_overrides = {
             str(key): int(value)
@@ -223,7 +221,14 @@ class ContextManager:
             str(key): int(item) for key, item in dict(value).items()
         }
 
-    def build(self, user_message):
+    def build(
+        self,
+        user_message,
+        *,
+        include_history=True,
+        history_override=None,
+        segment_budget_overrides=None,
+    ):
         """按预算组装一轮完整 prompt。
 
         为什么存在：
@@ -245,6 +250,13 @@ class ContextManager:
         提供工作记忆，这个函数则把它们和当前请求合成一份可控大小的 prompt。
         """
         user_message = str(user_message)
+        history = []
+        if include_history:
+            history = list(
+                getattr(self.agent, "session", {}).get("history", [])
+                if history_override is None
+                else history_override
+            )
         self.section_floors = self._compute_section_floors()
         memory_enabled = True
         relevant_memory_enabled = True
@@ -256,7 +268,9 @@ class ContextManager:
         section_texts = {
             "prefix": str(getattr(self.agent, "prefix", "")),
             "checkpoint": "",
-            "memory": "Memory:\n- disabled" if not memory_enabled else str(self.agent.memory_text()),
+            "memory": "Memory:\n- disabled"
+            if not memory_enabled
+            else str(self.agent.memory_text()),
             "history": "",
             "skills": str(
                 getattr(self.agent, "skill_text", lambda: "Skills:\n- none")()
@@ -269,8 +283,15 @@ class ContextManager:
         if checkpoint_text:
             section_texts["checkpoint"] = checkpoint_text
         selected_notes = []
-        if memory_enabled and relevant_memory_enabled and hasattr(self.agent, "memory") and hasattr(self.agent.memory, "retrieval_candidates"):
-            selected_notes = self.agent.memory.retrieval_candidates(user_message, limit=RELEVANT_MEMORY_LIMIT)
+        if (
+            memory_enabled
+            and relevant_memory_enabled
+            and hasattr(self.agent, "memory")
+            and hasattr(self.agent.memory, "retrieval_candidates")
+        ):
+            selected_notes = self.agent.memory.retrieval_candidates(
+                user_message, limit=RELEVANT_MEMORY_LIMIT
+            )
             seen_note_texts = {str(note.get("text", "")) for note in selected_notes}
             for hit in getattr(self.agent, "backend_memory_hits", ()):
                 if hit.text in seen_note_texts:
@@ -288,12 +309,18 @@ class ContextManager:
             selected_notes = selected_notes[:RELEVANT_MEMORY_LIMIT]
 
         if not context_reduction_enabled:
-            rendered = self._render_sections_without_reduction(section_texts, selected_notes=selected_notes)
+            rendered = self._render_sections_without_reduction(
+                section_texts,
+                selected_notes=selected_notes,
+                history=history,
+            )
             prompt = self._assemble_prompt(rendered)
             metadata = self._metadata(
                 prompt=prompt,
                 rendered=rendered,
-                budgets={section: render.budget for section, render in rendered.items()},
+                budgets={
+                    section: render.budget for section, render in rendered.items()
+                },
                 reduction_log=[],
                 selected_notes=selected_notes,
                 user_message=user_message,
@@ -302,9 +329,21 @@ class ContextManager:
             return prompt, metadata
 
         budgets = dict(self.segment_token_budgets)
+        if segment_budget_overrides:
+            budgets.update(
+                {
+                    str(key): max(0, int(value))
+                    for key, value in segment_budget_overrides.items()
+                }
+            )
         if not section_texts["skills"].strip():
             budgets["skills"] = 0
-        rendered = self._render_sections(section_texts, budgets, selected_notes=selected_notes)
+        rendered = self._render_sections(
+            section_texts,
+            budgets,
+            selected_notes=selected_notes,
+            history=history,
+        )
         prompt = self._assemble_prompt(rendered)
         reduction_log = []
 
@@ -332,7 +371,12 @@ class ContextManager:
                     }
                 )
                 budgets[section] = new_budget
-                rendered = self._render_sections(section_texts, budgets, selected_notes=selected_notes)
+                rendered = self._render_sections(
+                    section_texts,
+                    budgets,
+                    selected_notes=selected_notes,
+                    history=history,
+                )
                 prompt = self._assemble_prompt(rendered)
                 reduced = True
                 break
@@ -358,7 +402,9 @@ class ContextManager:
         )
         return prompt, metadata
 
-    def _render_sections_without_reduction(self, section_texts, selected_notes=None):
+    def _render_sections_without_reduction(
+        self, section_texts, selected_notes=None, history=None
+    ):
         selected_notes = selected_notes or []
         relevant_lines = ["Relevant memory:"]
         if selected_notes:
@@ -366,7 +412,11 @@ class ContextManager:
         else:
             relevant_lines.append("- none")
         relevant_raw = "\n".join(relevant_lines)
-        history = list(getattr(self.agent, "session", {}).get("history", []))
+        history = (
+            list(getattr(self.agent, "session", {}).get("history", []))
+            if history is None
+            else list(history)
+        )
         history_raw = self._raw_history_text(history)
         return {
             "prefix": self._segment(
@@ -478,7 +528,9 @@ class ContextManager:
                 high = middle - 1
         return text[:low] + suffix
 
-    def _render_sections(self, section_texts, budgets, selected_notes=None):
+    def _render_sections(
+        self, section_texts, budgets, selected_notes=None, history=None
+    ):
         rendered = {}
         for section in SECTION_ORDER:
             budget = budgets.get(section)
@@ -492,9 +544,13 @@ class ContextManager:
                     rendered=raw,
                 )
             elif section == "relevant_memory":
-                rendered[section] = self._render_relevant_memory(selected_notes or [], int(budget or 0))
+                rendered[section] = self._render_relevant_memory(
+                    selected_notes or [], int(budget or 0)
+                )
             elif section == "history":
-                rendered[section] = self._render_history_section(int(budget or 0))
+                rendered[section] = self._render_history_section(
+                    int(budget or 0), history=history
+                )
             elif section == "skills":
                 raw = section_texts.get(section, "Skills:\n- none")
                 rendered[section] = self._segment(
@@ -511,7 +567,9 @@ class ContextManager:
                 )
             else:
                 raw = section_texts[section]
-                rendered_text = self._clip_text(raw, int(budget)) if budget is not None else raw
+                rendered_text = (
+                    self._clip_text(raw, int(budget)) if budget is not None else raw
+                )
                 rendered[section] = self._segment(
                     section,
                     raw=raw,
@@ -522,7 +580,11 @@ class ContextManager:
 
     def _render_relevant_memory(self, selected_notes, budget):
         header = "Relevant memory:"
-        note_texts = [str(note.get("text", "")) for note in selected_notes if str(note.get("text", "")).strip()]
+        note_texts = [
+            str(note.get("text", ""))
+            for note in selected_notes
+            if str(note.get("text", "")).strip()
+        ]
         raw_lines = [header] + [f"- {text}" for text in note_texts]
         raw = "\n".join(raw_lines) if note_texts else "\n".join([header, "- none"])
         if not note_texts:
@@ -545,7 +607,9 @@ class ContextManager:
         rendered_notes = []
         while True:
             # 让每条 note 平分这一段的预算，避免一条超长笔记把其他笔记都挤掉。
-            rendered_notes = [self._clip_text(text, per_note_budget) for text in note_texts]
+            rendered_notes = [
+                self._clip_text(text, per_note_budget) for text in note_texts
+            ]
             rendered = "\n".join([header] + [f"- {text}" for text in rendered_notes])
             if self._count_tokens(rendered) <= budget or per_note_budget <= 1:
                 break
@@ -569,8 +633,12 @@ class ContextManager:
             },
         )
 
-    def _render_history_section(self, budget):
-        history = list(getattr(self.agent, "session", {}).get("history", []))
+    def _render_history_section(self, budget, *, history=None):
+        history = (
+            list(getattr(self.agent, "session", {}).get("history", []))
+            if history is None
+            else list(history)
+        )
         result = self.history_compactor.compact(
             history,
             budget,
@@ -610,7 +678,16 @@ class ContextManager:
             if rendered[definition.name].rendered
         ).strip()
 
-    def _metadata(self, prompt, rendered, budgets, reduction_log, selected_notes, user_message, section_texts):
+    def _metadata(
+        self,
+        prompt,
+        rendered,
+        budgets,
+        reduction_log,
+        selected_notes,
+        user_message,
+        section_texts,
+    ):
         section_metadata = {}
         for section in SECTION_ORDER:
             segment = rendered[section]
@@ -638,8 +715,7 @@ class ContextManager:
             "token_counter": self.token_counter.metadata(),
             "section_order": list(SECTION_ORDER),
             "section_budgets": {
-                section: rendered[section].budget
-                for section in SECTION_ORDER
+                section: rendered[section].budget for section in SECTION_ORDER
             },
             "segment_token_budgets": {
                 section: rendered[section].budget for section in SECTION_ORDER
@@ -664,10 +740,18 @@ class ContextManager:
                 "limit": RELEVANT_MEMORY_LIMIT,
                 "selected_count": len(selected_notes),
                 "selected_notes": [note["text"] for note in selected_notes],
-                "selected_sources": [str(note.get("source", "")).strip() for note in selected_notes],
-                "selected_kinds": [str(note.get("kind", "episodic")).strip() or "episodic" for note in selected_notes],
+                "selected_sources": [
+                    str(note.get("source", "")).strip() for note in selected_notes
+                ],
+                "selected_kinds": [
+                    str(note.get("kind", "episodic")).strip() or "episodic"
+                    for note in selected_notes
+                ],
                 "selected_durable_count": sum(
-                    1 for note in selected_notes if (str(note.get("kind", "episodic")).strip() or "episodic") == "durable"
+                    1
+                    for note in selected_notes
+                    if (str(note.get("kind", "episodic")).strip() or "episodic")
+                    == "durable"
                 ),
                 "raw_chars": rendered["relevant_memory"].raw_chars,
                 "raw_tokens": self._count_tokens(rendered["relevant_memory"].raw),
@@ -675,28 +759,58 @@ class ContextManager:
                 "rendered_tokens": self._count_tokens(
                     rendered["relevant_memory"].rendered
                 ),
-                "rendered_notes": list(rendered["relevant_memory"].details.get("rendered_notes", [])),
-                "rendered_count": int(rendered["relevant_memory"].details.get("rendered_count", 0)),
+                "rendered_notes": list(
+                    rendered["relevant_memory"].details.get("rendered_notes", [])
+                ),
+                "rendered_count": int(
+                    rendered["relevant_memory"].details.get("rendered_count", 0)
+                ),
             },
             "history": {
                 "raw_chars": rendered["history"].raw_chars,
                 "raw_tokens": self._count_tokens(rendered["history"].raw),
                 "rendered_chars": rendered["history"].rendered_chars,
                 "rendered_tokens": self._count_tokens(rendered["history"].rendered),
-                "older_entries_count": int(rendered["history"].details.get("older_entries_count", 0)),
-                "collapsed_duplicate_reads": int(rendered["history"].details.get("collapsed_duplicate_reads", 0)),
-                "reused_file_summary_count": int(rendered["history"].details.get("reused_file_summary_count", 0)),
-                "summarized_tool_count": int(rendered["history"].details.get("summarized_tool_count", 0)),
-                "compaction_strategy": str(rendered["history"].details.get("strategy", "disabled")),
-                "compaction_applied": bool(rendered["history"].details.get("compaction_applied", False)),
-                "compaction_provenance_digest": str(rendered["history"].details.get("provenance_digest", "")),
-                "compaction_records": list(rendered["history"].details.get("records", [])),
-                "source_entry_count": int(rendered["history"].details.get("source_entry_count", 0)),
-                "included_entry_count": int(rendered["history"].details.get("included_entry_count", 0)),
-                "dropped_entry_count": int(rendered["history"].details.get("dropped_entry_count", 0)),
-                "clipped_entry_count": int(rendered["history"].details.get("clipped_entry_count", 0)),
+                "older_entries_count": int(
+                    rendered["history"].details.get("older_entries_count", 0)
+                ),
+                "collapsed_duplicate_reads": int(
+                    rendered["history"].details.get("collapsed_duplicate_reads", 0)
+                ),
+                "reused_file_summary_count": int(
+                    rendered["history"].details.get("reused_file_summary_count", 0)
+                ),
+                "summarized_tool_count": int(
+                    rendered["history"].details.get("summarized_tool_count", 0)
+                ),
+                "compaction_strategy": str(
+                    rendered["history"].details.get("strategy", "disabled")
+                ),
+                "compaction_applied": bool(
+                    rendered["history"].details.get("compaction_applied", False)
+                ),
+                "compaction_provenance_digest": str(
+                    rendered["history"].details.get("provenance_digest", "")
+                ),
+                "compaction_records": list(
+                    rendered["history"].details.get("records", [])
+                ),
+                "source_entry_count": int(
+                    rendered["history"].details.get("source_entry_count", 0)
+                ),
+                "included_entry_count": int(
+                    rendered["history"].details.get("included_entry_count", 0)
+                ),
+                "dropped_entry_count": int(
+                    rendered["history"].details.get("dropped_entry_count", 0)
+                ),
+                "clipped_entry_count": int(
+                    rendered["history"].details.get("clipped_entry_count", 0)
+                ),
                 "raw_digest": str(rendered["history"].details.get("raw_digest", "")),
-                "rendered_digest": str(rendered["history"].details.get("rendered_digest", "")),
+                "rendered_digest": str(
+                    rendered["history"].details.get("rendered_digest", "")
+                ),
             },
             "skills": {
                 "activated_ids": list(
@@ -706,9 +820,7 @@ class ContextManager:
                     rendered["skills"].details.get("activated_ids", [])
                 ),
                 "raw_tokens": self._count_tokens(rendered["skills"].raw),
-                "rendered_tokens": self._count_tokens(
-                    rendered["skills"].rendered
-                ),
+                "rendered_tokens": self._count_tokens(rendered["skills"].rendered),
             },
             "current_request": {
                 "text": user_message,

@@ -11,8 +11,12 @@ class StorageCorruptionError(ValueError):
     pass
 
 
+class LockUnavailableError(RuntimeError):
+    pass
+
+
 @contextmanager
-def file_lock(path):
+def file_lock(path, *, blocking=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
@@ -23,7 +27,11 @@ def file_lock(path):
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+            try:
+                msvcrt.locking(handle.fileno(), mode, 1)
+            except OSError as exc:
+                raise LockUnavailableError(f"file lock is already held: {path}") from exc
             try:
                 yield
             finally:
@@ -32,7 +40,11 @@ def file_lock(path):
         else:
             import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            operation = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+            try:
+                fcntl.flock(handle.fileno(), operation)
+            except BlockingIOError as exc:
+                raise LockUnavailableError(f"file lock is already held: {path}") from exc
             try:
                 yield
             finally:

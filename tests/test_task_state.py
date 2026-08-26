@@ -66,10 +66,16 @@ def test_task_state_snapshot_keeps_checkpoint_reference_without_body():
     state = TaskState.create(run_id="run_006", task_id="task_006", user_request="Resume the task.")
     state.checkpoint_id = "ckpt_001"
     state.resume_status = "full-valid"
+    state.workspace_checkpoint_id = "abc123"
+    state.workspace_checkpoint_status = "committed"
+    state.edited_files = ["a.py"]
 
     snapshot = state.to_dict()
 
     assert snapshot["checkpoint_id"] == "ckpt_001"
     assert snapshot["resume_status"] == "full-valid"
+    assert snapshot["workspace_checkpoint_id"] == "abc123"
+    assert snapshot["workspace_checkpoint_status"] == "committed"
+    assert snapshot["edited_files"] == ["a.py"]
     assert "current_goal" not in snapshot
     assert "next_step" not in snapshot
