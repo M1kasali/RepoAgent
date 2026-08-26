@@ -69,6 +69,9 @@ class RuntimeAssembly:
                 docker_memory=getattr(args, "sandbox_memory", "2g"),
                 docker_cpus=getattr(args, "sandbox_cpus", 2.0),
                 docker_pids_limit=getattr(args, "sandbox_pids_limit", 256),
+                docker_workspace_path_converter=getattr(
+                    args, "sandbox_workspace_path_converter", None
+                ),
                 verify=getattr(args, "sandbox_backend", "direct") == "docker",
             ),
             "max_new_tokens": profile.max_output_tokens,

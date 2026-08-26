@@ -168,6 +168,31 @@ def test_docker_adapter_builds_fail_closed_resource_bounded_command(tmp_path):
     assert cleanup[0][0][:3] == ["docker", "rm", "--force"]
 
 
+def test_docker_adapter_projects_workspace_path_for_external_cli(tmp_path):
+    commands = []
+
+    def process_runner(command, **kwargs):
+        commands.append(command)
+        return ProcessOutcome("completed", 0, "ok\n", "", 3, 0, False)
+
+    adapter = DockerSandboxAdapter(
+        tmp_path,
+        workspace_path_converter=lambda path: r"C:\\wsl\\workspace",
+        process_runner=process_runner,
+        cleanup_runner=lambda *args, **kwargs: None,
+    )
+
+    adapter.execute(
+        "pwd",
+        cwd=tmp_path,
+        env={},
+        control=ToolExecutionControl(timeout_seconds=5, max_output_chars=100),
+    )
+
+    mount = commands[0][commands[0].index("--mount") + 1]
+    assert mount == r"type=bind,source=C:\\wsl\\workspace,target=/workspace"
+
+
 def test_docker_adapter_rejects_cwd_escape(tmp_path):
     adapter = DockerSandboxAdapter(tmp_path)
     control = ToolExecutionControl(timeout_seconds=5, max_output_chars=100)

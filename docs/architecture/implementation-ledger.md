@@ -2372,7 +2372,7 @@ help/configuration smoke, and whitespace checks passed.
 ## TECH-073 - Docker Agent Shell Sandbox
 
 - Area: real isolation for model-requested shell execution
-- Status: implemented; real daemon smoke blocked by local Docker service state
+- Status: implemented; Linux and Windows-CLI-over-WSL paths verified
 - Implemented/tested: 2026-08-26
 - Owning modules: `repoagent/sandbox.py`, `repoagent/runtime_assembly.py`, `repoagent/cli.py`, `repoagent/product_commands.py`
 - Tests: `tests/test_sandbox.py`, `tests/test_product_cli.py`, `tests/test_safety_invariants.py`
@@ -2399,9 +2399,18 @@ an isolated backend from an available isolated runtime, so an installed but
 stopped Docker service produces `is_isolated=true`, `available=false`, and a
 failed status rather than a false readiness claim.
 
-Offline sandbox, CLI, and security verification passed 32 focused tests. A real
-probe on this WSL host correctly failed because `/var/run/docker.sock` was absent;
-there was no container execution to claim. Persistent container reuse, network
+The Agent sandbox also accepts an explicit workspace-path projector. This is
+required when WSL invokes the Windows `docker.exe`: the CLI cannot bind a raw
+`/home/...` path, and Docker Desktop may not expose its distro mount service.
+The Polyglot live runner now shares its `--wsl-windows-path` converter with both
+the Agent shell sandbox and the grader staging backend. An actual smoke placed a
+workspace under Windows Temp, projected it to a `C:\\...` bind source, and read it
+inside Docker Desktop 29.6.2 with networking disabled and exit code 0.
+
+Offline sandbox, CLI, and security verification includes the external-CLI path
+projection contract. The native WSL socket remains absent, but the verified
+Windows Docker CLI plus Windows staging path provides the isolated live-campaign
+route without enabling direct-host fallback. Persistent container reuse, network
 allowlists, sandboxed stdio MCP processes, and a BoxLite MicroVM backend remain
 future slices. The complete suite passed 568 tests with six pre-existing metrics
 deprecation warnings; Ruff and whitespace checks passed.

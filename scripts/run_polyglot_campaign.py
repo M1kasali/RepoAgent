@@ -89,6 +89,9 @@ def main(argv=None):
     base_agent_args.sandbox_memory = "1g"
     base_agent_args.sandbox_cpus = 1.0
     base_agent_args.sandbox_pids_limit = 128
+    base_agent_args.sandbox_workspace_path_converter = (
+        wsl_windows_path if args.wsl_windows_path else None
+    )
     base_agent_args.require_isolation = True
 
     def agent_factory(context):

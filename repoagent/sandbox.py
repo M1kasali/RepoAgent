@@ -92,6 +92,7 @@ class DockerSandboxAdapter(SandboxAdapter):
         cpus=2.0,
         pids_limit=256,
         network="none",
+        workspace_path_converter=None,
         process_runner=run_bounded_process,
         cleanup_runner=subprocess.run,
     ):
@@ -124,6 +125,7 @@ class DockerSandboxAdapter(SandboxAdapter):
         self.cpus = float(cpus)
         self.pids_limit = pids_limit
         self.network = network
+        self._workspace_path_converter = workspace_path_converter or str
         self._process_runner = process_runner
         self._cleanup_runner = cleanup_runner
 
@@ -147,6 +149,11 @@ class DockerSandboxAdapter(SandboxAdapter):
             )
         relative_cwd = cwd.relative_to(self.workspace).as_posix()
         guest_cwd = "/workspace" + (f"/{relative_cwd}" if relative_cwd != "." else "")
+        mount_source = str(self._workspace_path_converter(self.workspace)).strip()
+        if not mount_source or "," in mount_source:
+            raise SandboxConfigurationError(
+                "Docker workspace path conversion produced an invalid mount source"
+            )
         container_name = f"repoagent-{uuid.uuid4().hex}"
         argv = [
             self.executable,
@@ -170,7 +177,7 @@ class DockerSandboxAdapter(SandboxAdapter):
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,size=256m",
             "--mount",
-            f"type=bind,source={self.workspace},target=/workspace",
+            f"type=bind,source={mount_source},target=/workspace",
             "--workdir",
             guest_cwd,
         ]
@@ -249,6 +256,7 @@ def build_sandbox_adapter(
     docker_memory="2g",
     docker_cpus=2.0,
     docker_pids_limit=256,
+    docker_workspace_path_converter=None,
     verify=False,
 ):
     backend = str(backend or "direct").strip().lower()
@@ -262,6 +270,7 @@ def build_sandbox_adapter(
             memory=docker_memory,
             cpus=docker_cpus,
             pids_limit=docker_pids_limit,
+            workspace_path_converter=docker_workspace_path_converter,
         )
         if verify:
             adapter.verify_available()
