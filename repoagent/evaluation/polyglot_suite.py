@@ -98,6 +98,7 @@ class PolyglotCampaign:
         budget: CampaignBudget | None = None,
         require_provider_probe=True,
         require_clean_source=True,
+        workspace_root=None,
     ):
         self.repo_root = Path(repo_root).resolve()
         self.output_root = Path(output_root).resolve()
@@ -122,6 +123,7 @@ class PolyglotCampaign:
         self.budget = budget
         self.require_provider_probe = bool(require_provider_probe)
         self.require_clean_source = bool(require_clean_source)
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
 
     def run(self):
         planned = len(self.instances) * self.repetitions
@@ -202,6 +204,11 @@ class PolyglotCampaign:
                         require_clean_source=self.require_clean_source,
                         repetition=repetition,
                         manage_paid_lock=False,
+                        workspace_root=(
+                            self.workspace_root / relative
+                            if self.workspace_root is not None
+                            else None
+                        ),
                     ).run()
                     first_result = first_result or result
                     row = self._prefix_evidence(result.rows[0], relative)

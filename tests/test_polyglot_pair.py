@@ -19,6 +19,8 @@ RUNTIME_IDENTITY = {
     "max_output_tokens": 1024,
     "max_provider_calls": 8,
     "context_token_budget": 8000,
+    "context_window_tokens": 1_000_000,
+    "context_window_source": "provider-docs",
     "sandbox_identity": "docker:benchmark@sha256:" + "d" * 64,
     "sandbox_isolated": True,
 }

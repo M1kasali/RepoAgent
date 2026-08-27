@@ -200,6 +200,11 @@ BUILTIN_MODEL_PROFILES = MappingProxyType(
             protocol="anthropic",
             model="deepseek-v4-pro",
             base_url="https://api.deepseek.com/anthropic",
+            context_window_tokens=1_000_000,
+            context_window_source=(
+                "DeepSeek official model documentation: "
+                "https://api-docs.deepseek.com/quick_start/pricing/"
+            ),
             credential_envs=(
                 "REPOAGENT_DEEPSEEK_API_KEY",
                 "DEEPSEEK_API_KEY",

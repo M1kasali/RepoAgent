@@ -143,6 +143,28 @@ class AgentTurnRunner:
         except Exception as exc:
             self._agent.backend_memory_hits = []
             task_state = self._agent.current_task_state
+            error = f"{type(exc).__name__}: {exc}"
+            if task_state is not None:
+                task_state.stop_model_error(error)
+                self._agent.run_store.write_task_state(task_state)
+                self._agent.emit_trace(
+                    task_state,
+                    "run_failed",
+                    {
+                        "status": task_state.status,
+                        "stop_reason": task_state.stop_reason,
+                        "error": error,
+                        "call_efficiency": dict(
+                            self._agent.last_call_efficiency_summary
+                        ),
+                    },
+                )
+                self._agent.run_store.write_report(
+                    task_state,
+                    self._agent.redact_artifact(
+                        self._agent.build_report(task_state)
+                    ),
+                )
             return TurnOutcome(
                 turn_id=request.turn_id,
                 request_id=request.request_id,
@@ -155,7 +177,7 @@ class AgentTurnRunner:
                     self._agent.last_call_efficiency_summary
                 ),
                 tool_calls=int(task_state.tool_steps) if task_state else 0,
-                error=f"{type(exc).__name__}: {exc}",
+                error=error,
             )
         if not streamed_text:
             await emit(Text(content=final_answer))

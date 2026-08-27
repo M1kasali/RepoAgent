@@ -436,6 +436,22 @@ staging cleanup. Formal campaigns require an immutable image digest. These are
 environment gates only; they do not replace the pending 24-task live model
 canary.
 
+The first 24-task live attempt on commit `d1620d6` was stopped during task four
+and retained only as diagnostic evidence. Two completed rows failed before
+grading because the in-turn structured Provider transcript exceeded the 8,000
+token input budget outside the existing overflow recovery path; failed rows also
+omitted completed-call cost from their aggregates. Structure-preserving
+pre-admission transcript reduction and failed-turn report persistence now cover
+both defects. The live canary must restart from a new clean commit and output
+directory; the interrupted attempt cannot satisfy `P11-06`.
+
+A clean post-fix `go/alphametics` replay then isolated Docker Desktop workspace
+placement as a second environmental variable: WSL-resident Agent workspaces could
+not be mounted although the Windows-staged grader passed. With a separate
+Docker-visible Agent staging root, the task converged, passed hidden grading and
+all campaign gates in 11 calls at USD 0.0113416128. The formal 24-task restart
+must use that staging contract and retain a complete denominator.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

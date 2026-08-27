@@ -6,6 +6,7 @@ from repoagent.context_overflow import (
     OVERFLOW_ELISION_PLACEHOLDER,
     emergency_shrink_history,
     emergency_shrink_messages,
+    fit_messages_to_token_budget,
 )
 from repoagent.providers import (
     ModelEvent,
@@ -14,6 +15,7 @@ from repoagent.providers import (
     ProviderError,
     ToolCall,
 )
+from repoagent.tokenization import Utf8TokenEstimator
 
 
 def test_emergency_shrink_elides_all_but_three_recent_tool_results():
@@ -90,6 +92,63 @@ def test_emergency_shrink_history_copies_entries_and_preserves_recent_results():
     ]
     assert history[1]["content"] == "large result 0"
     assert shrunk[0] is not history[0]
+
+
+def test_message_budget_reduction_drops_thinking_only_retry_as_one_unit():
+    messages = (
+        ModelMessage(role="user", content="request"),
+        ModelMessage(
+            role="assistant",
+            reasoning_content="r" * 20_000,
+            thinking_blocks=(
+                {"type": "thinking", "thinking": "r" * 20_000},
+            ),
+        ),
+    )
+
+    fitted, evidence = fit_messages_to_token_budget(
+        messages,
+        Utf8TokenEstimator(provider="test", model="test"),
+        1_000,
+    )
+
+    assert evidence["fitted"] is True
+    assert evidence["after_tokens"] <= 1_000
+    assert fitted == (messages[0],)
+    assert evidence["dropped_thinking_only_messages"] == 1
+
+
+def test_message_budget_reduction_never_mutates_signed_tool_thinking():
+    call = ToolCall("call-1", "read_file", {"path": "x" * 20_000})
+    thinking = (
+        {"type": "thinking", "thinking": "required", "signature": "sig"},
+    )
+    messages = (
+        ModelMessage(role="user", content="request"),
+        ModelMessage(
+            role="assistant",
+            tool_calls=(call,),
+            reasoning_content="r" * 20_000,
+            thinking_blocks=thinking,
+        ),
+        ModelMessage(
+            role="tool",
+            content="result",
+            tool_call_id="call-1",
+            name="read_file",
+        ),
+    )
+
+    fitted, evidence = fit_messages_to_token_budget(
+        messages,
+        Utf8TokenEstimator(provider="test", model="test"),
+        1_000,
+    )
+
+    assert evidence["fitted"] is False
+    assert fitted == messages
+    assert fitted[1].thinking_blocks == thinking
+    assert fitted[1].tool_calls[0].arguments == call.arguments
 
 
 def test_agent_loop_shrinks_old_tool_results_and_retries_overflow(tmp_path):
@@ -206,3 +265,44 @@ def test_agent_loop_does_not_retry_overflow_without_elidable_results(tmp_path):
     assert len(failed) == 1
     assert failed[0]["category"] == "context_overflow"
     assert failed[0]["should_compress"] is True
+    state = json.loads(
+        agent.run_store.task_state_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+    )
+    report = json.loads(
+        agent.run_store.report_path(agent.current_task_state)
+        .read_text(encoding="utf-8")
+    )
+    assert state["status"] == "failed"
+    assert state["stop_reason"] == "model_error"
+    assert report["call_efficiency"]["call_count"] == 1
+    assert report["call_efficiency"]["cost_complete"] is False
+
+
+def test_message_budget_reduction_drops_old_tool_exchange_without_rewriting_calls():
+    old_call = ToolCall("old", "write_file", {"content": "x" * 20_000})
+    recent_call = ToolCall("recent", "read_file", {"path": "answer.go"})
+    messages = (
+        ModelMessage(role="user", content="request"),
+        ModelMessage(role="assistant", tool_calls=(old_call,)),
+        ModelMessage(
+            role="tool", content="written", tool_call_id="old", name="write_file"
+        ),
+        ModelMessage(role="assistant", tool_calls=(recent_call,)),
+        ModelMessage(
+            role="tool", content="contents", tool_call_id="recent", name="read_file"
+        ),
+    )
+
+    fitted, evidence = fit_messages_to_token_budget(
+        messages,
+        Utf8TokenEstimator(provider="test", model="test"),
+        1_000,
+    )
+
+    assert evidence["fitted"] is True
+    assert evidence["dropped_tool_exchanges"] == 1
+    assert [call.id for message in fitted for call in message.tool_calls] == ["recent"]
+    assert fitted[-1].tool_call_id == "recent"
+    assert old_call.arguments == {"content": "x" * 20_000}
+    assert recent_call.arguments == {"path": "answer.go"}

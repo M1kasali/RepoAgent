@@ -41,6 +41,10 @@ def test_builtin_profiles_are_valid_immutable_and_secret_free():
         "deepseek",
     )
     assert get_model_profile("deepseek").protocol == "anthropic"
+    assert get_model_profile("deepseek").context_window_tokens == 1_000_000
+    assert "api-docs.deepseek.com" in get_model_profile(
+        "deepseek"
+    ).context_window_source
     assert "api_key" not in get_model_profile("openai").to_dict()
     with pytest.raises(TypeError):
         BUILTIN_MODEL_PROFILES["new"] = _profile()

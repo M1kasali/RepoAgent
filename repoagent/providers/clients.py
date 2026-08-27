@@ -107,6 +107,8 @@ def _anthropic_messages(request: ModelRequest) -> list[dict]:
     projected = []
 
     def append(role, blocks):
+        if not blocks:
+            return
         if projected and projected[-1]["role"] == role:
             projected[-1]["content"].extend(blocks)
         else:

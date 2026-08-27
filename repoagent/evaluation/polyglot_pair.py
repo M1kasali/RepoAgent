@@ -21,6 +21,8 @@ _REQUIRED_RUNTIME_FIELDS = (
     "max_output_tokens",
     "max_provider_calls",
     "context_token_budget",
+    "context_window_tokens",
+    "context_window_source",
     "sandbox_identity",
     "sandbox_isolated",
 )
@@ -48,6 +50,7 @@ def polyglot_runtime_pairing_identity(agent) -> dict[str, Any]:
     client = getattr(agent, "model_client", None)
     profile = getattr(client, "profile", None)
     sandbox = getattr(agent, "sandbox_adapter", None)
+    context_window = getattr(agent, "context_window_budget", None)
     return {
         "provider": str(getattr(profile, "provider", type(client).__name__)),
         "protocol": str(getattr(profile, "protocol", "scripted")),
@@ -58,6 +61,12 @@ def polyglot_runtime_pairing_identity(agent) -> dict[str, Any]:
         "max_provider_calls": int(getattr(agent, "max_steps", 0)),
         "context_token_budget": int(
             getattr(getattr(agent, "context_manager", None), "total_token_budget", 0)
+        ),
+        "context_window_tokens": int(
+            getattr(context_window, "context_window_tokens", 0)
+        ),
+        "context_window_source": str(
+            getattr(context_window, "window_source", "unknown")
         ),
         "sandbox_identity": str(getattr(sandbox, "identity", "unknown")),
         "sandbox_isolated": bool(getattr(sandbox, "is_isolated", False)),

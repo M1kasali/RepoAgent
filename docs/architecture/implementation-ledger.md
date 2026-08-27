@@ -121,6 +121,7 @@ Copy this section for each completed capability.
 | Live Polyglot acceptance | local ignored evidence under `artifacts/polyglot-live/` | source-bound DeepSeek/Docker single-task pass and retained failure | TECH-080 |
 | Strict paired Polyglot comparison | `repoagent/evaluation/polyglot_pair.py`, `repoagent/evaluation/cli.py` | frozen runtime/task/grader identity, complete pair denominator, quality and efficiency deltas | TECH-081 |
 | Six-language Polyglot image | `benchmarks/polyglot-image/`, `scripts/run_polyglot_image_smoke.py` | fixed toolchains, offline full-test semantics, immutable image gate, six-language known-good smoke | TECH-082 |
+| In-turn transcript admission | `repoagent/context_overflow.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py` | structure-preserving replay reduction and failure-terminal cost evidence | TECH-083 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -2733,6 +2734,64 @@ Python passed 16, Rust passed 12, and Go completed its package test. Formal
 campaign entry now rejects a mutable image tag before loading the dataset or
 making Provider calls. A 24-task live model run remains required to complete
 `P11-06`.
+
+## TECH-083 - In-Turn Transcript Admission and Failure Accounting
+
+- Area: structured Provider transcript compaction and failed-turn evidence
+- Status: implemented; clean single-task rerun passed, 24-task canary pending
+- Implemented/tested: 2026-08-28
+- Owning modules: `repoagent/context_overflow.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/providers/profiles.py`
+- Integration: `scripts/run_polyglot_campaign.py`, `repoagent/evaluation/polyglot_pair.py`
+- Tests: `tests/test_context_overflow.py`, `tests/test_model_profiles.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_pair.py`
+- Diagnostic evidence: `artifacts/polyglot-live/deepseek-v4-flash-canary24-d1620d6-20260828/` (local and ignored)
+- Acceptance evidence: `artifacts/polyglot-live/deepseek-go-alphametics-a918ec1-windows-workspace-20260828/` (local and ignored)
+
+The first 24-task live canary attempt was stopped during its fourth task after
+two consecutive infrastructure failures. Completed DeepSeek calls caused the
+in-turn structured message transcript to exceed the configured 8,000-token input
+budget before the next Provider request. Admission happened outside the existing
+Provider-error recovery block, so the turn failed even though the reported
+32,768-token physical window still had headroom. The partial campaign is a
+diagnostic artifact and must not be used as a model-quality denominator.
+
+`fit_messages_to_token_budget` now runs before every structured Provider request
+and exhaustion-synthesis request. It preserves the initial user message plus
+native Tool call IDs, names and matching Tool results, while deterministically
+bounding replay-only assistant content, display reasoning and Tool results.
+Thinking-only retry messages and old Tool call/result exchanges may
+be removed as whole units. Signed thinking and Tool arguments in retained
+exchanges are always replayed unchanged. Reduction is applied to a request
+snapshot, so the authoritative in-turn transcript, session and trace evidence is
+not rewritten.
+The runtime records before/after token counts and the reduction trigger as
+`context_budget_recovered` evidence. If the mandatory user content and minimum
+structural transcript still cannot fit, admission continues to fail closed.
+
+The diagnostic run also exposed a cost-accounting defect: failed Turns had a
+terminal `turn.json` and `calls.jsonl`, but `AgentTurnRunner` left TaskState as
+running and omitted `report.json`. Polyglot rows therefore reported zero calls
+for failures despite five completed calls on Go and six on Java. The exception
+path now persists `failed/model_error` TaskState and a final report before
+returning the failed TurnOutcome. Failed campaign rows consequently retain usage,
+CallEfficiency and incomplete-pricing state instead of silently assuming zero.
+
+DeepSeek V4's documented one-million-token physical context is now explicit in
+the built-in profile, independently of the smaller configured input budget.
+Physical window tokens and provenance participate in strict Polyglot pairing, and
+the campaign CLI exposes an explicit override. This corrects capability identity;
+it does not relax the 8,000-token compaction workload used by the canary.
+
+The first post-fix Go replay proved protocol correctness but also exposed a host
+mount confounder: Docker Desktop could grade from its Windows staging directory,
+while Agent `run_shell` calls against a WSL-resident attempt workspace failed at
+the distro mount service. The campaign now accepts a separate
+`--agent-staging-root`; result evidence can remain under the requested output
+root while executable attempt workspaces reside on a Docker-visible host path.
+With that root on `/mnt/c`, `go test` succeeded inside the Agent sandbox and the
+same `go/alphametics` task passed hidden grading, normal Turn convergence and all
+campaign gates in 11 calls for an estimated complete cost of USD 0.0113416128.
+This is infrastructure acceptance for the repaired path, not a multi-task quality
+claim.
 
 ## 5. Decision Index
 

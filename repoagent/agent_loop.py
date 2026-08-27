@@ -19,7 +19,7 @@ from .empty_recovery import (
 from .context_overflow import (
     OVERFLOW_MAX_COMPRESS_RETRIES,
     emergency_shrink_history,
-    emergency_shrink_messages,
+    fit_messages_to_token_budget,
 )
 from .conversation import (
     build_structured_history,
@@ -354,6 +354,22 @@ class AgentLoop:
                 synthesis_tokens = model_messages_token_count(
                     synthesis_messages, agent.context_manager.token_counter
                 )
+                synthesis_messages, reduction = fit_messages_to_token_budget(
+                    synthesis_messages,
+                    agent.context_manager.token_counter,
+                    agent.context_manager.total_token_budget,
+                )
+                synthesis_tokens = int(reduction["after_tokens"])
+                if reduction["after_tokens"] < reduction["before_tokens"]:
+                    agent.emit_trace(
+                        task_state,
+                        "context_budget_recovered",
+                        {
+                            **reduction,
+                            "trigger": "exhaustion_synthesis_admission",
+                            "reduction_target": "provider_messages",
+                        },
+                    )
                 agent._apply_provider_message_metadata(
                     prompt_metadata,
                     projected_tokens=synthesis_tokens,
@@ -564,16 +580,34 @@ class AgentLoop:
                     provider_messages.extend(structured_history.messages)
                     history_selection_metadata = structured_history.to_metadata()
                 provider_messages.append(current_message)
+            request_messages = tuple(provider_messages)
             if use_structured_history:
                 projected_tokens = model_messages_token_count(
                     provider_messages, agent.context_manager.token_counter
                 )
+                request_messages, reduction = fit_messages_to_token_budget(
+                    provider_messages,
+                    agent.context_manager.token_counter,
+                    agent.context_manager.total_token_budget,
+                )
+                projected_tokens = int(reduction["after_tokens"])
+                if reduction["after_tokens"] < reduction["before_tokens"]:
+                    agent.emit_trace(
+                        task_state,
+                        "context_budget_recovered",
+                        {
+                            **reduction,
+                            "trigger": "provider_request_admission",
+                            "reduction_target": "provider_messages",
+                        },
+                    )
+                    prompt_metadata["provider_message_reduction"] = dict(reduction)
                 agent._apply_provider_message_metadata(
                     prompt_metadata,
                     projected_tokens=projected_tokens,
                     history_metadata={
                         **history_selection_metadata,
-                        "provider_message_count": len(provider_messages),
+                        "provider_message_count": len(request_messages),
                     },
                 )
             agent.emit_trace(
@@ -677,7 +711,7 @@ class AgentLoop:
                 ),
                 attempt=task_state.attempts,
                 tools=model_tools_from_registry(agent.tools),
-                messages=tuple(provider_messages),
+                messages=request_messages,
                 cancellation_token=cancellation_token,
                 timeout_seconds=timeout_seconds,
             )
@@ -762,7 +796,7 @@ class AgentLoop:
                     and overflow_compress_retries < OVERFLOW_MAX_COMPRESS_RETRIES
                 ):
                     if use_structured_history:
-                        shrunk, elided = emergency_shrink_messages(provider_messages)
+                        shrunk, elided = request_messages, 0
                     else:
                         current_history = (
                             agent.session["history"]
@@ -777,9 +811,7 @@ class AgentLoop:
                         if target_history_tokens >= history_tokens:
                             elided = 0
                     if elided:
-                        if use_structured_history:
-                            provider_messages[:] = shrunk
-                        else:
+                        if not use_structured_history:
                             prompt_history_override = shrunk
                             prompt_segment_budget_overrides = {
                                 "history": target_history_tokens

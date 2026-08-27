@@ -8,8 +8,10 @@ from repoagent import FakeModelClient, RepoAgent, SessionStore
 from repoagent.pricing import ModelPricing
 from repoagent.providers import (
     ModelEvent,
+    ModelProfile,
     ModelResult,
     ModelUsage,
+    ProviderError,
     ToolCall,
     UsageSource,
 )
@@ -85,6 +87,8 @@ def test_live_campaign_parser_preserves_explicit_cache_pricing():
             "0.014",
             "--cache-write-cost-per-1m-usd",
             "0",
+            "--context-window-tokens",
+            "1000000",
             "--pricing-source",
             "official",
             "--image",
@@ -94,6 +98,7 @@ def test_live_campaign_parser_preserves_explicit_cache_pricing():
 
     assert args.cache_read_cost_per_1m_usd == 0.014
     assert args.cache_write_cost_per_1m_usd == 0
+    assert args.context_window_tokens == 1_000_000
 
 
 def test_polyglot_adapter_separates_runner_and_grader_inputs(tmp_path):
@@ -309,6 +314,48 @@ def test_polyglot_single_task_campaign_retains_patch_grade_and_turn_evidence(tmp
     assert (output / "agent-evidence" / "manifest.json").is_file()
 
 
+def test_polyglot_single_task_campaign_can_stage_agent_workspace_separately(tmp_path):
+    loaded = PolyglotAdapter().load(
+        _dataset(tmp_path / "dataset"), languages=("python",), limit=1
+    )
+    instance = loaded["instances"][0]
+    staged_workspace = tmp_path / "host-visible" / "attempt"
+    observed = {}
+
+    class Container:
+        is_isolated = True
+
+        def execute(self, command, *, cwd, env, control):
+            return ProcessOutcome("completed", 0, "pass\n", "", 5, 0, False)
+
+    def agent_factory(context):
+        observed["root"] = Path(context.repo_root)
+        return RepoAgent(
+            model_client=FakeModelClient(("<final>Done.</final>",)),
+            workspace=context,
+            session_store=SessionStore(
+                Path(context.repo_root) / ".repoagent" / "sessions"
+            ),
+            approval_policy="auto",
+        )
+
+    output = tmp_path / "campaign-with-external-workspace"
+    PolyglotSingleTaskCampaign(
+        repo_root=".",
+        output_root=output,
+        workspace_root=staged_workspace,
+        instance=instance,
+        benchmark=loaded["benchmark"],
+        agent_factory=agent_factory,
+        grader=PolyglotContainerGrader(Container()),
+    ).run()
+
+    assert observed["root"] == staged_workspace.resolve()
+    assert staged_workspace.is_dir()
+    assert not (output / "runner-workspace").exists()
+    assert (output / "agent-evidence" / "manifest.json").is_file()
+
+
 def test_polyglot_campaign_does_not_treat_code_only_pass_as_complete(tmp_path):
     dataset = _dataset(tmp_path / "dataset")
     loaded = PolyglotAdapter().load(dataset, languages=("python",), limit=1)
@@ -467,6 +514,68 @@ def test_polyglot_formal_campaign_rejects_uncommitted_source_before_agent(tmp_pa
     with pytest.raises(ValueError, match="Git commit"):
         campaign.run()
     assert not (tmp_path / "formal-output").exists()
+
+
+def test_polyglot_failed_turn_retains_call_efficiency_in_result_row(tmp_path):
+    loaded = PolyglotAdapter().load(
+        _dataset(tmp_path / "dataset"), languages=("python",), limit=1
+    )
+
+    class FailingProvider:
+        supports_prompt_cache = False
+        supports_structured_messages = True
+        model = "failing-model"
+        profile = ModelProfile(
+            name="test",
+            provider="test",
+            protocol="openai",
+            model=model,
+            base_url="https://models.example/v1",
+            credential_envs=("TEST_API_KEY",),
+            temperature=0.2,
+            pricing=ModelPricing(1, 1, "test-pricing"),
+        )
+
+        def stream(self, _request):
+            raise ProviderError(
+                "provider failed",
+                category="server",
+                provider="test",
+                status_code=500,
+            )
+            yield
+
+    def agent_factory(context):
+        return RepoAgent(
+            model_client=FailingProvider(),
+            workspace=context,
+            session_store=SessionStore(
+                Path(context.repo_root) / ".repoagent" / "sessions"
+            ),
+            approval_policy="auto",
+        )
+
+    class Grader:
+        def grade(self, _instance, _runner_root):
+            raise AssertionError("grader must not run after Agent failure")
+
+    output = tmp_path / "failed-turn"
+    result = PolyglotSingleTaskCampaign(
+        repo_root=tmp_path,
+        output_root=output,
+        instance=loaded["instances"][0],
+        benchmark=loaded["benchmark"],
+        agent_factory=agent_factory,
+        grader=Grader(),
+        require_provider_probe=False,
+    ).run()
+
+    row = result.rows[0]
+    assert row.status == "error"
+    assert row.metrics["call_efficiency"]["call_count"] == 1
+    assert row.metrics["call_efficiency"]["cost_complete"] is False
+    assert row.metrics["usage"]["model_call_count"] == 1
+    assert (output / "agent-evidence" / "report.json").is_file()
 
 
 def test_polyglot_campaign_revalidates_source_after_provider_probe(

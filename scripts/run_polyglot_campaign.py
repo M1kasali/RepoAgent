@@ -40,6 +40,7 @@ def build_arg_parser():
     parser.add_argument("--max-steps", type=int, default=20)
     parser.add_argument("--max-new-tokens", type=int, default=4096)
     parser.add_argument("--context-token-budget", type=int, default=8000)
+    parser.add_argument("--context-window-tokens", type=int, default=None)
     parser.add_argument("--max-provider-calls-per-attempt", type=int, default=24)
     parser.add_argument("--max-input-tokens-per-call", type=int, required=True)
     parser.add_argument("--hard-cost-cap-usd", type=float, required=True)
@@ -51,6 +52,11 @@ def build_arg_parser():
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--image", required=True)
     parser.add_argument("--staging-root", default=None)
+    parser.add_argument(
+        "--agent-staging-root",
+        default=None,
+        help="Optional host-visible root for Agent workspaces (for example /mnt/c under Docker Desktop).",
+    )
     parser.add_argument("--wsl-windows-path", action="store_true")
     parser.add_argument(
         "--allow-dirty-source",
@@ -92,6 +98,7 @@ def main(argv=None):
     base_agent_args.max_steps = args.max_steps
     base_agent_args.max_new_tokens = args.max_new_tokens
     base_agent_args.context_token_budget = args.context_token_budget
+    base_agent_args.context_window_tokens = args.context_window_tokens
     base_agent_args.input_cost_per_1m_usd = args.input_cost_per_1m_usd
     base_agent_args.output_cost_per_1m_usd = args.output_cost_per_1m_usd
     base_agent_args.cache_read_cost_per_1m_usd = args.cache_read_cost_per_1m_usd
@@ -140,6 +147,7 @@ def main(argv=None):
         ),
         require_provider_probe=True,
         require_clean_source=not args.allow_dirty_source,
+        workspace_root=args.agent_staging_root,
     ).run()
     payload = {
         "output": str(Path(args.output).resolve()),

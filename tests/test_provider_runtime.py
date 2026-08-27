@@ -31,6 +31,7 @@ from repoagent.providers import (
     generate_model,
     stream_model,
 )
+from repoagent.providers.clients import _anthropic_messages
 
 
 def test_model_request_validates_budget_timeout_and_attempt():
@@ -1024,6 +1025,28 @@ def test_anthropic_stream_projects_native_assistant_and_tool_result_messages():
                 {"type": "text", "text": "summarize"},
             ],
         },
+    ]
+
+
+def test_anthropic_projection_omits_messages_without_wire_blocks():
+    request = ModelRequest(
+        prompt="inspect",
+        max_output_tokens=20,
+        messages=(
+            ModelMessage(role="user", content="inspect"),
+            ModelMessage(role="assistant", reasoning_content="display only"),
+            ModelMessage(role="user", content="continue"),
+        ),
+    )
+
+    assert _anthropic_messages(request) == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "inspect"},
+                {"type": "text", "text": "continue"},
+            ],
+        }
     ]
 
 

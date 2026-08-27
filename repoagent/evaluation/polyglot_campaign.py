@@ -60,6 +60,7 @@ implementation is complete, return a concise <final> answer.
         require_clean_source=False,
         repetition=0,
         manage_paid_lock=True,
+        workspace_root=None,
     ):
         if not isinstance(instance, PolyglotInstance):
             raise TypeError("Polyglot campaign requires one PolyglotInstance")
@@ -77,6 +78,7 @@ implementation is complete, return a concise <final> answer.
             raise ValueError("Polyglot repetition must be a non-negative integer")
         self.repetition = repetition
         self.manage_paid_lock = bool(manage_paid_lock)
+        self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
 
     def run(self):
         lock = (
@@ -105,7 +107,7 @@ implementation is complete, return a concise <final> answer.
             )
         self.output_root.mkdir(parents=True)
         context = polyglot_workspace_context(
-            self.instance, self.output_root / "runner-workspace"
+            self.instance, self.workspace_root or self.output_root / "runner-workspace"
         )
         agent = self.agent_factory(context)
         runtime_pairing_identity = polyglot_runtime_pairing_identity(agent)
