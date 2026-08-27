@@ -198,6 +198,7 @@ def test_polyglot_grader_physically_separates_runner_and_hidden_files(tmp_path):
 
         def execute(self, command, *, cwd, env, control):
             cwd = Path(cwd)
+            assert cwd.name == instance.runner.exercise
             assert (cwd / "tests" / "hidden.txt").read_text() == "SECRET TEST\n"
             assert (cwd / ".meta" / "example.txt").read_text() == "SECRET ANSWER\n"
             assert (cwd / "src" / "answer.txt").read_text() == "TODO\n"
@@ -240,6 +241,20 @@ def test_polyglot_grader_requires_isolation_and_solution_output(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="missing safely"):
         PolyglotContainerGrader(Container()).grade(instance, runner_workspace)
+
+
+def test_polyglot_java_grader_enables_all_tests_only_in_grading_copy(tmp_path):
+    test_path = tmp_path / "ExampleTest.java"
+    original = '@Disabled("Remove to run test")\n@Test\nvoid example() {}\n'
+    test_path.write_text(original, encoding="utf-8")
+    instance = SimpleNamespace(
+        runner=SimpleNamespace(language="java"),
+        test_files=("ExampleTest.java",),
+    )
+
+    PolyglotContainerGrader._enable_all_tests(instance, tmp_path)
+
+    assert test_path.read_text(encoding="utf-8") == "@Test\nvoid example() {}\n"
 
 
 def test_polyglot_single_task_campaign_retains_patch_grade_and_turn_evidence(tmp_path):

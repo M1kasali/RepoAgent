@@ -14,6 +14,10 @@ from ..evidence import EvidenceBundleBuilder, sha256_file
 from ..paths import workspace_state_root
 from ..task_state import STOP_REASON_FINAL_ANSWER_RETURNED
 from .polyglot import PolyglotInstance, polyglot_workspace_context
+from .polyglot_pair import (
+    polyglot_runtime_pairing_identity,
+    polyglot_task_pairing_identity,
+)
 from .provider_probe import (
     PROVIDER_PROBE_MAX_ATTEMPTS,
     ProviderProbeError,
@@ -104,6 +108,8 @@ implementation is complete, return a concise <final> answer.
             self.instance, self.output_root / "runner-workspace"
         )
         agent = self.agent_factory(context)
+        runtime_pairing_identity = polyglot_runtime_pairing_identity(agent)
+        task_pairing_identity = polyglot_task_pairing_identity(self.instance)
         started = time.monotonic()
         answer = ""
         error = ""
@@ -252,6 +258,7 @@ implementation is complete, return a concise <final> answer.
                 "failure_category": self._failure_category(
                     error, grade, provider_probe
                 ),
+                "pairing_identity": task_pairing_identity,
             },
             evidence=evidence,
             error=error,
@@ -291,6 +298,7 @@ implementation is complete, return a concise <final> answer.
                 "repetition_index": self.repetition,
                 "paired": False,
                 "max_grader_attempts": 1,
+                "pairing_identity": runtime_pairing_identity,
             },
             rows=[row],
             aggregates={

@@ -164,6 +164,11 @@ def test_docker_adapter_builds_fail_closed_resource_bounded_command(tmp_path):
     assert "no-new-privileges" in command
     assert "LANG=C.UTF-8" in command
     assert not any("API_KEY" in item for item in command)
+    guest_root = f"/workspace/{tmp_path.name}"
+    assert command[command.index("--workdir") + 1] == guest_root
+    assert command[command.index("--mount") + 1].endswith(
+        f",target={guest_root}"
+    )
     assert kwargs["shell"] is False
     assert cleanup[0][0][:3] == ["docker", "rm", "--force"]
 
@@ -190,7 +195,9 @@ def test_docker_adapter_projects_workspace_path_for_external_cli(tmp_path):
     )
 
     mount = commands[0][commands[0].index("--mount") + 1]
-    assert mount == r"type=bind,source=C:\\wsl\\workspace,target=/workspace"
+    assert mount == (
+        rf"type=bind,source=C:\\wsl\\workspace,target=/workspace/{tmp_path.name}"
+    )
 
 
 def test_docker_adapter_rejects_cwd_escape(tmp_path):

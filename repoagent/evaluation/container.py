@@ -26,10 +26,15 @@ _EXCLUDED_NAMES = frozenset(
     }
 )
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_IMMUTABLE_IMAGE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 
 
 class ContainerConfigurationError(ValueError):
     pass
+
+
+def is_immutable_container_image(image):
+    return _IMMUTABLE_IMAGE.fullmatch(str(image)) is not None
 
 
 def _ignore_stage(directory, names):
@@ -94,6 +99,14 @@ class DockerContainerRunner:
         self._process_runner = process_runner
         self._cleanup_runner = cleanup_runner
 
+    @property
+    def identity(self):
+        return f"docker:{self.image}"
+
+    @property
+    def image_is_immutable(self):
+        return is_immutable_container_image(self.image)
+
     def execute(self, command, *, cwd, env, control) -> ProcessOutcome:
         if not isinstance(control, ToolExecutionControl):
             raise TypeError("Docker container runner requires ToolExecutionControl")
@@ -108,11 +121,13 @@ class DockerContainerRunner:
         try:
             staged = temporary / "workspace"
             shutil.copytree(workspace, staged, ignore=_ignore_stage)
+            container_workspace = self._container_workspace(workspace.name)
             container_name = f"repoagent-eval-{uuid.uuid4().hex}"
             docker_command = self._docker_command(
                 command,
                 staged=staged,
                 container_name=container_name,
+                container_workspace=container_workspace,
                 env=env,
             )
             try:
@@ -131,7 +146,7 @@ class DockerContainerRunner:
                     check=False,
                     timeout=10,
                 )
-                self._scrub_staging(staged)
+                self._scrub_staging(staged, container_workspace)
         finally:
             shutil.rmtree(temporary, ignore_errors=True)
             if temporary.exists():
@@ -139,7 +154,15 @@ class DockerContainerRunner:
                     f"Docker staging cleanup failed: {temporary}"
                 )
 
-    def _docker_command(self, command, *, staged, container_name, env):
+    def _docker_command(
+        self,
+        command,
+        *,
+        staged,
+        container_name,
+        container_workspace,
+        env,
+    ):
         if isinstance(command, str):
             shell_command = command
         else:
@@ -171,9 +194,9 @@ class DockerContainerRunner:
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,nodev,size=128m",
             "--mount",
-            f"type=bind,source={mount_source},target=/workspace",
+            f"type=bind,source={mount_source},target={container_workspace}",
             "--workdir",
-            "/workspace",
+            container_workspace,
         ]
         for name, value in sorted(dict(env or {}).items()):
             if _ENV_NAME.fullmatch(str(name)) is None:
@@ -182,7 +205,7 @@ class DockerContainerRunner:
         argv.extend((self.image, "sh", "-lc", shell_command))
         return argv
 
-    def _scrub_staging(self, staged):
+    def _scrub_staging(self, staged, container_workspace):
         if not staged.exists():
             return
         mount_source = self.path_converter(staged)
@@ -198,17 +221,30 @@ class DockerContainerRunner:
                 "--security-opt",
                 "no-new-privileges",
                 "--mount",
-                f"type=bind,source={mount_source},target=/workspace",
+                f"type=bind,source={mount_source},target={container_workspace}",
                 self.image,
                 "sh",
                 "-lc",
-                "find /workspace -mindepth 1 -delete",
+                (
+                    f"chmod -R u+w {shlex.quote(container_workspace)} "
+                    "2>/dev/null || true; "
+                    f"find {shlex.quote(container_workspace)} -mindepth 1 -delete"
+                ),
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
             timeout=30,
         )
+
+    @staticmethod
+    def _container_workspace(name):
+        name = str(name)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
+            raise ContainerConfigurationError(
+                f"workspace basename is unsafe for container execution: {name}"
+            )
+        return f"/workspace/{name}"
 
     @staticmethod
     def _reject_symlinks(workspace):
@@ -222,4 +258,9 @@ class DockerContainerRunner:
         return {name: os.environ[name] for name in names if os.environ.get(name)}
 
 
-__all__ = ["ContainerConfigurationError", "DockerContainerRunner", "wsl_windows_path"]
+__all__ = [
+    "ContainerConfigurationError",
+    "DockerContainerRunner",
+    "is_immutable_container_image",
+    "wsl_windows_path",
+]

@@ -12,6 +12,7 @@ from ..evidence import sha256_file
 from ..pricing import ModelPricing
 from .polyglot import PolyglotInstance
 from .polyglot_campaign import PolyglotSingleTaskCampaign
+from .polyglot_pair import polyglot_task_pairing_identity
 from .schema import (
     EvaluationResult,
     EvaluationRow,
@@ -226,6 +227,9 @@ class PolyglotCampaign:
         return result
 
     def _skipped_row(self, task_id, repetition, relative, reason):
+        instance = next(
+            item for item in self.instances if item.runner.task_id == task_id
+        )
         path = self.output_root / relative / "skip.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -237,7 +241,11 @@ class PolyglotCampaign:
             variant="repoagent-harness",
             repetition=repetition,
             status="skipped",
-            verifier={"passed": False, "failure_category": "campaign_aborted"},
+            verifier={
+                "passed": False,
+                "failure_category": "campaign_aborted",
+                "pairing_identity": polyglot_task_pairing_identity(instance),
+            },
             evidence={
                 "skip": path.relative_to(self.output_root).as_posix(),
                 "skip_sha256": sha256_file(path),
@@ -323,6 +331,7 @@ class PolyglotCampaign:
                 "paired": False,
                 "planned_attempts": planned,
                 "budget": budget_evidence or {"status": "not_configured"},
+                "pairing_identity": dict(first.design["pairing_identity"]),
             },
             rows=rows,
             aggregates={

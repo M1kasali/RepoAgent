@@ -8,7 +8,11 @@ from pathlib import Path
 
 from repoagent.cli import build_agent, build_arg_parser as build_agent_arg_parser
 from repoagent.config import load_project_env
-from repoagent.evaluation.container import DockerContainerRunner, wsl_windows_path
+from repoagent.evaluation.container import (
+    DockerContainerRunner,
+    is_immutable_container_image,
+    wsl_windows_path,
+)
 from repoagent.evaluation.polyglot import PolyglotAdapter, PolyglotContainerGrader
 from repoagent.evaluation.polyglot_suite import CampaignBudget, PolyglotCampaign
 from repoagent.pricing import ModelPricing
@@ -58,6 +62,10 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    if not args.allow_dirty_source and not is_immutable_container_image(args.image):
+        raise ValueError(
+            "formal Polyglot campaign requires image@sha256:<64-hex-digest>"
+        )
     repo_root = Path(args.repo_root).resolve()
     load_project_env(repo_root)
     languages = tuple(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -22,7 +23,7 @@ POLYGLOT_TEST_COMMANDS = MappingProxyType(
     {
         "cpp": ("/repoagent/benchmarks/cpp-test.sh",),
         "go": ("go", "test", "./..."),
-        "java": ("./gradlew", "test"),
+        "java": ("gradle", "test", "--offline", "--no-daemon"),
         "javascript": ("/repoagent/benchmarks/npm-test.sh",),
         "python": ("pytest",),
         "rust": ("cargo", "test", "--", "--include-ignored"),
@@ -339,8 +340,9 @@ class PolyglotContainerGrader:
             raise FileNotFoundError(f"Polyglot runner workspace does not exist: {runner_workspace}")
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="repoagent-polyglot-grade-") as temporary:
-            grading_workspace = Path(temporary) / "workspace"
+            grading_workspace = Path(temporary) / instance.runner.exercise
             shutil.copytree(instance.exercise_root, grading_workspace)
+            self._enable_all_tests(instance, grading_workspace)
             for relative in instance.runner.solution_files:
                 produced = runner_workspace / relative
                 if produced.is_symlink() or not produced.is_file():
@@ -371,6 +373,18 @@ class PolyglotContainerGrader:
             "output_truncated": outcome.output_truncated,
             "fixture_digest": instance.metadata["fixture_digest"],
         }
+
+    @staticmethod
+    def _enable_all_tests(instance, grading_workspace):
+        if instance.runner.language != "java":
+            return
+        for relative in instance.test_files:
+            if not relative.endswith(".java"):
+                continue
+            path = grading_workspace / relative
+            content = path.read_text(encoding="utf-8")
+            content = re.sub(r"@Disabled\([^)]*\)\s*\n", "", content)
+            path.write_text(content, encoding="utf-8")
 
 
 __all__ = [

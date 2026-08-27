@@ -374,8 +374,8 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-03` Add a benchmark container backend and refuse Polyglot execution without verified isolation.
 - [x] `P11-04` Execute one scripted task through the public RepoAgent runtime, capture its patch, and grade it inside the isolated benchmark workspace.
 - [x] `P11-05` Persist per-attempt tests, patch, trace, usage, cost, latency, failure category, and checksummed evidence.
-- [ ] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (CI fixture implemented; live canary pending.)
-- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration.
+- [ ] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (CI fixture and offline six-language image acceptance implemented; live canary pending.)
+- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (Strict identity, comparison, denominator, and statistics contract implemented; baseline execution adapter and live pair pending.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
 Gate:
@@ -427,3 +427,20 @@ accounting and all 16 hidden tests; a preceding independent repetition converged
 but passed only 15/16. This completes the single-task live acceptance gate without
 claiming general quality. Paid expansion to the frozen 24-task, six-language canary
 remains required before `P11-06` can close.
+
+The six-language grader image is now defined in-repository and its known-good,
+network-disabled acceptance passed 6/6 languages against the frozen benchmark.
+This repaired C++ exercise-directory preservation, Java full-test enablement,
+Go/Gradle execution under a `noexec` temporary filesystem, and Windows-backed
+staging cleanup. Formal campaigns require an immutable image digest. These are
+environment gates only; they do not replace the pending 24-task live model
+canary.
+
+The `P11-07` analysis boundary is now implemented independently of any named
+external harness. Polyglot attempts persist frozen runtime, task and grader
+pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,
+model/decoding/limit configuration, task matrix, or grader input before producing
+paired W/T/L, McNemar and efficiency deltas. This does not yet complete `P11-07`:
+the external baseline execution adapter and a real same-configuration paired run
+remain pending. Prior one-off comparisons with different protocols remain
+diagnostic only.

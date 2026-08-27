@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .campaigns import RuntimeContractCampaign
 from .polyglot import PolyglotAdapter, polyglot_plan_payload
+from .polyglot_pair import write_paired_polyglot_comparison
 from .release import ReleaseEvidenceBuilder, compare_results
 from .schema import validate_result_evidence, validate_result_payload
 
@@ -50,6 +51,14 @@ def build_arg_parser():
     compare.add_argument("baseline")
     compare.add_argument("candidate")
     compare.add_argument("--max-pass-rate-drop", type=float, default=0.0)
+
+    paired = commands.add_parser(
+        "compare-polyglot-paired",
+        help="Strictly compare two live Polyglot harness result artifacts.",
+    )
+    paired.add_argument("control")
+    paired.add_argument("treatment")
+    paired.add_argument("--output", required=True)
 
     release = commands.add_parser(
         "release", help="Build a self-contained release evidence directory."
@@ -104,6 +113,13 @@ def main(argv=None):
             _load(args.candidate),
             max_pass_rate_drop=args.max_pass_rate_drop,
         )
+    elif args.command == "compare-polyglot-paired":
+        path = write_paired_polyglot_comparison(
+            _load(args.control),
+            _load(args.treatment),
+            args.output,
+        )
+        payload = _load(path)
     else:
         path = ReleaseEvidenceBuilder().build(
             args.result,

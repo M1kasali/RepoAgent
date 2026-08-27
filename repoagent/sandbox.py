@@ -148,7 +148,15 @@ class DockerSandboxAdapter(SandboxAdapter):
                 f"Docker sandbox workspace does not exist: {self.workspace}"
             )
         relative_cwd = cwd.relative_to(self.workspace).as_posix()
-        guest_cwd = "/workspace" + (f"/{relative_cwd}" if relative_cwd != "." else "")
+        workspace_name = self.workspace.name
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", workspace_name):
+            raise SandboxConfigurationError(
+                f"Docker workspace basename is unsafe: {workspace_name}"
+            )
+        guest_root = f"/workspace/{workspace_name}"
+        guest_cwd = guest_root + (
+            f"/{relative_cwd}" if relative_cwd != "." else ""
+        )
         mount_source = str(self._workspace_path_converter(self.workspace)).strip()
         if not mount_source or "," in mount_source:
             raise SandboxConfigurationError(
@@ -177,7 +185,7 @@ class DockerSandboxAdapter(SandboxAdapter):
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,size=256m",
             "--mount",
-            f"type=bind,source={mount_source},target=/workspace",
+            f"type=bind,source={mount_source},target={guest_root}",
             "--workdir",
             guest_cwd,
         ]

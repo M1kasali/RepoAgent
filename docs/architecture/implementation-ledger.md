@@ -119,6 +119,8 @@ Copy this section for each completed capability.
 | Responses reasoning recovery | `repoagent/providers/clients.py`, `repoagent/agent_loop.py` | normalized reasoning-only output, opaque replay, and bounded structured prefill | TECH-078 |
 | Prompt-only overflow recovery | `repoagent/context_overflow.py`, `repoagent/context_manager.py`, `repoagent/agent_loop.py` | emergency history snapshot and token-budget reduction for legacy/Ollama prompts | TECH-079 |
 | Live Polyglot acceptance | local ignored evidence under `artifacts/polyglot-live/` | source-bound DeepSeek/Docker single-task pass and retained failure | TECH-080 |
+| Strict paired Polyglot comparison | `repoagent/evaluation/polyglot_pair.py`, `repoagent/evaluation/cli.py` | frozen runtime/task/grader identity, complete pair denominator, quality and efficiency deltas | TECH-081 |
+| Six-language Polyglot image | `benchmarks/polyglot-image/`, `scripts/run_polyglot_image_smoke.py` | fixed toolchains, offline full-test semantics, immutable image gate, six-language known-good smoke | TECH-082 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -2653,6 +2655,84 @@ tested divisibility by 26. Its failure bundle is also retained locally. The two
 runs demonstrate why convergence and code correctness are separate gates, but
 they are not a general quality estimate. The successful run has effective N=1
 and a Wilson 95% pass-rate interval of approximately [20.65%, 100%].
+
+## TECH-081 - Strict Paired Polyglot Comparison Contract
+
+- Area: external baseline comparison and benchmark statistics
+- Status: analysis contract implemented; paired live execution pending
+- Implemented/tested: 2026-08-28
+- Owning modules: `repoagent/evaluation/polyglot_pair.py`, `repoagent/evaluation/polyglot_campaign.py`, `repoagent/evaluation/polyglot_suite.py`, `repoagent/evaluation/cli.py`
+- Tests: `tests/test_polyglot_pair.py`, `tests/test_polyglot_evaluation.py`
+
+Polyglot result rows now bind each attempt to a digest of the model-visible public
+task input and a separate digest of the hidden grader input. Campaign design also
+records the Provider, protocol, model, temperature, top-p, output-token limit,
+Provider-call limit and context budget used for a future pair. Skipped attempts
+retain the same task/grader identity, so an aborted campaign cannot shrink the
+planned denominator.
+
+`repoagent-eval compare-polyglot-paired CONTROL TREATMENT --output RESULT`
+accepts two live, single-variant result artifacts only when their benchmark,
+task/repetition matrix, runtime identity and per-task grader identity match. A
+mismatch fails before statistics are produced. The output retains pass, fail,
+error and skipped states, reports paired quality W/T/L and exact McNemar counts,
+and reports duration, call-count and estimated-cost deltas with explicit metric
+coverage and paired bootstrap intervals. Missing efficiency values are excluded
+from that metric rather than converted to zero, while their rows remain in the
+quality denominator.
+
+This is the comparison and evidence contract for `P11-07`, not completion of the
+live experiment. A baseline adapter must still produce the same versioned result
+schema, both variants must be executed under the frozen identity, and the
+resulting comparison must be retained before a Harness improvement can be
+claimed. Earlier one-off runs with different Tool protocols or execution
+boundaries are diagnostic observations and are intentionally rejected as strict
+pairs.
+
+## TECH-082 - Reproducible Six-Language Polyglot Grader
+
+- Area: isolated public-benchmark execution environment
+- Status: six-language known-good smoke passed; live canary pending
+- Implemented/tested: 2026-08-28
+- Owning modules: `benchmarks/polyglot-image/`, `repoagent/evaluation/container.py`, `repoagent/evaluation/polyglot.py`, `scripts/run_polyglot_image_smoke.py`, `scripts/run_polyglot_campaign.py`
+- Tests: `tests/test_evaluation_container.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_image.py`
+- Local evidence: `artifacts/polyglot-live/image-smoke-20260828/`
+
+The repository now defines its Polyglot grader image instead of relying on an
+unrecorded local Python image. The build pins Go 1.21.5, Rust 1.83.0, Node
+20.18.1 and Gradle 8.7, uses JDK 21, and installs the C++/CMake and Python test
+toolchains. The base image is locked by digest, and release builds disable
+timestamped BuildKit provenance attestations so identical runnable manifests
+retain the same execution identity. Java/JUnit and JavaScript/Jest dependencies
+are fetched at image build time. Runtime grading remains network-disabled and
+uses the prewarmed dependency cache.
+
+`run_polyglot_image_smoke.py` restores one benchmark-owned known-good reference
+per language only inside the grader boundary, then executes the same hidden-test
+path used after an Agent turn. It records the benchmark commit/digest, image ID,
+per-language exit status, output and reference mapping. This is an environment
+acceptance test, not a coding-quality result.
+
+The smoke exposed four previously hidden infrastructure errors. C++ CMake derives
+its target from the exercise directory name, so the container runner now preserves
+the workspace basename. Go test binaries and Gradle native libraries cannot run
+from the deliberately `noexec` `/tmp`, so language build state is placed in the
+disposable mounted workspace while `/tmp` stays non-executable. The Java grader
+now removes `@Disabled` annotations in its private grading copy, matching the
+benchmark's full-test semantics instead of accepting one enabled test and fifteen
+skips. Windows-backed staging cleanup now restores owner write permission before
+deletion and still fails closed if any new attempt directory remains.
+
+The final offline smoke passed 6/6 languages on benchmark commit
+`7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f` and definition digest
+`sha256:408e9c87f72d0e4469e480e912fdc58f915d0778861c6e1593199e10cceb8bd4`.
+The immutable image identity was
+`repoagent-polyglot@sha256:abb4183a827978e195474e6a0594ffa59916a1efcd625ecde6ab5d3386381096`.
+C++ passed 17 cases, Java passed all 16 enabled cases, JavaScript passed 16,
+Python passed 16, Rust passed 12, and Go completed its package test. Formal
+campaign entry now rejects a mutable image tag before loading the dataset or
+making Provider calls. A 24-task live model run remains required to complete
+`P11-06`.
 
 ## 5. Decision Index
 

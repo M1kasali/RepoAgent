@@ -28,6 +28,13 @@ from .polyglot import (
     prepare_polyglot_runner_workspace,
 )
 from .polyglot_campaign import PolyglotSingleTaskCampaign
+from .polyglot_pair import (
+    PAIRED_POLYGLOT_COMPARISON_SCHEMA,
+    compare_paired_polyglot_results,
+    polyglot_runtime_pairing_identity,
+    polyglot_task_pairing_identity,
+    write_paired_polyglot_comparison,
+)
 from .polyglot_suite import CampaignBudget, PolyglotCampaign
 from .provider_probe import ProviderProbeError, ProviderProbeResult, run_provider_probe
 from .tracing import TRACING_EXPERIMENT_SCHEMA, measure_tracing_overhead
@@ -65,6 +72,7 @@ __all__ = [
     "PolyglotInstance",
     "PolyglotRunnerInput",
     "PolyglotSingleTaskCampaign",
+    "PAIRED_POLYGLOT_COMPARISON_SCHEMA",
     "CampaignBudget",
     "PolyglotCampaign",
     "ProviderProbeError",
@@ -84,6 +92,7 @@ __all__ = [
     "TRACING_EXPERIMENT_SCHEMA",
     "measure_tracing_overhead",
     "compare_results",
+    "compare_paired_polyglot_results",
     "render_resume_claims_markdown",
     "resume_claims_from_release",
     "exact_mcnemar",
@@ -94,11 +103,14 @@ __all__ = [
     "paired_campaign_matrix",
     "paired_win_tie_loss",
     "polyglot_plan_payload",
+    "polyglot_runtime_pairing_identity",
+    "polyglot_task_pairing_identity",
     "polyglot_workspace_context",
     "prepare_polyglot_runner_workspace",
     "run_fault_matrix",
     "run_provider_probe",
     "verify_release_bundle",
     "wilson_interval",
+    "write_paired_polyglot_comparison",
     "wsl_windows_path",
 ]
