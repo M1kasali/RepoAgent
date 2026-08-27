@@ -543,7 +543,14 @@ class AgentLoop:
         # 3. 行动：如果是工具调用，就执行工具
         # 4. 记录：把结果写回 history / task_state / trace / memory
         # 然后进入下一轮，直到停机条件满足
-        while tool_steps < agent.max_steps and attempts < max_attempts:
+        while (
+            tool_steps < agent.max_steps
+            and attempts < max_attempts
+            and (
+                agent.max_provider_calls is None
+                or len(call_entries) < agent.max_provider_calls
+            )
+        ):
             if cancellation_token is not None:
                 cancellation_token.raise_if_cancelled(
                     provider=type(agent.model_client).__name__
@@ -1280,7 +1287,14 @@ class AgentLoop:
             )
             return final
 
-        if attempts >= max_attempts and tool_steps < agent.max_steps:
+        provider_call_limit_reached = (
+            agent.max_provider_calls is not None
+            and len(call_entries) >= agent.max_provider_calls
+        )
+        if provider_call_limit_reached:
+            final = "Stopped after reaching the configured Provider call limit."
+            task_state.stop_step_limit(final)
+        elif attempts >= max_attempts and tool_steps < agent.max_steps:
             final = "Stopped after too many malformed model responses without a valid tool call or final answer."
             task_state.stop_retry_limit(final)
         else:

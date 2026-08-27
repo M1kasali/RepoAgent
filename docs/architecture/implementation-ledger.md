@@ -2745,6 +2745,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Tests: `tests/test_context_overflow.py`, `tests/test_model_profiles.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_pair.py`
 - Diagnostic evidence: `artifacts/polyglot-live/deepseek-v4-flash-canary24-d1620d6-20260828/` (local and ignored)
 - Acceptance evidence: `artifacts/polyglot-live/deepseek-go-alphametics-a918ec1-windows-workspace-20260828/` (local and ignored)
+- Budget diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-caa0d9f-20260828/` (local and ignored; stopped after 15 complete rows)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2792,6 +2793,16 @@ same `go/alphametics` task passed hidden grading, normal Turn convergence and al
 campaign gates in 11 calls for an estimated complete cost of USD 0.0113416128.
 This is infrastructure acceptance for the repaired path, not a multi-task quality
 claim.
+
+The subsequent 24-task restart completed 15 rows before manual stop. It retained
+no infrastructure-error rows, but Java `alphametics` used 15 Provider calls
+against the declared per-attempt limit of 14. The campaign previously enforced
+that limit only as a post-run aggregate gate, so recovery and exhaustion
+synthesis could spend beyond the admitted attempt envelope. `RepoAgent` now has
+an optional execution-level `max_provider_calls`; the Polyglot runner binds it to
+`--max-provider-calls-per-attempt`, prevents an unbudgeted synthesis call, and
+retains a non-converged terminal report at the limit. The interrupted 15-row
+artifact remains diagnostic and cannot complete `P11-06`.
 
 ## 5. Decision Index
 

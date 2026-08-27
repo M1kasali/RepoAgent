@@ -100,6 +100,7 @@ class RepoAgent:
         run_store=None,
         approval_policy="ask",
         max_steps=20,
+        max_provider_calls=None,
         max_parallel_tools=ToolGateway.DEFAULT_MAX_PARALLEL,
         mutation_conflict_policy=MutationConflictPolicy.SERIAL.value,
         max_new_tokens=4096,
@@ -134,6 +135,13 @@ class RepoAgent:
         self.session_store = session_store
         self.approval_policy = approval_policy
         self.max_steps = max_steps
+        if max_provider_calls is not None and (
+            isinstance(max_provider_calls, bool)
+            or not isinstance(max_provider_calls, int)
+            or max_provider_calls < 1
+        ):
+            raise ValueError("max_provider_calls must be a positive integer or None")
+        self.max_provider_calls = max_provider_calls
         if (
             isinstance(max_parallel_tools, bool)
             or not isinstance(max_parallel_tools, int)

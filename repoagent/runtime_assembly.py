@@ -56,6 +56,7 @@ class RuntimeAssembly:
             "run_store": self.run_store,
             "approval_policy": args.approval,
             "max_steps": args.max_steps,
+            "max_provider_calls": getattr(args, "max_provider_calls", None),
             "max_parallel_tools": getattr(args, "max_parallel_tools", 4),
             "mutation_conflict_policy": getattr(
                 args, "mutation_conflict_policy", "serial"

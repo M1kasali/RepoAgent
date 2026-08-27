@@ -96,6 +96,7 @@ def main(argv=None):
     base_agent_args.base_url = args.base_url
     base_agent_args.approval = "auto"
     base_agent_args.max_steps = args.max_steps
+    base_agent_args.max_provider_calls = args.max_provider_calls_per_attempt
     base_agent_args.max_new_tokens = args.max_new_tokens
     base_agent_args.context_token_budget = args.context_token_budget
     base_agent_args.context_window_tokens = args.context_window_tokens

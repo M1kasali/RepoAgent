@@ -58,7 +58,10 @@ def polyglot_runtime_pairing_identity(agent) -> dict[str, Any]:
         "temperature": getattr(profile, "temperature", None),
         "top_p": getattr(profile, "top_p", None),
         "max_output_tokens": int(getattr(agent, "max_new_tokens", 0)),
-        "max_provider_calls": int(getattr(agent, "max_steps", 0)),
+        "max_provider_calls": int(
+            getattr(agent, "max_provider_calls", None)
+            or getattr(agent, "max_steps", 0)
+        ),
         "context_token_budget": int(
             getattr(getattr(agent, "context_manager", None), "total_token_budget", 0)
         ),

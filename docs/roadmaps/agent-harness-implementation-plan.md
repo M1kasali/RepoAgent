@@ -452,6 +452,13 @@ Docker-visible Agent staging root, the task converged, passed hidden grading and
 all campaign gates in 11 calls at USD 0.0113416128. The formal 24-task restart
 must use that staging contract and retain a complete denominator.
 
+The first staging-correct 24-task restart was stopped after 15 complete rows when
+one attempt used 15 Provider calls against its declared limit of 14. This exposed
+that the call budget was previously a post-run gate rather than an execution
+limit. The campaign now binds the budget to the Agent loop and suppresses any
+extra exhaustion-synthesis call once the limit is reached. That partial result is
+diagnostic only; `P11-06` still requires a fresh complete 24-row run.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

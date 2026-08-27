@@ -427,6 +427,27 @@ def test_step_exhaustion_uses_static_fallback_when_synthesis_fails(tmp_path):
     assert failed["fallback"] == "static"
 
 
+def test_provider_call_limit_prevents_unbudgeted_exhaustion_synthesis(tmp_path):
+    provider = FakeModelClient(
+        ('<tool>{"name":"list_files","args":{"path":"."}}</tool>',)
+    )
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=build_workspace(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+        max_steps=3,
+        max_provider_calls=1,
+    )
+
+    answer = agent.ask("Inspect once")
+
+    assert answer == "Stopped after reaching the configured Provider call limit."
+    assert agent.current_task_state.stop_reason == "step_limit_reached"
+    calls = agent.run_store.load_model_calls(agent.current_task_state)
+    assert len(calls) == 1
+
+
 def test_agent_saves_and_resumes_session(tmp_path):
     agent = build_agent(tmp_path, ["<final>First pass.</final>"])
     assert agent.ask("Start a session") == "First pass."
