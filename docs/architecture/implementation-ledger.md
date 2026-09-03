@@ -2804,6 +2804,13 @@ an optional execution-level `max_provider_calls`; the Polyglot runner binds it t
 retains a non-converged terminal report at the limit. The interrupted 15-row
 artifact remains diagnostic and cannot complete `P11-06`.
 
+A later run on `53384a7` wrote all 24 planned rows after the operator requested
+stop, but seven consecutive DeepSeek connection failures produced incomplete
+usage evidence. Its actual-cost gate therefore failed and the run is diagnostic,
+not release evidence. Multi-task campaigns now fail fast after any infrastructure
+`error` row while writing the remaining planned rows as `skipped`; ordinary
+hidden-test failures continue because they are valid quality observations.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

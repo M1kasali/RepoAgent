@@ -459,6 +459,12 @@ limit. The campaign now binds the budget to the Agent loop and suppresses any
 extra exhaustion-synthesis call once the limit is reached. That partial result is
 diagnostic only; `P11-06` still requires a fresh complete 24-row run.
 
+The next 24-row artifact is also diagnostic: an operator stop coincided with
+seven DeepSeek connection failures, leaving usage pricing incomplete and failing
+the actual-cost gate. Campaign orchestration now aborts further paid attempts on
+the first infrastructure-error row while retaining skipped denominator rows.
+Hidden-test failures remain non-fatal to preserve unbiased quality measurement.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

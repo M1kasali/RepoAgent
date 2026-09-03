@@ -212,11 +212,14 @@ class PolyglotCampaign:
                     ).run()
                     first_result = first_result or result
                     row = self._prefix_evidence(result.rows[0], relative)
-                    if (
-                        row.verifier.get("failure_category")
-                        == "provider_preflight_failed"
-                    ):
-                        stop_reason = "provider preflight failed"
+                    if row.status == "error":
+                        category = str(
+                            row.verifier.get("failure_category")
+                            or "unknown_infrastructure_error"
+                        )
+                        stop_reason = (
+                            f"infrastructure error after {row.task_id}: {category}"
+                        )
                 rows.append(row)
                 RawRowWriter(self.output_root / "rows.jsonl").append(row)
         if first_result is None:

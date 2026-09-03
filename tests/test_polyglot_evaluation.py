@@ -930,3 +930,50 @@ def test_polyglot_campaign_preserves_skipped_rows_after_preflight_failure(tmp_pa
     assert result.aggregates["skipped_run_n"] == 3
     assert result.aggregates["pass_rate"] == 0.0
     assert all((output / row.evidence["skip"]).is_file() for row in result.rows[1:])
+
+
+def test_polyglot_campaign_stops_after_runtime_infrastructure_error(tmp_path):
+    loaded = PolyglotAdapter().load(
+        _dataset(tmp_path / "dataset"), languages=("python",), limit=2
+    )
+    factory_calls = 0
+
+    def agent_factory(context):
+        nonlocal factory_calls
+        factory_calls += 1
+        return RepoAgent(
+            model_client=FakeModelClient(()),
+            workspace=context,
+            session_store=SessionStore(
+                Path(context.repo_root) / ".repoagent" / "sessions"
+            ),
+            approval_policy="auto",
+        )
+
+    class Grader:
+        def grade(self, _instance, _runner_root):
+            raise AssertionError("grader must not run after Agent failure")
+
+    output = tmp_path / "runtime-failure"
+    result = PolyglotCampaign(
+        repo_root=tmp_path,
+        output_root=output,
+        instances=loaded["instances"],
+        benchmark=loaded["benchmark"],
+        agent_factory=agent_factory,
+        grader=Grader(),
+        repetitions=2,
+        require_provider_probe=False,
+        require_clean_source=False,
+    ).run()
+
+    assert factory_calls == 1
+    assert [row.status for row in result.rows] == [
+        "error",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
+    assert result.aggregates["executed_run_n"] == 1
+    assert result.aggregates["skipped_run_n"] == 3
+    assert all("infrastructure error after" in row.error for row in result.rows[1:])
