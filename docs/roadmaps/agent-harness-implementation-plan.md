@@ -374,7 +374,7 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-03` Add a benchmark container backend and refuse Polyglot execution without verified isolation.
 - [x] `P11-04` Execute one scripted task through the public RepoAgent runtime, capture its patch, and grade it inside the isolated benchmark workspace.
 - [x] `P11-05` Persist per-attempt tests, patch, trace, usage, cost, latency, failure category, and checksummed evidence.
-- [ ] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (CI fixture and offline six-language image acceptance implemented; live canary pending.)
+- [x] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (24/24 live attempts executed on `c42e2bb`; all engineering gates passed.)
 - [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (Strict identity, comparison, denominator, and statistics contract implemented; baseline execution adapter and live pair pending.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
@@ -418,23 +418,19 @@ actual call count, cost completeness, source integrity, errors and skipped attem
 remain explicit gates and rows. Both Agent shell execution and hidden-test grading
 are forced through the configured Docker runtime in the live entry points.
 
-The active slice is `P11-06`: CI now runs and uploads a credential-free two-task,
-two-repetition fixture campaign, then validates the aggregate result and per-row
-evidence. The remaining work is the bounded 24-task six-language live canary outside
-PR CI. A clean-source DeepSeek V4 Flash replay on `python/affine-cipher` now passed
-provider preflight, normal Turn convergence, Docker shell execution, complete cost
-accounting and all 16 hidden tests; a preceding independent repetition converged
-but passed only 15/16. This completes the single-task live acceptance gate without
-claiming general quality. Paid expansion to the frozen 24-task, six-language canary
-remains required before `P11-06` can close.
+`P11-06` is complete. CI runs and uploads the credential-free two-task,
+two-repetition fixture campaign, while the external live gate executed 24
+language-balanced DeepSeek V4 Flash tasks on clean commit `c42e2bb`. All 24 rows
+executed with zero infrastructure errors or skips, complete cost evidence and
+stable source identity. The measured quality baseline is 4/24 end-to-end passes;
+it is retained as a bounded diagnostic baseline rather than a competitive claim.
 
 The six-language grader image is now defined in-repository and its known-good,
 network-disabled acceptance passed 6/6 languages against the frozen benchmark.
 This repaired C++ exercise-directory preservation, Java full-test enablement,
 Go/Gradle execution under a `noexec` temporary filesystem, and Windows-backed
 staging cleanup. Formal campaigns require an immutable image digest. These are
-environment gates only; they do not replace the pending 24-task live model
-canary.
+environment gates only; the separate completed live result is recorded below.
 
 The first 24-task live attempt on commit `d1620d6` was stopped during task four
 and retained only as diagnostic evidence. Two completed rows failed before
@@ -493,9 +489,17 @@ That replacement replay passed `go/alphametics` end to end on clean commit
 `2a1e197`: 11 complete DeepSeek calls, normal Turn convergence, pinned hidden
 grader exit zero, USD 0.0073998512 actual estimated cost, stable source, and all
 campaign gates green. The stochastic response did not repeat the non-object
-payload, while offline regressions directly cover that branch. The next step for
-`P11-06` is a fresh 24-task run with the same 12,000-token runtime/cost envelope
-and prepared Windows-visible staging roots.
+payload, while offline regressions directly cover that branch. At that point the
+next `P11-06` step was a fresh 24-task run with the same 12,000-token runtime/cost
+envelope and prepared Windows-visible staging roots.
+
+That formal run completed on clean commit `c42e2bb`: 24/24 executed rows, zero
+errors and skips, 263 completely priced calls, USD 0.2301833184 actual estimated
+task-call cost, and all campaign gates passing. Four tasks passed end to end;
+eight patches passed hidden tests, exposing four code-correct Turns lost solely
+to non-convergence. The run also exercised `_raw_arguments` live and recovered to
+a valid `write_file` call without executing the malformed payload. `P11-06` is
+closed; `P11-07` paired baseline execution is now the active slice.
 
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader

@@ -2139,8 +2139,9 @@ remains an object, but ToolGateway rejects the reserved field through the normal
 Tool Schema before approval, sandboxing, or execution. Its error becomes a
 matched Tool result that the model can inspect and retry. Offline regressions
 cover trailing-comma repair, non-object preservation, and a complete Agent Turn
-that consumes the schema error and returns a final answer. Another paid replay
-is still required to verify the exact live failure no longer aborts the Turn.
+that consumes the schema error and returns a final answer. The later 24-task
+canary on `c42e2bb` exercised this branch live: one malformed `write_file` call
+was rejected, the model retried with valid arguments, and hidden grading passed.
 
 The provider parsing order is deliberately bounded:
 
@@ -2164,8 +2165,8 @@ array retains its original payload. An end-to-end Agent regression proves the
 wrapper becomes `invalid_arguments`, is sent back under the matching Tool call
 ID, and permits normal Turn completion. The focused provider/Agent/ToolGateway
 regression passed 133 tests and the full suite passed 615 tests with six existing
-`datetime.utcnow()` deprecation warnings. Live recovery is still unverified and
-is not counted as a pass.
+`datetime.utcnow()` deprecation warnings. The `c42e2bb` canary supplies the live
+recovery evidence without weakening the Tool contract.
 
 Tool-loop exhaustion now uses one tools-disabled synthesis request while the Turn
 remains interrupted through
@@ -2512,7 +2513,7 @@ slice.
 ## TECH-076 - Credential-free Polyglot CI Campaign
 
 - Area: public benchmark pipeline regression
-- Status: implemented; live canary remains pending
+- Status: implemented; credential-free CI gate passing
 - Implemented/tested: 2026-08-26
 - Owning modules: `scripts/run_polyglot_fixture_campaign.py`, `benchmarks/fixtures/polyglot-mini/`, `.github/workflows/ci.yml`
 - Tests: `tests/test_polyglot_evaluation.py`; CI campaign and schema-validation commands
@@ -2531,8 +2532,8 @@ The result schema explicitly states that scripted campaigns verify orchestration
 and evidence rather than model coding quality. A local reproduction produced four
 planned rows, four passes, no skips, eight recorded scripted calls and four complete
 attempt evidence trees; the result validator accepted every row. This is a CI
-contract only. It does not complete `P11-06`, which still requires the bounded
-six-language live canary outside pull-request CI. Final local verification passed
+contract only; the later six-language live acceptance is recorded in TECH-083.
+Final local verification passed
 582 tests with six pre-existing metrics deprecation warnings; full Ruff and
 whitespace checks passed.
 
@@ -2637,11 +2638,13 @@ deprecation warnings; Ruff and whitespace checks passed.
 ## TECH-080 - Bounded Live Polyglot Acceptance
 
 - Area: real-provider coding task, isolation, grading, and cost evidence
-- Status: single-task acceptance passed; 24-task canary pending
-- Executed: 2026-08-26
+- Status: single-task and 24-task acceptance passed
+- Executed: 2026-08-26 through 2026-09-04
 - Source commit: `5a3b54b95d9912c1415af88e663c03ba7e3fab35`
+- Formal canary source: `c42e2bbbb878f9dd02de22982845244f81894e72`
 - Benchmark: Aider Polyglot commit `7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f`, task `python/affine-cipher`
 - Local evidence: `artifacts/polyglot-live/deepseek-affine-5a3b54b-live-pass-20260826/`
+- Formal canary evidence: `artifacts/polyglot-live/deepseek-v4-flash-canary24-c42e2bb-20260904/`
 
 A clean-source live campaign used `deepseek-v4-flash` and the isolated
 `repoagent-polyglot-python:20260825` Docker image. Provider preflight resolved the
@@ -2742,14 +2745,14 @@ The immutable image identity was
 C++ passed 17 cases, Java passed all 16 enabled cases, JavaScript passed 16,
 Python passed 16, Rust passed 12, and Go completed its package test. Formal
 campaign entry now rejects a mutable image tag before loading the dataset or
-making Provider calls. A 24-task live model run remains required to complete
-`P11-06`.
+making Provider calls. The completed 24-task live acceptance is recorded in
+TECH-083.
 
 ## TECH-083 - In-Turn Transcript Admission and Failure Accounting
 
 - Area: structured Provider transcript compaction and failed-turn evidence
-- Status: implemented; clean single-task rerun passed, 24-task canary pending
-- Implemented/tested: 2026-08-28
+- Status: implemented; `P11-06` live acceptance complete
+- Implemented/tested: 2026-08-28 through 2026-09-04
 - Owning modules: `repoagent/context_overflow.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py`, `repoagent/providers/profiles.py`
 - Integration: `scripts/run_polyglot_campaign.py`, `repoagent/evaluation/polyglot_pair.py`
 - Tests: `tests/test_context_overflow.py`, `tests/test_model_profiles.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_pair.py`
@@ -2760,6 +2763,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Protocol diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-667ae58-20260904/` (local and ignored; 2 executed plus 22 skipped)
 - Protocol-replay diagnostic: `artifacts/polyglot-live/deepseek-go-alphametics-dcba94f-protocol-replay-20260904/` (local and ignored; Agent converged, grader configuration failed)
 - Protocol-recovery acceptance: `artifacts/polyglot-live/deepseek-go-alphametics-2a1e197-grader-replay-20260904/` (local and ignored; 1/1 passed)
+- Formal canary acceptance: `artifacts/polyglot-live/deepseek-v4-flash-canary24-c42e2bb-20260904/` (local and ignored; 24/24 executed)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2877,6 +2881,29 @@ in this stochastic run, so the exact raw-wrapper branch remains proven by the
 offline SSE and Agent-loop regressions rather than claimed as live coverage. The
 provider, Docker, staging, grader, evidence and gate path is now accepted for a
 fresh 24-task canary.
+
+The formal canary on clean commit `c42e2bb` then executed all 24 planned tasks,
+four per language, with no error or skipped rows. All engineering gates passed:
+planned and executed denominators were 24/24, infrastructure errors were zero,
+the maximum attempt used 14 calls, all 263 recorded task calls had complete usage/pricing,
+actual estimated task-call cost was USD 0.2301833184 under the USD 2.00 admitted
+cap, and source identity remained stable. `repoagent-eval validate --require-evidence`
+accepted the aggregate and all referenced evidence.
+
+The measured end-to-end quality baseline is 4/24 (16.67%, Wilson 95% interval
+6.68%-35.85%). Eight patches passed hidden tests, but four of those Turns did not
+return a normal final answer; 11 Turns converged, while seven of those failed
+hidden tests. Full passes were Python 2/4, Go 1/4, JavaScript 1/4, C++ 0/4,
+Java 0/4, and Rust 0/4. This is a bounded baseline, not a competitive quality
+claim. It isolates completion judgment as the first optimization target: four
+additional code-correct attempts were lost only to Turn non-convergence.
+
+The same run directly exercised the non-object Tool-argument recovery on
+`go/alphametics`. ToolGateway rejected `_raw_arguments` before execution, returned
+the matched schema error to DeepSeek, and the next `write_file` call used valid
+`path` and `content` arguments. The resulting patch passed hidden grading, though
+the overall attempt remained a fail because it exhausted the Turn call budget.
+This closes `P11-06`; the next active slice is `P11-07` paired baseline execution.
 
 ## 5. Decision Index
 
