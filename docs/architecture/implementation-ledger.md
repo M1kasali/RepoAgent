@@ -2125,14 +2125,22 @@ mandatory checkpoint consuming about 1,170 tokens and squeezing the runtime
 prefix from 900 tokens to roughly 258-294 tokens in later rounds. A subsequent
 8,000-token diagnostic failed before grading because the Anthropic-compatible
 stream contained malformed native-tool argument JSON. This is useful failure
-evidence, not a coding-quality score or resume claim. Further paid runs are
-blocked until protocol recovery and convergence regressions are fixed offline.
-The provider boundary now tries `json_repair` after strict JSON decoding fails,
-while still requiring an object
-and passing repaired arguments through the normal Tool Schema and policy gates.
-Offline stream regressions cover a repairable trailing comma and rejection of a
-repaired non-object payload; another paid run is still required to verify the
-exact live failure no longer aborts the Turn.
+evidence, not a coding-quality score or resume claim. The provider boundary first
+added `json_repair` after strict JSON decoding and retained a strict object-only
+postcondition. That recovered a malformed-object live replay, but a later
+24-task restart on `667ae58` exposed the remaining case: DeepSeek returned a
+repairable non-object payload during `go/alphametics`, and the object check still
+aborted the Turn as a Provider protocol error after three calls.
+
+RepoAgent now follows pico-harness's streaming finalization boundary: malformed
+or non-object arguments are retained as `{"_raw_arguments": <original>}` instead
+of aborting the Provider call. The typed `ToolCall.arguments` contract therefore
+remains an object, but ToolGateway rejects the reserved field through the normal
+Tool Schema before approval, sandboxing, or execution. Its error becomes a
+matched Tool result that the model can inspect and retry. Offline regressions
+cover trailing-comma repair, non-object preservation, and a complete Agent Turn
+that consumes the schema error and returns a final answer. Another paid replay
+is still required to verify the exact live failure no longer aborts the Turn.
 
 The provider parsing order is deliberately bounded:
 
@@ -2140,22 +2148,24 @@ The provider parsing order is deliberately bounded:
 2. String arguments first use standard-library `json.loads()` so valid provider
    output retains strict JSON semantics.
 3. Only a `JSONDecodeError` activates `json_repair.loads()`; transport failures
-   and non-string payloads are not disguised as repairable JSON.
-4. The decoded value must still be an object. Arrays, scalars, and null remain
-   protocol errors even when the repair library can parse them.
-5. The resulting object enters the existing `ToolDefinition` argument Schema,
-   effect approval, capability, sandbox, and execution gates. JSON repair does
-   not authorize a tool, add missing business arguments, or bypass policy.
+   remain Provider failures rather than being disguised as argument repair.
+4. If parsing fails or yields an array, scalar, or null, the original payload is
+   wrapped in the reserved `_raw_arguments` field. No array element is silently
+   selected and no missing business argument is invented.
+5. Both repaired objects and raw wrappers enter the existing `ToolDefinition`
+   Schema, effect approval, capability, sandbox, and execution gates. The raw
+   wrapper is rejected at Schema validation and returned to the model as a Tool
+   error; it never authorizes or executes the requested Tool.
 
 The focused provider tests construct Anthropic-compatible SSE
 `input_json_delta` streams. One verifies that `{"path":"README.md",}` becomes
 the expected `read_file` argument object; another verifies that a repairable
-array is rejected before it can reach ToolGateway. The full suite after this
-change initially passed 506 tests; after removing the temporary project-specific
-terminal tool, the provider/runtime/checkpoint/Polyglot focused regression passed
-117 tests. Six pre-existing `datetime.utcnow()` deprecation warnings remain. No
-additional paid provider call was made after adding the repair path, so live
-recovery remains unverified and is not counted as a pass.
+array retains its original payload. An end-to-end Agent regression proves the
+wrapper becomes `invalid_arguments`, is sent back under the matching Tool call
+ID, and permits normal Turn completion. The focused provider/Agent/ToolGateway
+regression passed 133 tests and the full suite passed 615 tests with six existing
+`datetime.utcnow()` deprecation warnings. Live recovery is still unverified and
+is not counted as a pass.
 
 Tool-loop exhaustion now uses one tools-disabled synthesis request while the Turn
 remains interrupted through
@@ -2747,6 +2757,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Acceptance evidence: `artifacts/polyglot-live/deepseek-go-alphametics-a918ec1-windows-workspace-20260828/` (local and ignored)
 - Budget diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-caa0d9f-20260828/` (local and ignored; stopped after 15 complete rows)
 - Fail-fast diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-882e8e1-20260903-retry1/` (local and ignored; 8 executed plus 16 skipped)
+- Protocol diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-667ae58-20260904/` (local and ignored; 2 executed plus 22 skipped)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2830,6 +2841,16 @@ otherwise valid. Focused evaluation tests passed 42/42 and the full suite passed
 614 tests; Ruff and whitespace checks also passed. Docker Desktop and asyncio
 thread-wakeup checks were run outside the managed Codex sandbox because that
 sandbox blocks the relevant WSL interop and thread notification paths.
+
+The next restart raised the runtime input budget to the already-admitted 12,000
+tokens and verified the new execution-denominator gate: DeepSeek failed the first
+C++ hidden test normally, then emitted non-object Tool arguments on
+`go/alphametics`. The campaign stopped after 2/24 executed rows, wrote 22 skipped
+rows, and failed `executed_denominator_complete` plus incomplete actual-cost
+evidence. This correctly rejected the partial run while limiting it to 17 calls
+and USD 0.0166723984 of partially priced usage. The provider-boundary recovery
+described in TECH-065 was added from this evidence; a one-task live replay must
+pass before another formal 24-task restart.
 
 ## 5. Decision Index
 

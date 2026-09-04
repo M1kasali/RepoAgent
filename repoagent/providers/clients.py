@@ -511,25 +511,20 @@ def _decode_tool_arguments(value, *, provider):
     if isinstance(value, dict):
         return value
     if not isinstance(value, str):
-        raise ProviderProtocolError(
-            "native tool arguments must be a JSON object",
-            provider=provider,
-        )
+        try:
+            raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            raw = repr(value)
+        return {"_raw_arguments": raw}
     try:
         arguments = json.loads(value or "{}")
     except json.JSONDecodeError:
         try:
             arguments = json_repair.loads(value or "{}")
-        except Exception as exc:
-            raise ProviderProtocolError(
-                "native tool arguments are not repairable JSON",
-                provider=provider,
-            ) from exc
+        except Exception:
+            return {"_raw_arguments": value}
     if not isinstance(arguments, dict):
-        raise ProviderProtocolError(
-            "native tool arguments must decode to an object",
-            provider=provider,
-        )
+        return {"_raw_arguments": value}
     return arguments
 
 

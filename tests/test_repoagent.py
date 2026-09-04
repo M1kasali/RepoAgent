@@ -330,6 +330,58 @@ def test_retries_do_not_consume_the_whole_budget(tmp_path):
     assert answer == "Recovered after several retries."
 
 
+def test_native_non_object_tool_arguments_become_model_visible_tool_error(tmp_path):
+    class InvalidThenFinalProvider:
+        supports_prompt_cache = False
+        model = "test-model"
+
+        def __init__(self):
+            self.requests = []
+
+        def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                result = ModelResult(
+                    tool_calls=(
+                        ToolCall(
+                            "call-invalid",
+                            "read_file",
+                            {"_raw_arguments": '["README.md",]'},
+                        ),
+                    ),
+                    finish_reason="tool_use",
+                    provider="test",
+                    model=self.model,
+                )
+            else:
+                result = ModelResult(
+                    text="<final>Recovered after invalid tool arguments.</final>",
+                    finish_reason="stop",
+                    provider="test",
+                    model=self.model,
+                )
+            yield ModelEvent(kind="completed", result=result)
+
+    provider = InvalidThenFinalProvider()
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=build_workspace(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+    )
+
+    answer = agent.ask("Inspect README.md")
+
+    assert answer == "Recovered after invalid tool arguments."
+    assert len(provider.requests) == 2
+    feedback = provider.requests[1].messages[-1]
+    assert feedback.role == "tool"
+    assert feedback.tool_call_id == "call-invalid"
+    assert "invalid arguments for read_file" in feedback.content
+    assert "_raw_arguments" in feedback.content
+    assert agent.current_task_state.status == "completed"
+
+
 def test_step_exhaustion_synthesizes_with_tools_disabled(tmp_path):
     class ToolThenSynthesisProvider:
         supports_prompt_cache = False

@@ -1149,7 +1149,7 @@ def test_anthropic_stream_repairs_malformed_tool_argument_json():
     )
 
 
-def test_anthropic_stream_rejects_repaired_non_object_tool_arguments():
+def test_anthropic_stream_preserves_repaired_non_object_tool_arguments():
     class FakeResponse:
         headers = {"Content-Type": "text/event-stream"}
 
@@ -1188,8 +1188,17 @@ def test_anthropic_stream_rejects_repaired_non_object_tool_arguments():
         "deepseek-test", "https://deepseek.example/anthropic", "key", 0, 30
     )
     with patch("urllib.request.urlopen", return_value=FakeResponse()):
-        with pytest.raises(ProviderProtocolError, match="decode to an object"):
-            stream_model(client, ModelRequest(prompt="inspect", max_output_tokens=20))
+        result = stream_model(
+            client, ModelRequest(prompt="inspect", max_output_tokens=20)
+        )
+
+    assert result.tool_calls == (
+        ToolCall(
+            "tool-list",
+            "read_file",
+            {"_raw_arguments": '["README.md",]'},
+        ),
+    )
 
 
 def test_agent_loop_accepts_typed_only_provider_and_passes_correlation(tmp_path):

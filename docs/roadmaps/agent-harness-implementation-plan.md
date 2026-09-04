@@ -473,6 +473,14 @@ gates now distinguish a complete planned-row denominator from a complete execute
 denominator, so any error-triggered skipped rows fail formal acceptance instead
 of leaving all gates green.
 
+The first 12,000-token restart verified that gate by stopping after 2/24 executed
+rows when DeepSeek emitted a repairable non-object Tool-argument payload. The
+partial run is rejected and retained as protocol evidence. RepoAgent now preserves
+that payload behind `_raw_arguments` and lets Tool schema validation return the
+matched error to the model, matching pico-harness's failure boundary without
+weakening execution policy. A focused single-task live replay is required before
+starting the next complete canary.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,
