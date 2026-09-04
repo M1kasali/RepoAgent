@@ -375,7 +375,7 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-04` Execute one scripted task through the public RepoAgent runtime, capture its patch, and grade it inside the isolated benchmark workspace.
 - [x] `P11-05` Persist per-attempt tests, patch, trace, usage, cost, latency, failure category, and checksummed evidence.
 - [x] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (24/24 live attempts executed on `c42e2bb`; all engineering gates passed.)
-- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (Strict comparison and the real pico-harness baseline adapter are implemented; one live same-configuration baseline campaign and paired report remain pending.)
+- [x] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (The 24-pair live canary completed with matching identities: RepoAgent 4 wins, 20 ties, 0 losses versus pico-harness; exact two-sided McNemar p=0.125, so the result is directional rather than statistically significant.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
 Gate:

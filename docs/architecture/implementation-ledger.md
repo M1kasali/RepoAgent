@@ -2908,11 +2908,13 @@ This closes `P11-06`; the next active slice is `P11-07` paired baseline executio
 ## TECH-084 - Real pico-harness Polyglot Baseline Adapter
 
 - Area: external Harness comparison and paired evaluation
-- Status: adapter implemented and scripted runtime smoke passed; live paired campaign pending
-- Implemented/tested: 2026-09-04
+- Status: implemented; live paired canary complete
+- Implemented/tested: 2026-09-04 through 2026-09-05
 - Owning modules: `repoagent/evaluation/pico_baseline.py`, `repoagent/evaluation/polyglot_campaign.py`, `repoagent/evaluation/polyglot_suite.py`
 - Integration: `scripts/run_pico_baseline_campaign.py`, `repoagent/evaluation/polyglot_pair.py`
 - Tests: `tests/test_pico_baseline.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_pair.py`
+- Accepted baseline evidence: `artifacts/polyglot-live/pico-baseline-deepseek-v4-flash-canary24-5f9c3d0-20260905/` (local and ignored)
+- Paired report: `artifacts/polyglot-live/pico-vs-repoagent-paired-5f9c3d0-c42e2bb-20260905.json` (local and ignored)
 
 `P11-07` now has an executable external baseline rather than a synthetic control.
 The adapter imports the clean pico-harness checkout and runs its real
@@ -2954,10 +2956,56 @@ The no-provider integration smoke used pico-harness commit
 `c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3`, completed through the real host in
 one model call, returned `final_answer_returned`, and exposed exactly the seven
 expected tools. Focused tests passed 34/34, Ruff passed, and the full RepoAgent
-suite passed 619 tests with only the six existing `datetime.utcnow()` warnings.
-This accepts the adapter boundary only. A clean live 24-task pico baseline and
-strict comparison against the retained `c42e2bb` RepoAgent result are still
-required before `P11-07` can be closed or any relative quality claim made.
+suite initially passed 619 tests with only the six existing `datetime.utcnow()`
+warnings.
+
+The first 24-task baseline executed every attempt and wrote valid evidence, but
+the Python process exited with `SIGSEGV` after printing the completed result.
+Thread enumeration isolated the defect to pico's `SkillFileWatcher`, which
+remained alive after `RuntimeAssembly.close()`; pico also used
+`asyncio.to_thread` to close a duplicate observe-only call ledger. The adapter
+now disables that duplicate ledger, detaches it from the asynchronous close path,
+closes it synchronously, and explicitly stops the short-lived Skill watcher.
+This changes neither Provider requests nor the seven-tool surface. Before the
+fix, a 32-runtime credential-free stress test completed its turns and then
+segfaulted; after the fix, the identical test exited zero with 32/32 clean
+closures. Focused tests passed 36/36, Ruff passed, and the expanded full suite
+passed 621 tests with the same six warnings. The earlier `7428002` baseline is
+diagnostic only because its runner did not exit cleanly.
+
+The accepted rerun bound the external pico source to clean commit
+`c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3` and the adapter to clean commit
+`5f9c3d04b04e92bbd488ea792cd29feb4696d992`. It exited zero after executing all
+24 attempts, with zero errors or skips and all seven engineering gates passing.
+Pico produced 0/24 end-to-end passes, zero hidden-test code passes and zero
+converged Turns. Every attempt reached the 14-call ceiling: 336 Provider calls,
+USD 0.0266217728 of completely priced usage, and 673.150897 seconds in total.
+The retained runtime evidence reports 349 Tool calls, 18 Tool failures, delivery
+for all 24 attempts, and the fast context path for all 24. Every generated patch
+has the empty-file SHA-256. Live logs showed the runtime repeatedly exploring
+directory listings without progressing to file reads or edits; the empty patches
+and hidden-test failures are therefore treated as valid quality observations,
+not infrastructure errors.
+
+The strict comparator accepted all 24 pairs against RepoAgent commit `c42e2bb`:
+the benchmark digest, selected task/repetition matrix, model, protocol,
+temperature, 12,000-token prompt ceiling, 4,096-token output ceiling, 14-call
+limit, and immutable Docker identity all matched. RepoAgent recorded 4 wins, 20
+ties and zero losses, so the quality non-inferiority gate passed. The four wins
+were `go/book-store`, `javascript/beer-song`, `python/affine-cipher`, and
+`python/bottle-song`. The exact two-sided McNemar p-value is 0.125, so this is a
+directional result on the frozen canary rather than a statistically significant
+general quality claim.
+
+The paired efficiency result is mixed and must not be presented as an unqualified
+improvement. RepoAgent used 263 calls versus pico's 336, a mean paired reduction
+of 3.0417 calls with a 95% bootstrap interval from 2.0417 to 4.0000 fewer calls.
+However, RepoAgent cost USD 0.2301833184 and took 2,961.060794 seconds in total.
+Relative to the non-solving pico control, its mean paired cost was USD
+0.0084817311 higher and mean duration was 95.3296 seconds higher per task; all 24
+pairs regressed on both metrics. This comparison closes `P11-07`, but the 0/24
+control and 4/24 treatment rates make a 225-task release run premature until the
+coding loop's completion quality improves.
 
 ## 5. Decision Index
 
