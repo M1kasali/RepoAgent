@@ -465,6 +465,14 @@ the actual-cost gate. Campaign orchestration now aborts further paid attempts on
 the first infrastructure-error row while retaining skipped denominator rows.
 Hidden-test failures remain non-fatal to preserve unbiased quality measurement.
 
+The first fail-fast restart executed 8/24 rows before an 8,000-token runtime
+input ceiling rejected a retained signed-thinking exchange; its campaign cost
+envelope had already reserved 12,000 input tokens per call. The next restart must
+use 12,000 for both runtime admission and worst-case cost admission. Campaign
+gates now distinguish a complete planned-row denominator from a complete executed
+denominator, so any error-triggered skipped rows fail formal acceptance instead
+of leaving all gates green.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

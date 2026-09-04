@@ -929,6 +929,15 @@ def test_polyglot_campaign_preserves_skipped_rows_after_preflight_failure(tmp_pa
     assert result.aggregates["executed_run_n"] == 1
     assert result.aggregates["skipped_run_n"] == 3
     assert result.aggregates["pass_rate"] == 0.0
+    execution_gate = next(
+        gate for gate in result.gates if gate["id"] == "executed_denominator_complete"
+    )
+    assert execution_gate == {
+        "id": "executed_denominator_complete",
+        "status": "fail",
+        "observed": "1/4",
+        "threshold": "4/4",
+    }
     assert all((output / row.evidence["skip"]).is_file() for row in result.rows[1:])
 
 
@@ -941,14 +950,37 @@ def test_polyglot_campaign_stops_after_runtime_infrastructure_error(tmp_path):
     def agent_factory(context):
         nonlocal factory_calls
         factory_calls += 1
-        return RepoAgent(
-            model_client=FakeModelClient(()),
-            workspace=context,
-            session_store=SessionStore(
-                Path(context.repo_root) / ".repoagent" / "sessions"
-            ),
-            approval_policy="auto",
-        )
+
+        class Agent:
+            model_client = SimpleNamespace(
+                profile=SimpleNamespace(
+                    provider="synthetic",
+                    protocol="scripted",
+                    model="synthetic-model",
+                    temperature=0.0,
+                    top_p=1.0,
+                )
+            )
+            context_manager = SimpleNamespace(total_token_budget=1000)
+            context_window_budget = SimpleNamespace(
+                context_window_tokens=4096,
+                window_source="test",
+            )
+            sandbox_adapter = SimpleNamespace(identity="docker:test", is_isolated=True)
+            max_steps = 1
+            max_provider_calls = 1
+            max_new_tokens = 128
+            current_task_state = None
+
+            @staticmethod
+            def tool_signature():
+                return "tools-v1"
+
+            @staticmethod
+            def ask(_request):
+                raise RuntimeError("synthetic Agent infrastructure failure")
+
+        return Agent()
 
     class Grader:
         def grade(self, _instance, _runner_root):
@@ -976,4 +1008,9 @@ def test_polyglot_campaign_stops_after_runtime_infrastructure_error(tmp_path):
     ]
     assert result.aggregates["executed_run_n"] == 1
     assert result.aggregates["skipped_run_n"] == 3
+    execution_gate = next(
+        gate for gate in result.gates if gate["id"] == "executed_denominator_complete"
+    )
+    assert execution_gate["status"] == "fail"
+    assert execution_gate["observed"] == "1/4"
     assert all("infrastructure error after" in row.error for row in result.rows[1:])

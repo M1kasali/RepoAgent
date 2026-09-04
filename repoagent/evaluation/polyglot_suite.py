@@ -368,6 +368,12 @@ class PolyglotCampaign:
                     "threshold": f"{planned}/{planned}",
                 },
                 {
+                    "id": "executed_denominator_complete",
+                    "status": "pass" if executed == planned else "fail",
+                    "observed": f"{executed}/{planned}",
+                    "threshold": f"{planned}/{planned}",
+                },
+                {
                     "id": "budget_admission",
                     "status": "pass" if budget_evidence else "not_run",
                     "observed": (

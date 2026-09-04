@@ -2746,6 +2746,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Diagnostic evidence: `artifacts/polyglot-live/deepseek-v4-flash-canary24-d1620d6-20260828/` (local and ignored)
 - Acceptance evidence: `artifacts/polyglot-live/deepseek-go-alphametics-a918ec1-windows-workspace-20260828/` (local and ignored)
 - Budget diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-caa0d9f-20260828/` (local and ignored; stopped after 15 complete rows)
+- Fail-fast diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-882e8e1-20260903-retry1/` (local and ignored; 8 executed plus 16 skipped)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2810,6 +2811,25 @@ usage evidence. Its actual-cost gate therefore failed and the run is diagnostic,
 not release evidence. Multi-task campaigns now fail fast after any infrastructure
 `error` row while writing the remaining planned rows as `skipped`; ordinary
 hidden-test failures continue because they are valid quality observations.
+
+The first fail-fast run on `882e8e1` verified Docker and DeepSeek execution for
+eight attempts, with three hidden-test passes, 85 Provider calls and USD
+0.0650332816 of complete priced usage. It then stopped on `go/beer-song`: a
+retained signed thinking block plus the fixed initial request could not fit the
+configured 8,000-token runtime input budget. The campaign's admitted cost model
+already reserved up to 12,000 input tokens per call, so the next canary must bind
+the runtime input budget to that same 12,000-token ceiling. The old artifact has
+16 explicit skipped rows and remains diagnostic.
+
+Fail-fast originally made the planned-row gate pass because skipped rows preserve
+the denominator, even though only 8 of 24 attempts executed. Campaign reports now
+separate row-denominator integrity from execution completeness through the
+`executed_denominator_complete` gate. Any infrastructure stop therefore produces
+a non-zero CLI result even when source, call-budget and incurred-cost evidence are
+otherwise valid. Focused evaluation tests passed 42/42 and the full suite passed
+614 tests; Ruff and whitespace checks also passed. Docker Desktop and asyncio
+thread-wakeup checks were run outside the managed Codex sandbox because that
+sandbox blocks the relevant WSL interop and thread notification paths.
 
 ## 5. Decision Index
 
