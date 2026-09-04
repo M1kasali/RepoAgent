@@ -489,6 +489,14 @@ separate `infrastructure_error_free` gate rejects every error row even when the
 executed denominator is complete. The failed grader run remains diagnostic and
 must be replaced by a clean single-task replay.
 
+That replacement replay passed `go/alphametics` end to end on clean commit
+`2a1e197`: 11 complete DeepSeek calls, normal Turn convergence, pinned hidden
+grader exit zero, USD 0.0073998512 actual estimated cost, stable source, and all
+campaign gates green. The stochastic response did not repeat the non-object
+payload, while offline regressions directly cover that branch. The next step for
+`P11-06` is a fresh 24-task run with the same 12,000-token runtime/cost envelope
+and prepared Windows-visible staging roots.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

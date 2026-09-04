@@ -2759,6 +2759,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Fail-fast diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-882e8e1-20260903-retry1/` (local and ignored; 8 executed plus 16 skipped)
 - Protocol diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-667ae58-20260904/` (local and ignored; 2 executed plus 22 skipped)
 - Protocol-replay diagnostic: `artifacts/polyglot-live/deepseek-go-alphametics-dcba94f-protocol-replay-20260904/` (local and ignored; Agent converged, grader configuration failed)
+- Protocol-recovery acceptance: `artifacts/polyglot-live/deepseek-go-alphametics-2a1e197-grader-replay-20260904/` (local and ignored; 1/1 passed)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2866,6 +2867,16 @@ the independent `infrastructure_error_free` gate fails on any error row. Ordinar
 hidden-test `fail` rows remain valid quality observations and do not trip this
 gate. This replay remains diagnostic; a clean grader-backed replay is still
 required.
+
+The clean grader-backed replay on `2a1e197` then passed `go/alphametics` end to
+end. The Agent converged in 11 calls, the pinned hidden grader exited zero with
+`ok alphametics`, usage and pricing were complete at USD 0.0073998512, source
+integrity remained stable, and every campaign gate passed including
+`infrastructure_error_free=0`. DeepSeek did not emit another non-object argument
+in this stochastic run, so the exact raw-wrapper branch remains proven by the
+offline SSE and Agent-loop regressions rather than claimed as live coverage. The
+provider, Docker, staging, grader, evidence and gate path is now accepted for a
+fresh 24-task canary.
 
 ## 5. Decision Index
 
