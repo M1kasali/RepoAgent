@@ -2905,6 +2905,60 @@ the matched schema error to DeepSeek, and the next `write_file` call used valid
 the overall attempt remained a fail because it exhausted the Turn call budget.
 This closes `P11-06`; the next active slice is `P11-07` paired baseline execution.
 
+## TECH-084 - Real pico-harness Polyglot Baseline Adapter
+
+- Area: external Harness comparison and paired evaluation
+- Status: adapter implemented and scripted runtime smoke passed; live paired campaign pending
+- Implemented/tested: 2026-09-04
+- Owning modules: `repoagent/evaluation/pico_baseline.py`, `repoagent/evaluation/polyglot_campaign.py`, `repoagent/evaluation/polyglot_suite.py`
+- Integration: `scripts/run_pico_baseline_campaign.py`, `repoagent/evaluation/polyglot_pair.py`
+- Tests: `tests/test_pico_baseline.py`, `tests/test_polyglot_evaluation.py`, `tests/test_polyglot_pair.py`
+
+`P11-07` now has an executable external baseline rather than a synthetic control.
+The adapter imports the clean pico-harness checkout and runs its real
+`RuntimeTrialHost`, Scheduler, AgentLoop, unified context assembler and native
+coding tools. It does not copy pico's loop into RepoAgent. The campaign variant,
+external runtime report, checksummed runtime evidence and state root are now
+configurable so the existing Polyglot grading and aggregate machinery can accept
+another Harness without weakening denominator or evidence rules.
+
+The baseline freezes the important confounders against the RepoAgent treatment.
+It uses RepoAgent's same typed DeepSeek Anthropic-compatible transport and model
+profile, temperature, 4,096-token output ceiling, 14-call hard limit, 12,000-token
+effective prompt ceiling, one-million-token physical model window, pricing
+snapshot, immutable Docker image and hidden grader. Pico's internal context
+window is set to input ceiling plus reserved output, which makes its assembler's
+maximum prompt equal the shared 12,000-token budget. The strict pair contract
+will still reject any emitted runtime or task identity mismatch.
+
+Harness behavior remains the intended treatment variable. Pico keeps its own
+system prompt, Curator/context path and seven native coding tools: `read_file`,
+`write_file`, `edit_file`, `list_dir`, `grep`, `find` and `exec`. Non-coding,
+interactive and network tools are disabled for this benchmark. Host-side file
+tools remain restricted to the model-visible runner workspace, and `exec` is
+rebound before the first Turn to RepoAgent's disposable, network-disabled Docker
+adapter. The adapter verifies Docker and the exact active tool set before any
+paid Agent call. A separate state directory prevents Pico sessions and Curator
+traces from entering the runner input.
+
+Provider messages and Tool schemas are projected structurally rather than
+flattened to a prompt. Malformed historical Tool arguments remain under
+`_raw_arguments` for Pico's schema boundary to reject, and the bridge records
+every real Provider call with complete RepoAgent pricing semantics. A call past
+the shared limit returns a non-executing budget terminal response and marks the
+Turn non-converged; it is not counted as a Provider call. Baseline runtime state,
+delivery state, event counts, tool totals and the per-call ledger are persisted
+as checksummed `agent-runtime.json` evidence.
+
+The no-provider integration smoke used pico-harness commit
+`c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3`, completed through the real host in
+one model call, returned `final_answer_returned`, and exposed exactly the seven
+expected tools. Focused tests passed 34/34, Ruff passed, and the full RepoAgent
+suite passed 619 tests with only the six existing `datetime.utcnow()` warnings.
+This accepts the adapter boundary only. A clean live 24-task pico baseline and
+strict comparison against the retained `c42e2bb` RepoAgent result are still
+required before `P11-07` can be closed or any relative quality claim made.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

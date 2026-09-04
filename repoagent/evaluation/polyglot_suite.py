@@ -99,6 +99,8 @@ class PolyglotCampaign:
         require_provider_probe=True,
         require_clean_source=True,
         workspace_root=None,
+        state_root=None,
+        variant="repoagent-harness",
     ):
         self.repo_root = Path(repo_root).resolve()
         self.output_root = Path(output_root).resolve()
@@ -124,6 +126,10 @@ class PolyglotCampaign:
         self.require_provider_probe = bool(require_provider_probe)
         self.require_clean_source = bool(require_clean_source)
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        self.state_root = Path(state_root).resolve() if state_root else self.repo_root
+        self.variant = str(variant).strip()
+        if not self.variant:
+            raise ValueError("Polyglot campaign variant must not be empty")
 
     def run(self):
         planned = len(self.instances) * self.repetitions
@@ -149,6 +155,8 @@ class PolyglotCampaign:
             agent_factory=self.agent_factory,
             grader=self.grader,
             require_provider_probe=self.require_provider_probe,
+            state_root=self.state_root,
+            variant=self.variant,
         )
         lock = (
             file_lock(lock_probe._campaign_lock_path(), blocking=False)
@@ -209,6 +217,8 @@ class PolyglotCampaign:
                             if self.workspace_root is not None
                             else None
                         ),
+                        state_root=self.state_root,
+                        variant=self.variant,
                     ).run()
                     first_result = first_result or result
                     row = self._prefix_evidence(result.rows[0], relative)
@@ -248,7 +258,7 @@ class PolyglotCampaign:
         )
         return EvaluationRow(
             task_id=task_id,
-            variant="repoagent-harness",
+            variant=self.variant,
             repetition=repetition,
             status="skipped",
             verifier={
@@ -337,7 +347,7 @@ class PolyglotCampaign:
             },
             model=model,
             design={
-                "variants": ["repoagent-harness"],
+                "variants": [self.variant],
                 "repetitions": self.repetitions,
                 "paired": False,
                 "planned_attempts": planned,

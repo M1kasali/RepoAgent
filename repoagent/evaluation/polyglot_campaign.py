@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import json
 import time
+from collections.abc import Mapping
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -61,6 +62,8 @@ implementation is complete, return a concise <final> answer.
         repetition=0,
         manage_paid_lock=True,
         workspace_root=None,
+        state_root=None,
+        variant="repoagent-harness",
     ):
         if not isinstance(instance, PolyglotInstance):
             raise TypeError("Polyglot campaign requires one PolyglotInstance")
@@ -79,6 +82,10 @@ implementation is complete, return a concise <final> answer.
         self.repetition = repetition
         self.manage_paid_lock = bool(manage_paid_lock)
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        self.state_root = Path(state_root).resolve() if state_root else self.repo_root
+        self.variant = str(variant).strip()
+        if not self.variant:
+            raise ValueError("Polyglot campaign variant must not be empty")
 
     def run(self):
         lock = (
@@ -179,17 +186,38 @@ implementation is complete, return a concise <final> answer.
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
         run_id = str(getattr(getattr(agent, "current_task_state", None), "run_id", ""))
-        report = {}
+        report = self._external_agent_report(agent)
         if run_id:
             bundle = self.output_root / "agent-evidence"
             EvidenceBundleBuilder(agent.run_store).build(run_id, bundle)
             report_path = bundle / "report.json"
             if report_path.is_file():
-                report = json.loads(report_path.read_text(encoding="utf-8"))
+                report.update(json.loads(report_path.read_text(encoding="utf-8")))
             evidence.update(
                 {
                     "agent_bundle": bundle.relative_to(self.output_root).as_posix(),
                     "agent_manifest_sha256": sha256_file(bundle / "manifest.json"),
+                }
+            )
+        runtime_evidence = getattr(agent, "evaluation_evidence", None)
+        if isinstance(runtime_evidence, Mapping):
+            runtime_path = self.output_root / "agent-runtime.json"
+            runtime_path.write_text(
+                json.dumps(
+                    dict(runtime_evidence),
+                    indent=2,
+                    sort_keys=True,
+                    ensure_ascii=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            evidence.update(
+                {
+                    "agent_runtime": runtime_path.relative_to(
+                        self.output_root
+                    ).as_posix(),
+                    "agent_runtime_sha256": sha256_file(runtime_path),
                 }
             )
         patch_path = self._write_patch(context.repo_root)
@@ -232,7 +260,7 @@ implementation is complete, return a concise <final> answer.
         passed = code_passed and turn_converged
         row = EvaluationRow(
             task_id=self.instance.runner.task_id,
-            variant="repoagent-harness",
+            variant=self.variant,
             repetition=self.repetition,
             status="pass" if passed else ("error" if error else "fail"),
             metrics={
@@ -295,7 +323,7 @@ implementation is complete, return a concise <final> answer.
             benchmark=benchmark,
             model=model,
             design={
-                "variants": ["repoagent-harness"],
+                "variants": [self.variant],
                 "repetitions": 1,
                 "repetition_index": self.repetition,
                 "paired": False,
@@ -356,7 +384,7 @@ implementation is complete, return a concise <final> answer.
             character for character in digest if character.isalnum()
         )
         return (
-            workspace_state_root(self.repo_root)
+            workspace_state_root(self.state_root)
             / "evaluation-locks"
             / f"polyglot-{safe_digest or 'unknown'}.lock"
         )
@@ -364,7 +392,7 @@ implementation is complete, return a concise <final> answer.
     def _probe_cache_path(self, approval_digest):
         key = str(approval_digest).removeprefix("sha256:")
         return (
-            workspace_state_root(self.repo_root)
+            workspace_state_root(self.state_root)
             / "provider-probes"
             / f"{key}.json"
         )
@@ -463,6 +491,15 @@ implementation is complete, return a concise <final> answer.
             "sandbox_identity": runtime_config["sandbox_identity"],
             "sandbox_isolated": runtime_config["sandbox_isolated"],
         }
+
+    @staticmethod
+    def _external_agent_report(agent):
+        report = getattr(agent, "evaluation_report", None)
+        if report is None:
+            return {}
+        if not isinstance(report, Mapping):
+            raise TypeError("agent evaluation_report must be a mapping")
+        return dict(report)
 
     def _write_patch(self, runner_root):
         runner_root = Path(runner_root)

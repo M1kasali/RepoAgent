@@ -314,6 +314,98 @@ def test_polyglot_single_task_campaign_retains_patch_grade_and_turn_evidence(tmp
     assert (output / "agent-evidence" / "manifest.json").is_file()
 
 
+def test_polyglot_campaign_accepts_external_runtime_report_variant_and_state_root(
+    tmp_path,
+):
+    loaded = PolyglotAdapter().load(
+        _dataset(tmp_path / "dataset"), languages=("python",), limit=1
+    )
+    state_root = tmp_path / "campaign-state"
+
+    class Agent:
+        model_client = SimpleNamespace(
+            profile=SimpleNamespace(
+                provider="test",
+                protocol="anthropic",
+                model="test-model",
+                temperature=0.2,
+                top_p=None,
+            )
+        )
+        max_steps = 4
+        max_provider_calls = 4
+        max_new_tokens = 128
+        context_manager = SimpleNamespace(total_token_budget=1000)
+        context_window_budget = SimpleNamespace(
+            context_window_tokens=4096,
+            window_source="test",
+        )
+        sandbox_adapter = SimpleNamespace(identity="docker:test", is_isolated=True)
+        current_task_state = None
+
+        def __init__(self, context):
+            self.context = context
+            self.evaluation_report = {}
+            self.evaluation_evidence = {}
+
+        def ask(self, _request):
+            (Path(self.context.repo_root) / "src" / "answer.txt").write_text(
+                "DONE\n", encoding="utf-8"
+            )
+            self.evaluation_report = {
+                "attempts": 1,
+                "tool_steps": 1,
+                "usage": {"model_call_count": 2},
+                "call_efficiency": {
+                    "call_count": 2,
+                    "partial_estimated_cost_usd": 0.01,
+                    "cost_complete": True,
+                },
+                "stop_reason": "final_answer_returned",
+            }
+            self.evaluation_evidence = {
+                "schema": "external-runtime/v1",
+                "runtime_state": "completed",
+            }
+            return "Done."
+
+    class Grader:
+        def grade(self, _instance, _runner_root):
+            return {
+                "passed": True,
+                "status": "pass",
+                "exit_code": 0,
+                "duration_seconds": 0.1,
+            }
+
+    output = tmp_path / "external-campaign"
+    campaign = PolyglotSingleTaskCampaign(
+        repo_root=tmp_path,
+        state_root=state_root,
+        output_root=output,
+        instance=loaded["instances"][0],
+        benchmark=loaded["benchmark"],
+        agent_factory=Agent,
+        grader=Grader(),
+        variant="pico-harness",
+    )
+
+    result = campaign.run()
+
+    assert result.rows[0].variant == "pico-harness"
+    assert result.rows[0].status == "pass"
+    assert result.rows[0].metrics["call_efficiency"]["call_count"] == 2
+    assert result.design["variants"] == ["pico-harness"]
+    assert campaign._campaign_lock_path().is_relative_to(state_root)
+    assert campaign._probe_cache_path("sha256:" + "a" * 64).is_relative_to(
+        state_root
+    )
+    assert json.loads((output / "agent-runtime.json").read_text()) == {
+        "runtime_state": "completed",
+        "schema": "external-runtime/v1",
+    }
+
+
 def test_polyglot_single_task_campaign_can_stage_agent_workspace_separately(tmp_path):
     loaded = PolyglotAdapter().load(
         _dataset(tmp_path / "dataset"), languages=("python",), limit=1

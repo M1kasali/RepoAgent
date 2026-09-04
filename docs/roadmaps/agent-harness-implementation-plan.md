@@ -375,7 +375,7 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-04` Execute one scripted task through the public RepoAgent runtime, capture its patch, and grade it inside the isolated benchmark workspace.
 - [x] `P11-05` Persist per-attempt tests, patch, trace, usage, cost, latency, failure category, and checksummed evidence.
 - [x] `P11-06` Run a credential-free fixture campaign in CI and a 24-task six-language live canary outside PR CI. (24/24 live attempts executed on `c42e2bb`; all engineering gates passed.)
-- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (Strict identity, comparison, denominator, and statistics contract implemented; baseline execution adapter and live pair pending.)
+- [ ] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (Strict comparison and the real pico-harness baseline adapter are implemented; one live same-configuration baseline campaign and paired report remain pending.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
 Gate:
@@ -501,11 +501,17 @@ to non-convergence. The run also exercised `_raw_arguments` live and recovered t
 a valid `write_file` call without executing the malformed payload. `P11-06` is
 closed; `P11-07` paired baseline execution is now the active slice.
 
-The `P11-07` analysis boundary is now implemented independently of any named
-external harness. Polyglot attempts persist frozen runtime, task and grader
-pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,
-model/decoding/limit configuration, task matrix, or grader input before producing
-paired W/T/L, McNemar and efficiency deltas. This does not yet complete `P11-07`:
-the external baseline execution adapter and a real same-configuration paired run
-remain pending. Prior one-off comparisons with different protocols remain
+The `P11-07` analysis boundary and external baseline adapter are now implemented.
+Polyglot attempts persist frozen runtime, task and grader pairing identities, and
+`compare-polyglot-paired` refuses mismatched benchmark, model/decoding/limit
+configuration, task matrix, or grader input before producing paired W/T/L,
+McNemar and efficiency deltas. `run_pico_baseline_campaign.py` executes the real
+pico-harness `RuntimeTrialHost` while reusing the exact RepoAgent Provider
+transport, hard call limit, effective input/output budgets, immutable Docker
+image and hidden grader. Pico retains its own system prompt, context assembler
+and native coding-tool loop; shell commands are redirected through the same
+disposable Docker boundary. A no-provider smoke completed with one call and the
+expected seven-tool surface, and the RepoAgent suite passed 619 tests. This does
+not yet complete `P11-07`: the live 24-task baseline and resulting strict paired
+report remain pending. Prior one-off comparisons with different protocols remain
 diagnostic only.
