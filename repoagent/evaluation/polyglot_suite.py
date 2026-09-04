@@ -293,6 +293,7 @@ class PolyglotCampaign:
     ):
         passed = sum(row.status == "pass" for row in rows)
         executed = sum(row.status != "skipped" for row in rows)
+        errors = sum(row.status == "error" for row in rows)
         code_passes = sum(bool(row.verifier.get("code_passed")) for row in rows)
         converged = sum(bool(row.verifier.get("turn_converged")) for row in rows)
         call_counts = [
@@ -350,6 +351,7 @@ class PolyglotCampaign:
                 "planned_run_n": planned,
                 "executed_run_n": executed,
                 "skipped_run_n": len(rows) - executed,
+                "error_run_n": errors,
                 "passes": passed,
                 "pass_rate": passed / len(rows),
                 "pass_rate_wilson_95": wilson_interval(passed, len(rows)),
@@ -372,6 +374,12 @@ class PolyglotCampaign:
                     "status": "pass" if executed == planned else "fail",
                     "observed": f"{executed}/{planned}",
                     "threshold": f"{planned}/{planned}",
+                },
+                {
+                    "id": "infrastructure_error_free",
+                    "status": "pass" if errors == 0 else "fail",
+                    "observed": str(errors),
+                    "threshold": "0",
                 },
                 {
                     "id": "budget_admission",

@@ -481,6 +481,14 @@ matched error to the model, matching pico-harness's failure boundary without
 weakening execution policy. A focused single-task live replay is required before
 starting the next complete canary.
 
+The first focused replay converged at the Agent layer in 10 calls with complete
+usage, but its grader staging directory was absent, so no hidden tests ran. It
+also showed that a last-row infrastructure error could evade the execution-count
+gate. Container staging is now prepared before paid campaign execution, and the
+separate `infrastructure_error_free` gate rejects every error row even when the
+executed denominator is complete. The failed grader run remains diagnostic and
+must be replaced by a clean single-task replay.
+
 The `P11-07` analysis boundary is now implemented independently of any named
 external harness. Polyglot attempts persist frozen runtime, task and grader
 pairing identities, and `compare-polyglot-paired` refuses mismatched benchmark,

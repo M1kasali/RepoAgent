@@ -92,6 +92,13 @@ class DockerContainerRunner:
         self.docker_executable = str(docker_executable)
         self.image = str(image)
         self.staging_root = Path(staging_root).resolve() if staging_root else None
+        if self.staging_root is not None:
+            try:
+                self.staging_root.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise ContainerConfigurationError(
+                    f"failed to prepare Docker staging root: {self.staging_root}"
+                ) from exc
         self.path_converter = path_converter or _identity_path
         self.memory = str(memory)
         self.cpus = float(cpus)

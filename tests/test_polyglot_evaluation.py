@@ -844,6 +844,9 @@ def test_polyglot_campaign_runs_full_task_repetition_matrix(tmp_path):
     assert result.aggregates["executed_run_n"] == 4
     assert result.aggregates["skipped_run_n"] == 0
     assert result.gates[0]["status"] == "pass"
+    assert next(
+        gate for gate in result.gates if gate["id"] == "infrastructure_error_free"
+    )["status"] == "pass"
     assert any("not model coding quality" in item for item in result.limitations)
     assert len((output / "rows.jsonl").read_text().splitlines()) == 4
     for row in result.rows:
@@ -941,9 +944,11 @@ def test_polyglot_campaign_preserves_skipped_rows_after_preflight_failure(tmp_pa
     assert all((output / row.evidence["skip"]).is_file() for row in result.rows[1:])
 
 
-def test_polyglot_campaign_stops_after_runtime_infrastructure_error(tmp_path):
+def test_polyglot_campaign_fails_gate_for_final_runtime_infrastructure_error(
+    tmp_path,
+):
     loaded = PolyglotAdapter().load(
-        _dataset(tmp_path / "dataset"), languages=("python",), limit=2
+        _dataset(tmp_path / "dataset"), languages=("python",), limit=1
     )
     factory_calls = 0
 
@@ -994,23 +999,27 @@ def test_polyglot_campaign_stops_after_runtime_infrastructure_error(tmp_path):
         benchmark=loaded["benchmark"],
         agent_factory=agent_factory,
         grader=Grader(),
-        repetitions=2,
+        repetitions=1,
         require_provider_probe=False,
         require_clean_source=False,
     ).run()
 
     assert factory_calls == 1
-    assert [row.status for row in result.rows] == [
-        "error",
-        "skipped",
-        "skipped",
-        "skipped",
-    ]
+    assert [row.status for row in result.rows] == ["error"]
     assert result.aggregates["executed_run_n"] == 1
-    assert result.aggregates["skipped_run_n"] == 3
+    assert result.aggregates["skipped_run_n"] == 0
+    assert result.aggregates["error_run_n"] == 1
     execution_gate = next(
         gate for gate in result.gates if gate["id"] == "executed_denominator_complete"
     )
-    assert execution_gate["status"] == "fail"
-    assert execution_gate["observed"] == "1/4"
-    assert all("infrastructure error after" in row.error for row in result.rows[1:])
+    assert execution_gate["status"] == "pass"
+    assert execution_gate["observed"] == "1/1"
+    error_gate = next(
+        gate for gate in result.gates if gate["id"] == "infrastructure_error_free"
+    )
+    assert error_gate == {
+        "id": "infrastructure_error_free",
+        "status": "fail",
+        "observed": "1",
+        "threshold": "0",
+    }

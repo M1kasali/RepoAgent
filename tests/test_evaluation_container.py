@@ -50,7 +50,7 @@ def test_container_runner_stages_filtered_workspace_and_applies_security_flags(t
         process_runner=process,
         cleanup_runner=cleanup,
     )
-    (tmp_path / "staging").mkdir()
+    assert (tmp_path / "staging").is_dir()
     outcome = runner.execute(
         "python -m pytest",
         cwd=workspace,
@@ -89,6 +89,10 @@ def test_container_runner_rejects_symlinks_and_invalid_limits(tmp_path):
         DockerContainerRunner(memory="unbounded")
     with pytest.raises(ContainerConfigurationError, match="CPUs"):
         DockerContainerRunner(cpus=0)
+    invalid_staging_root = tmp_path / "staging-file"
+    invalid_staging_root.write_text("not a directory\n", encoding="utf-8")
+    with pytest.raises(ContainerConfigurationError, match="staging root"):
+        DockerContainerRunner(staging_root=invalid_staging_root)
     with pytest.raises(ContainerConfigurationError, match="basename"):
         DockerContainerRunner._container_workspace("unsafe workspace")
 

@@ -2758,6 +2758,7 @@ making Provider calls. A 24-task live model run remains required to complete
 - Budget diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-caa0d9f-20260828/` (local and ignored; stopped after 15 complete rows)
 - Fail-fast diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-882e8e1-20260903-retry1/` (local and ignored; 8 executed plus 16 skipped)
 - Protocol diagnostic: `artifacts/polyglot-live/deepseek-v4-flash-canary24-667ae58-20260904/` (local and ignored; 2 executed plus 22 skipped)
+- Protocol-replay diagnostic: `artifacts/polyglot-live/deepseek-go-alphametics-dcba94f-protocol-replay-20260904/` (local and ignored; Agent converged, grader configuration failed)
 
 The first 24-task live canary attempt was stopped during its fourth task after
 two consecutive infrastructure failures. Completed DeepSeek calls caused the
@@ -2851,6 +2852,20 @@ evidence. This correctly rejected the partial run while limiting it to 17 calls
 and USD 0.0166723984 of partially priced usage. The provider-boundary recovery
 described in TECH-065 was added from this evidence; a one-task live replay must
 pass before another formal 24-task restart.
+
+The first one-task replay on `dcba94f` completed 10 DeepSeek calls and converged
+normally at USD 0.0075427968 with complete usage. It did not emit another
+non-object argument, so it proves the former Provider exception did not recur but
+does not directly exercise the new raw-wrapper branch. The grader then failed
+before execution because the explicitly configured staging root did not exist.
+This operator error exposed two orchestration defects: staging was not prepared
+before paid calls, and a final `error` row could leave every aggregate gate green
+when the execution denominator was still 1/1. `DockerContainerRunner` now creates
+or rejects its staging root during construction, before campaign execution, and
+the independent `infrastructure_error_free` gate fails on any error row. Ordinary
+hidden-test `fail` rows remain valid quality observations and do not trip this
+gate. This replay remains diagnostic; a clean grader-backed replay is still
+required.
 
 ## 5. Decision Index
 
