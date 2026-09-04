@@ -56,6 +56,24 @@ class PicoBaselineRuntimeError(RuntimeError):
     """Raised when the baseline host fails before producing a valid final turn."""
 
 
+def _detach_pico_call_efficiency(assembly):
+    """Keep pico's duplicate observer off its thread-based shutdown path."""
+
+    controller = assembly.call_efficiency
+    assembly.call_efficiency = None
+    return controller
+
+
+def _stop_pico_skill_watcher(assembly) -> None:
+    """Close the short-lived runtime's catalog watcher if pico left it running."""
+
+    context = getattr(assembly.agent_loop, "context", None)
+    skills = getattr(context, "skills", None)
+    stop_watcher = getattr(skills, "stop_file_watcher", None)
+    if callable(stop_watcher):
+        stop_watcher()
+
+
 def _content_text(content: Any) -> str:
     if content is None:
         return ""
@@ -496,6 +514,11 @@ class PicoHarnessAgent:
             },
         )
         pico_config = PicoConfig(
+            call_efficiency={
+                "mode": "off",
+                "enabled": False,
+                "usage_tracking": False,
+            },
             memory={"backend": None},
             plugins={"disabled": []},
             skill_forge={"router": {"enabled": False}},
@@ -509,42 +532,54 @@ class PicoHarnessAgent:
             interactive=False,
             paths=RuntimePaths(workspace=self.workspace, state=self.state_dir),
         )
-        executor = PicoDockerExecutor(self.sandbox_adapter)
-        loop = assembly.agent_loop
-        loop._executor = executor
-        exec_tool = loop.tools.get("exec")
-        if exec_tool is None:
-            await assembly.close()
-            raise PicoBaselineRuntimeError("pico-harness did not register the exec tool")
-        exec_tool._executor = executor
-        actual_tools = frozenset(loop.tools.tool_names)
-        if actual_tools != PICO_CODING_TOOLS:
-            await assembly.close()
-            raise PicoBaselineRuntimeError(
-                "unexpected pico-harness tool surface: "
-                f"expected {sorted(PICO_CODING_TOOLS)}, got {sorted(actual_tools)}"
-            )
-
-        start_backend = getattr(assembly, "start_memory_backend", None)
-        if start_backend is not None:
-            await start_backend()
-        outlet = RecordingOutlet("polyglot")
-        host = RuntimeTrialHost(assembly=assembly, outlet=outlet)
-        request = TurnRequest(
-            origin=Origin.USER,
-            source=Source(
-                channel="polyglot",
-                chat_id="attempt",
-                sender_id="evaluator",
-                chat_type=ChatType.DM,
-            ),
-            text=str(prompt),
-            conversation="polyglot:attempt",
-        )
+        pico_call_efficiency = _detach_pico_call_efficiency(assembly)
+        host = None
         try:
+            executor = PicoDockerExecutor(self.sandbox_adapter)
+            loop = assembly.agent_loop
+            loop._executor = executor
+            exec_tool = loop.tools.get("exec")
+            if exec_tool is None:
+                raise PicoBaselineRuntimeError(
+                    "pico-harness did not register the exec tool"
+                )
+            exec_tool._executor = executor
+            actual_tools = frozenset(loop.tools.tool_names)
+            if actual_tools != PICO_CODING_TOOLS:
+                raise PicoBaselineRuntimeError(
+                    "unexpected pico-harness tool surface: "
+                    f"expected {sorted(PICO_CODING_TOOLS)}, got {sorted(actual_tools)}"
+                )
+
+            start_backend = getattr(assembly, "start_memory_backend", None)
+            if start_backend is not None:
+                await start_backend()
+            outlet = RecordingOutlet("polyglot")
+            host = RuntimeTrialHost(assembly=assembly, outlet=outlet)
+            request = TurnRequest(
+                origin=Origin.USER,
+                source=Source(
+                    channel="polyglot",
+                    chat_id="attempt",
+                    sender_id="evaluator",
+                    chat_type=ChatType.DM,
+                ),
+                text=str(prompt),
+                conversation="polyglot:attempt",
+            )
             observation = await host.run(request)
         finally:
-            await host.close()
+            try:
+                if host is None:
+                    await assembly.close()
+                else:
+                    await host.close()
+            finally:
+                try:
+                    _stop_pico_skill_watcher(assembly)
+                finally:
+                    if pico_call_efficiency is not None:
+                        pico_call_efficiency.close()
 
         runtime_state = observation.runtime_state.value
         delivery_state = observation.delivery_state.value

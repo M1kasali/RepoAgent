@@ -4,6 +4,8 @@ from types import ModuleType, SimpleNamespace
 
 from repoagent.evaluation.pico_baseline import (
     RepoAgentProviderBridge,
+    _detach_pico_call_efficiency,
+    _stop_pico_skill_watcher,
     pico_messages_to_model_messages,
     pico_tools_to_model_tools,
 )
@@ -128,6 +130,33 @@ def test_pico_message_projection_preserves_malformed_arguments_for_tool_validati
     )
 
     assert messages[0].tool_calls[0].arguments == {"_raw_arguments": "not-json"}
+
+
+def test_pico_call_efficiency_is_detached_from_async_thread_shutdown():
+    controller = object()
+    assembly = SimpleNamespace(call_efficiency=controller)
+
+    detached = _detach_pico_call_efficiency(assembly)
+
+    assert detached is controller
+    assert assembly.call_efficiency is None
+
+
+def test_pico_skill_watcher_is_stopped_during_adapter_cleanup():
+    class Skills:
+        stopped = False
+
+        def stop_file_watcher(self):
+            self.stopped = True
+
+    skills = Skills()
+    assembly = SimpleNamespace(
+        agent_loop=SimpleNamespace(context=SimpleNamespace(skills=skills))
+    )
+
+    _stop_pico_skill_watcher(assembly)
+
+    assert skills.stopped is True
 
 
 def test_pico_provider_bridge_uses_repoagent_transport_and_enforces_hard_call_cap(
