@@ -122,6 +122,7 @@ Copy this section for each completed capability.
 | Strict paired Polyglot comparison | `repoagent/evaluation/polyglot_pair.py`, `repoagent/evaluation/cli.py` | frozen runtime/task/grader identity, complete pair denominator, quality and efficiency deltas | TECH-081 |
 | Six-language Polyglot image | `benchmarks/polyglot-image/`, `scripts/run_polyglot_image_smoke.py` | fixed toolchains, offline full-test semantics, immutable image gate, six-language known-good smoke | TECH-082 |
 | In-turn transcript admission | `repoagent/context_overflow.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py` | structure-preserving replay reduction and failure-terminal cost evidence | TECH-083 |
+| Empty-response terminal accounting | `repoagent/agent_loop.py` | exhausted recovery stops the task without manufacturing a successful final answer | TECH-085 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -3006,6 +3007,102 @@ Relative to the non-solving pico control, its mean paired cost was USD
 pairs regressed on both metrics. This comparison closes `P11-07`, but the 0/24
 control and 4/24 treatment rates make a 225-task release run premature until the
 coding loop's completion quality improves.
+
+## TECH-085 - Empty-Recovery Terminal Accounting and Rejected Prompt Trials
+
+- Plan items: `P11-08` prerequisite; the release campaign remains pending.
+- Status: implemented terminal-state fix; coding-quality improvement unproven.
+- Implemented: 2026-09-07
+- Owning module: `repoagent/agent_loop.py`
+- Tests: `tests/test_provider_runtime.py`, existing exhaustion tests in `tests/test_repoagent.py`
+- Verification bundle: `artifacts/verifications/empty-recovery-terminal-20260907/` (local, ignored)
+
+### Problem and Decision
+
+The original 24-task RepoAgent canary had four hidden-test code passes without
+runtime convergence: `go/alphametics`, `rust/accumulate`, `rust/acronym`, and
+`rust/book-store`. Five subsequent single-task development trials on
+`go/alphametics` tested budget reminders and a visible correction after repeated
+thinking-only responses. None produced an end-to-end pass. One trial exposed a
+separate correctness defect: exhausted empty recovery manufactured
+`<final>I have no response to give.</final>` and passed it to `finish_success()`.
+That inflated convergence and successful-task cost accounting even though the
+hidden grader still rejected the untouched solution.
+
+The uncommitted budget-reminder and retry-correction candidates were withdrawn.
+Their scripted providers verified message delivery, not real quality improvement.
+In particular, runtime budgets must not be persisted as stale Tool output, and
+messages added after prompt construction must not bypass token admission. The
+retained production change is the independently reproducible terminal-state fix,
+not those unproven prompting changes.
+
+### Interface, Invariants, and Persistence
+
+The recovery classifier, retry limits, Tool budget semantics and public APIs are
+unchanged. When an empty or thinking-only response cannot be recovered, AgentLoop
+emits `empty_response_recovery_exhausted` and exits through its existing stopped
+path with `TaskState(status=stopped, stop_reason=retry_limit_reached)`. Disabling
+recovery gives the same outcome on the first empty response. It does not disable
+normal model-authored final answers.
+
+No additional synthesis call is made on this path. The existing Provider-call
+ceiling still wins if it prevents the next recovery attempt; if the final allowed
+call actually exhausts recovery, the more specific retry-limit reason is retained.
+Forced synthesis after Tool-step exhaustion remains stopped, as in TECH-066.
+
+The common stopped path retains the user-visible stop explanation, per-call
+usage/cost evidence, workspace snapshot attempt, semantic checkpoint, trace and
+report. `successful_turn_count` is zero and `cost_per_successful_turn_usd` is null.
+Spine `TurnState.COMPLETED` still means the request returned normally, not that
+the coding task succeeded. Consumers must use TaskState and task grading for
+quality, not the delivery/lifecycle state alone. This patch does not migrate the
+Spine wire schema or turn a controlled stop into an API exception.
+
+### Diagnostic Evidence, Not a Release Claim
+
+All rows below are 2026-09-05 development runs on dirty trees based on `10ace64`,
+using `deepseek-v4-flash`, temperature 0.2, the Anthropic-compatible protocol,
+12,000 input tokens, 4,096 output tokens and at most 14 Agent Provider calls.
+Each row contains one attempt on the same task, not five independent tasks or a
+paired improvement experiment. Evidence is retained under
+`artifacts/polyglot-live/`; directory names below identify `results.json` and the
+associated attempt artifacts.
+
+| Directory | Calls | Hidden-code pass | Recorded convergence | End-to-end pass | Agent seconds | Estimated USD |
+| --- | ---: | --- | --- | --- | ---: | ---: |
+| `deepseek-budget-notice-go1-dev-20260905` | 6 | not graded | no | no | 65.647133 | 0.0038917648, incomplete |
+| `deepseek-budget-notice-go1-dev-retry2-20260905` | 14 | yes | no | no | 339.626187 | 0.0230832560 |
+| `deepseek-budget-notice-go1-dev-retry3-20260905` | 14 | yes | no | no | 318.107131 | 0.0208788272 |
+| `deepseek-budget-notice-go1-dev-retry4-20260905` | 10 | no | yes, invalid fallback | no | 245.513112 | 0.0154461440 |
+| `deepseek-recovery-correction-go1-dev-retry1-20260905` | 14 | yes | no | no | 276.848127 | 0.0192825584 |
+
+The first row failed because the stream ended without `message_stop`; partial
+usage is not a complete bill. Provider preflight and grader latency are not part
+of the table's Agent attempt totals. The setup-only `...go1-dev-retry1-20260905`
+directory contains no completed campaign result and is not another model trial.
+The false-convergence row remains unmodified historical evidence, with this
+correction recorded separately. These observations do not replace the frozen
+24-pair result in TECH-084 or support a statistical performance claim.
+
+### Verification and Follow-ups
+
+The initial five regression cases failed on the old behavior. After the fix, the
+Provider/AgentLoop/recovery/cost subset passed 145 tests. Coverage was then expanded
+to include empty and thinking-only responses, structured and prompt-only clients,
+before and after a Tool call, disabled recovery, coincident Provider-call limits,
+persisted report/Turn accounting, checkpoint presence and model-authored finals.
+Full verification passed 631 tests in 113.69 seconds with the six existing
+`datetime.utcnow()` deprecation warnings. Ruff, `git diff --check`, the evaluation
+CLI smoke and the 24-task Polyglot plan check also passed. The local bundle retains
+stdout/stderr, JUnit XML, source provenance and a SHA-256 manifest; it is development
+evidence, not a clean-tag release result. Only this verification paragraph was
+updated after the bundle completed; the tested Python files are unchanged.
+
+This fixes an accounting defect, not the model's coding or convergence ability.
+No new paid run was launched for this patch. Before another quality experiment,
+freeze a development subset and one candidate change with explicit cost and stop
+criteria, then validate on the complete canary without reinterpreting forced
+summaries as success. The 225-task release gate stays open.
 
 ## 5. Decision Index
 

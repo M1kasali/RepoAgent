@@ -524,6 +524,7 @@ class AgentLoop:
         overflow_compress_retries = 0
         prompt_history_override = None
         prompt_segment_budget_overrides = None
+        empty_recovery_exhausted = False
         loop_fail_tool = None
         loop_fail_streak = 0
         loop_nudges = 0
@@ -957,10 +958,12 @@ class AgentLoop:
                         {**recovery_payload, "next_empty_retries": empty_retries},
                     )
                     continue
-                raw = "<final>I have no response to give.</final>"
+                empty_recovery_exhausted = True
                 agent.emit_trace(
                     task_state, "empty_response_recovery_exhausted", recovery_payload
                 )
+                # Recovery exhaustion is a stop, not a model-authored final answer.
+                break
             if model_result.tool_calls:
                 kind, payload = (
                     "tools",
@@ -1291,7 +1294,13 @@ class AgentLoop:
             agent.max_provider_calls is not None
             and len(call_entries) >= agent.max_provider_calls
         )
-        if provider_call_limit_reached:
+        if empty_recovery_exhausted:
+            final = (
+                "Stopped after exhausting empty-response recovery without a visible "
+                "answer or tool call. Review the retained run evidence before continuing."
+            )
+            task_state.stop_retry_limit(final)
+        elif provider_call_limit_reached:
             final = "Stopped after reaching the configured Provider call limit."
             task_state.stop_step_limit(final)
         elif attempts >= max_attempts and tool_steps < agent.max_steps:

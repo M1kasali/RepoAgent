@@ -1656,9 +1656,15 @@ def test_agent_loop_nudges_once_after_post_tool_empty_response(tmp_path):
     assert "(empty)" not in persisted
 
 
-def test_agent_loop_bounds_persistent_empty_recovery_per_turn(tmp_path):
+@pytest.mark.parametrize("structured", [False, True])
+@pytest.mark.parametrize("thinking", [False, True])
+@pytest.mark.parametrize("with_tool", [False, True])
+def test_agent_loop_bounds_persistent_empty_recovery_per_turn(
+    tmp_path, structured, thinking, with_tool
+):
     class EmptyProvider:
         supports_prompt_cache = False
+        supports_structured_messages = structured
         model = "empty"
 
         def __init__(self):
@@ -1666,8 +1672,23 @@ def test_agent_loop_bounds_persistent_empty_recovery_per_turn(tmp_path):
 
         def stream(self, request):
             self.requests.append(request)
+            if with_tool and len(self.requests) == 1:
+                yield ModelEvent(
+                    kind="completed",
+                    result=ModelResult(
+                        tool_calls=(ToolCall("read-1", "list_files", {"path": "."}),),
+                        provider="empty",
+                        model=self.model,
+                    ),
+                )
+                return
             yield ModelEvent(
-                kind="completed", result=ModelResult(provider="empty", model=self.model)
+                kind="completed",
+                result=ModelResult(
+                    provider="empty",
+                    model=self.model,
+                    reasoning_content="Still thinking." if thinking else "",
+                ),
             )
 
     provider = EmptyProvider()
@@ -1676,12 +1697,41 @@ def test_agent_loop_bounds_persistent_empty_recovery_per_turn(tmp_path):
         workspace=WorkspaceContext.build(tmp_path),
         session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
         approval_policy="auto",
-        max_steps=1,
+        max_steps=2 if with_tool else 1,
     )
 
-    assert agent.ask("answer") == "I have no response to give."
-    assert len(provider.requests) == 1 + RecoveryLimits().empty_content_max_retries
-    assert agent.current_task_state.stop_reason == "final_answer_returned"
+    answer = agent.ask("answer")
+    assert agent.current_task_state.status == "stopped"
+    assert agent.current_task_state.stop_reason == "retry_limit_reached"
+    assert answer.startswith("Stopped after exhausting empty-response recovery")
+    limits = RecoveryLimits()
+    expected_calls = 1 + limits.empty_content_max_retries
+    if thinking:
+        expected_calls += limits.thinking_prefill_max_retries
+    if with_tool:
+        expected_calls += 1
+        if not thinking:
+            expected_calls += limits.post_tool_empty_max_nudges
+    assert len(provider.requests) == expected_calls
+    assert agent.last_call_efficiency_summary["successful_turn_count"] == 0
+    assert agent.last_call_efficiency_summary["cost_per_successful_turn_usd"] is None
+    run_id = agent.current_task_state.run_id
+    turn = json.loads(agent.run_store.turn_path(run_id).read_text(encoding="utf-8"))
+    # Spine completion means the request returned, not that the task succeeded.
+    assert turn["state"] == "completed"
+    assert turn["outcome"]["call_efficiency"]["successful_turn_count"] == 0
+    assert turn["outcome"]["final_answer"] == answer
+    report = json.loads(agent.run_store.report_path(run_id).read_text(encoding="utf-8"))
+    assert report["task_state"]["status"] == "stopped"
+    assert report["task_state"]["stop_reason"] == "retry_limit_reached"
+    assert report["task_state"]["checkpoint_id"]
+    assert report["call_efficiency"] == turn["outcome"]["call_efficiency"]
+    events = [
+        json.loads(line)
+        for line in agent.run_store.trace_path(run_id).read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(event["event"] == "empty_response_recovery_exhausted" for event in events)
+    assert not any(event["event"] == "exhaustion_synthesis_requested" for event in events)
     assert all(
         "Runtime notice" not in item.get("content", "")
         for item in agent.session["history"]
@@ -1711,8 +1761,66 @@ def test_agent_loop_can_disable_empty_recovery(tmp_path):
         empty_recovery=RecoveryLimits(enabled=False),
     )
 
-    assert agent.ask("answer") == "I have no response to give."
+    assert agent.ask("answer").startswith("Stopped after exhausting empty-response recovery")
     assert provider.calls == 1
+    assert agent.current_task_state.status == "stopped"
+    assert agent.current_task_state.stop_reason == "retry_limit_reached"
+
+
+@pytest.mark.parametrize("call_limit", [2, 4])
+def test_empty_recovery_respects_provider_cap_without_extra_synthesis(tmp_path, call_limit):
+    class EmptyProvider:
+        supports_prompt_cache = False
+        model = "empty"
+
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, request):
+            self.calls += 1
+            yield ModelEvent(kind="completed", result=ModelResult())
+
+    provider = EmptyProvider()
+    agent = RepoAgent(
+        model_client=provider,
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+        max_steps=1,
+        max_provider_calls=call_limit,
+    )
+
+    agent.ask("answer")
+
+    assert provider.calls == call_limit
+    assert agent.current_task_state.status == "stopped"
+    assert agent.current_task_state.stop_reason == (
+        "step_limit_reached" if call_limit == 2 else "retry_limit_reached"
+    )
+    assert agent.last_call_efficiency_summary["successful_turn_count"] == 0
+
+
+def test_model_authored_final_is_not_confused_with_recovery_fallback(tmp_path):
+    class FinalProvider:
+        supports_prompt_cache = False
+        model = "final"
+
+        def stream(self, request):
+            yield ModelEvent(
+                kind="completed",
+                result=ModelResult(text="<final>I have no response to give.</final>"),
+            )
+
+    agent = RepoAgent(
+        model_client=FinalProvider(),
+        workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+        approval_policy="auto",
+    )
+
+    assert agent.ask("answer") == "I have no response to give."
+    assert agent.current_task_state.status == "completed"
+    assert agent.current_task_state.stop_reason == "final_answer_returned"
 
 
 def test_agent_loop_parallelizes_safe_reads_but_preserves_serial_barriers(tmp_path):

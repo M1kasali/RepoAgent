@@ -378,6 +378,14 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (The 24-pair live canary completed with matching identities: RepoAgent 4 wins, 20 ties, 0 losses versus pico-harness; exact two-sided McNemar p=0.125, so the result is directional rather than statistically significant.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
+`P11-08` readiness work (2026-09-07, TECH-085):
+
+- [x] Retain all five single-task budget/recovery diagnostics, including protocol failure and false convergence; none is a release-quality improvement result.
+- [x] Withdraw unproven budget-reminder and retry-correction prompt candidates.
+- [x] Stop exhausted empty recovery without manufacturing a successful final answer; retain checkpoint and unsuccessful-task cost evidence.
+- [ ] Freeze a bounded development experiment for the remaining code-pass/non-converged failures, with one changed variable and explicit stop criteria.
+- [ ] Re-run the complete canary against a clean, fixed baseline before authorizing the 225-task campaign.
+
 Gate:
 
 - Untrusted generated code never executes on the direct host adapter.
