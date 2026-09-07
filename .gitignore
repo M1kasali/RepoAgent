@@ -44,6 +44,7 @@ docs/architecture/*
 !docs/architecture/agent-harness-v1-overview.md
 !docs/architecture/implementation-ledger.md
 !docs/architecture/current-architecture.md
+!docs/architecture/polyglot-convergence-diagnosis-20260907.md
 !docs/roadmaps/
 docs/roadmaps/*
 !docs/roadmaps/agent-harness-implementation-plan.md

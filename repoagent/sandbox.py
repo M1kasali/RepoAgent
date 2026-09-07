@@ -28,6 +28,10 @@ class SandboxAdapter(ABC):
     @abstractmethod
     def execute(self, command, *, cwd, env, control) -> ProcessOutcome: ...
 
+    def prompt_context(self, *, cwd) -> str:
+        """Return adapter-owned execution facts, without probing the backend."""
+        return ""
+
 
 class DirectSandboxAdapter(SandboxAdapter):
     @property
@@ -137,15 +141,11 @@ class DockerSandboxAdapter(SandboxAdapter):
     def is_isolated(self):
         return True
 
-    def execute(self, command, *, cwd, env, control):
+    def _guest_paths(self, cwd):
         cwd = Path(cwd).expanduser().resolve()
         if not cwd.is_relative_to(self.workspace):
             raise SandboxConfigurationError(
                 "Docker command cwd must remain inside the configured workspace"
-            )
-        if not self.workspace.is_dir():
-            raise FileNotFoundError(
-                f"Docker sandbox workspace does not exist: {self.workspace}"
             )
         relative_cwd = cwd.relative_to(self.workspace).as_posix()
         workspace_name = self.workspace.name
@@ -157,6 +157,29 @@ class DockerSandboxAdapter(SandboxAdapter):
         guest_cwd = guest_root + (
             f"/{relative_cwd}" if relative_cwd != "." else ""
         )
+        return guest_root, guest_cwd
+
+    def prompt_context(self, *, cwd):
+        guest_root, guest_cwd = self._guest_paths(cwd)
+        return (
+            "Shell execution environment:\n"
+            f"- run_shell working directory: {guest_cwd}\n"
+            f"- Persistent workspace mount: {guest_root}\n"
+            "- Host absolute paths are not container paths. Use repository-relative "
+            "paths for file tools and run_shell, or obtain shell paths with pwd.\n"
+            "- A fresh container for each run_shell call resets shell state and "
+            "files outside the workspace mount. Workspace files persist.\n"
+            "- /tmp is per-call scratch space; keep build artifacts that must "
+            "persist or execute inside the workspace mount.\n"
+            "- The container root filesystem is read-only and network is disabled."
+        )
+
+    def execute(self, command, *, cwd, env, control):
+        guest_root, guest_cwd = self._guest_paths(cwd)
+        if not self.workspace.is_dir():
+            raise FileNotFoundError(
+                f"Docker sandbox workspace does not exist: {self.workspace}"
+            )
         mount_source = str(self._workspace_path_converter(self.workspace)).strip()
         if not mount_source or "," in mount_source:
             raise SandboxConfigurationError(

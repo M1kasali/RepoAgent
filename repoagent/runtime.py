@@ -404,7 +404,16 @@ class RepoAgent:
         return tool_signature(self.tools)
 
     def build_prefix(self):
-        return build_prompt_prefix(workspace=self.workspace, tools=self.tools)
+        describe = getattr(self.sandbox_adapter, "prompt_context", None)
+        return build_prompt_prefix(
+            workspace=self.workspace,
+            tools=self.tools,
+            execution_context=(
+                describe(cwd=self.root)
+                if "run_shell" in self.tools and callable(describe)
+                else ""
+            ),
+        )
 
     def _apply_prefix_state(self, prefix_state):
         self.prefix_state = prefix_state

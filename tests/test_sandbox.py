@@ -13,6 +13,7 @@ from repoagent import (
     WorkspaceContext,
 )
 from repoagent.sandbox import DockerSandboxAdapter, build_sandbox_adapter
+from repoagent.prompt_prefix import build_prompt_prefix
 from repoagent.tool_execution import ToolExecutionControl
 from repoagent.tool_execution import ProcessOutcome
 
@@ -198,6 +199,80 @@ def test_docker_adapter_projects_workspace_path_for_external_cli(tmp_path):
     assert mount == (
         rf"type=bind,source=C:\\wsl\\workspace,target=/workspace/{tmp_path.name}"
     )
+
+
+def test_docker_prompt_describes_actual_shell_paths_and_lifetime(tmp_path):
+    commands = []
+
+    def process_runner(command, **kwargs):
+        commands.append(command)
+        return ProcessOutcome("completed", 0, "ok\n", "", 3, 0, False)
+
+    adapter = DockerSandboxAdapter(
+        tmp_path,
+        process_runner=process_runner,
+        cleanup_runner=lambda *args, **kwargs: None,
+    )
+    agent = build_agent(tmp_path, sandbox_adapter=adapter)
+    agent.execute_tool("run_shell", {"command": "pwd"})
+    argv = commands[0]
+    actual_cwd = argv[argv.index("--workdir") + 1]
+    prompt, metadata = agent._build_prompt_and_metadata("Inspect the repository")
+
+    assert f"run_shell working directory: {actual_cwd}" in prompt
+    assert "Host absolute paths are not container paths" in prompt
+    assert "fresh container for each run_shell call" in prompt
+    assert "/tmp is per-call scratch space" in prompt
+    assert "repository-relative paths" in prompt
+    assert metadata["context_window_admitted"] is True
+    assert metadata["prompt_tokens"] <= agent.context_manager.total_token_budget
+    assert agent.build_prefix().hash == agent.prefix_state.hash
+    assert all(
+        "Shell execution environment:" not in item.get("content", "")
+        for item in agent.session["history"]
+    )
+
+
+@pytest.mark.parametrize("subdirectory", [".", "src"])
+def test_docker_prompt_and_execution_share_nested_cwd_mapping(tmp_path, subdirectory):
+    cwd = tmp_path / subdirectory
+    cwd.mkdir(exist_ok=True)
+    commands = []
+
+    def process_runner(command, **kwargs):
+        commands.append(command)
+        return ProcessOutcome("completed", 0, "ok\n", "", 3, 0, False)
+
+    adapter = DockerSandboxAdapter(
+        tmp_path,
+        process_runner=process_runner,
+        cleanup_runner=lambda *args, **kwargs: None,
+    )
+    context = adapter.prompt_context(cwd=cwd)
+    adapter.execute(
+        "pwd", cwd=cwd, env={},
+        control=ToolExecutionControl(timeout_seconds=5, max_output_chars=100),
+    )
+    argv = commands[0]
+    assert f"run_shell working directory: {argv[argv.index('--workdir') + 1]}" in context
+    assert f"Persistent workspace mount: /workspace/{tmp_path.name}" in context
+    with pytest.raises(SandboxConfigurationError, match="inside"):
+        adapter.prompt_context(cwd=tmp_path.parent)
+
+
+@pytest.mark.parametrize("backend", ["direct", "injected", "docker-no-shell"])
+def test_execution_context_preserves_existing_prefix_for_other_backends(tmp_path, backend):
+    kwargs = {}
+    if backend == "injected":
+        kwargs["sandbox_adapter"] = IsolatedSandboxAdapter(FakeIsolatedBackend())
+    elif backend == "docker-no-shell":
+        kwargs["sandbox_adapter"] = DockerSandboxAdapter(tmp_path)
+        kwargs["allowed_tools"] = ("list_files", "read_file")
+    agent = build_agent(tmp_path, **kwargs)
+    original = build_prompt_prefix(agent.workspace, agent.tools)
+
+    assert agent.prefix == original.text
+    assert agent.prefix_state.hash == original.hash
 
 
 def test_docker_adapter_rejects_cwd_escape(tmp_path):

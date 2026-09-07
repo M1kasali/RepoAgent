@@ -123,6 +123,7 @@ Copy this section for each completed capability.
 | Six-language Polyglot image | `benchmarks/polyglot-image/`, `scripts/run_polyglot_image_smoke.py` | fixed toolchains, offline full-test semantics, immutable image gate, six-language known-good smoke | TECH-082 |
 | In-turn transcript admission | `repoagent/context_overflow.py`, `repoagent/agent_loop.py`, `repoagent/agent_turn_runner.py` | structure-preserving replay reduction and failure-terminal cost evidence | TECH-083 |
 | Empty-response terminal accounting | `repoagent/agent_loop.py` | exhausted recovery stops the task without manufacturing a successful final answer | TECH-085 |
+| Docker execution context | `repoagent/sandbox.py`, `repoagent/prompt_prefix.py` | backend-owned paths and lifetime facts inside budgeted model context | TECH-086 |
 | Tool Gateway contracts | `repoagent/tool_contracts.py` | immutable typed definition, request, effect, and result contracts implemented | TECH-017 |
 | Tool definition projection | `repoagent/tools.py`, `repoagent/providers/tool_schema.py`, `repoagent/prompt_prefix.py` | one definition drives schemas, validation, effects, and prompt signatures | TECH-018 |
 | Unified Tool Gateway routing | `repoagent/tool_gateway.py`, `repoagent/runtime.py`, `repoagent/agent_loop.py` | model, delegate, compatibility, and internal calls share typed execution and evidence | TECH-019 |
@@ -3103,6 +3104,70 @@ No new paid run was launched for this patch. Before another quality experiment,
 freeze a development subset and one candidate change with explicit cost and stop
 criteria, then validate on the complete canary without reinterpreting forced
 summaries as success. The 225-task release gate stays open.
+
+## TECH-086 - Docker Execution Context and Convergence Diagnosis
+
+- Plan items: `P11-08` prerequisites, `P3-09` execution context
+- Status: implemented environment contract; live quality benefit unverified
+- Implemented: 2026-09-07
+- Owning modules: `repoagent/sandbox.py`, `repoagent/prompt_prefix.py`, `repoagent/runtime.py`
+- Tests: `tests/test_sandbox.py`
+- Diagnosis and next experiment: [four-task analysis](polyglot-convergence-diagnosis-20260907.md)
+
+The four historical code-pass/non-converged attempts do not share one simple
+final-answer failure. Two Rust attempts used host absolute paths inside Docker;
+two encountered execution denial under `/tmp`, and one attempted to reuse
+temporary files across disposable containers. Go additionally showed output
+truncation, thinking-only recovery and command timeouts after hundreds of build
+cache changes. The analysis records exact request numbers and distinguishes
+observations from causal hypotheses. No historical scores were revised.
+
+`SandboxAdapter.prompt_context(cwd=...)` is a non-executing optional description
+hook with an empty default. Docker describes its real shell cwd and mount,
+fresh-container lifecycle, temporary-file limitations, read-only root and disabled
+network. Its `_guest_paths()` helper drives both this description and the
+execution argv, including nested cwd validation. This does not project or rewrite
+arbitrary shell strings and does not change host file-tool authority.
+
+`RepoAgent.build_prefix()` supplies these facts only when `run_shell` is enabled.
+`build_prompt_prefix(..., execution_context=...)` includes them before the existing
+prefix text, so ordinary tail clipping does not immediately discard them. They
+participate in prefix hashing and normal ContextManager token admission, rather
+than being injected after budget calculation. Extremely small explicitly configured
+budgets can still clip the prefix; no special exemption from the context ceiling
+is introduced. The description is not persisted as Tool output or session history.
+Direct/injected adapters without a description and tool sets without `run_shell`
+retain byte-identical prefix text and hashes. The adapter remains a construction-
+time dependency; this patch does not introduce hot-swapping backends.
+
+The Tool and Provider budgets, recovery algorithm, completion criteria, Docker
+mounts/flags, environment allowlist and cleanup behavior are unchanged. In
+particular, this patch neither enables execution from `/tmp` nor makes ephemeral
+containers persistent. The new facts belong to RepoAgent's Docker integration;
+copying a host-oriented workspace description from another runtime would not
+describe this execution environment accurately.
+
+The initial no-Docker/no-model regression failed because the admitted prompt did
+not contain the generated Docker `--workdir`. After the fix, 99 focused Sandbox,
+context, checkpoint and Agent tests passed. A real two-call Docker probe also
+passed using the canary's pinned image on Docker 29.7.2: the shell cwd matched,
+the root was read-only, `/tmp` execution was denied, workspace files persisted
+and `/tmp` files did not. The probe made zero Provider calls and retained its
+command, observations and checksums under
+`artifacts/verifications/sandbox-environment-smoke-20260907/`.
+The four-task offline extraction is independently retained under
+`artifacts/verifications/convergence-diagnosis-b031b9a-20260907/` and verified all
+24 referenced Agent evidence files before extracting the timelines.
+
+Full development verification passed 637 tests in 107.51 seconds with the six
+existing deprecation warnings. Ruff, diff checks, evaluation CLI and the 24-task
+Polyglot plan also passed. Logs, JUnit XML and checksums are retained under
+`artifacts/verifications/sandbox-execution-context-20260907/`; only documentation
+was updated after verification, not the tested Python files. The next paid
+candidate must be bound to a clean commit and a complete admitted paired budget.
+Eight deliberately selected development tasks are not a held-out benchmark;
+no quality claim or 225-task release is authorized by these contract tests.
+Go workspace-snapshot overhead remains a separate measurement/fix candidate.
 
 ## 5. Decision Index
 

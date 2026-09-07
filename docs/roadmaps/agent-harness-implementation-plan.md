@@ -383,7 +383,9 @@ inferring coding quality from scripted runtime contracts.
 - [x] Retain all five single-task budget/recovery diagnostics, including protocol failure and false convergence; none is a release-quality improvement result.
 - [x] Withdraw unproven budget-reminder and retry-correction prompt candidates.
 - [x] Stop exhausted empty recovery without manufacturing a successful final answer; retain checkpoint and unsuccessful-task cost evidence.
-- [ ] Freeze a bounded development experiment for the remaining code-pass/non-converged failures, with one changed variable and explicit stop criteria.
+- [x] Diagnose the four code-pass/non-converged traces and define an eight-task, single-variable development protocol with explicit stop criteria. ([Diagnosis](../architecture/polyglot-convergence-diagnosis-20260907.md); no paid run yet.)
+- [ ] Bind the environment-context candidate to a clean commit and an admitted paired budget, then execute the development protocol.
+- [ ] Measure workspace-snapshot overhead separately before changing Go tool deadlines or cache tracking.
 - [ ] Re-run the complete canary against a clean, fixed baseline before authorizing the 225-task campaign.
 
 Gate:

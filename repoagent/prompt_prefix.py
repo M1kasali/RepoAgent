@@ -33,7 +33,7 @@ def tool_signature(tools):
     ).hexdigest()
 
 
-def build_prompt_prefix(workspace, tools, built_at=None):
+def build_prompt_prefix(workspace, tools, built_at=None, *, execution_context=""):
     tool_lines = []
     for name, tool in tools.items():
         definition = tool["definition"]
@@ -93,6 +93,9 @@ def build_prompt_prefix(workspace, tools, built_at=None):
         {workspace.text()}
         """
     ).strip()
+    if execution_context:
+        # Execution facts must survive the prefix's normal tail clipping.
+        text = f"{execution_context}\n\n{text}"
     signature = tool_signature(tools)
     return PromptPrefix(
         text=text,
