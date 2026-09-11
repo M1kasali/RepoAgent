@@ -112,6 +112,13 @@ class DeterministicGatePipeline:
 
 
 class PairedPromotionGate:
+    def run_measurements(self, measurements, *, task_ids, repetitions, candidate_budget, fired_tasks=None):
+        """Validate a frozen two-arm matrix before computing attributed lift."""
+        from .measurements import measured_promotion
+
+        return measured_promotion(self, measurements, task_ids=task_ids,
+            repetitions=repetitions, candidate_budget=candidate_budget, fired_tasks=fired_tasks)
+
     def __init__(
         self,
         *,

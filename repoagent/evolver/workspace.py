@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import re
 
 from .contracts import CandidateProposal, sha256_bytes
 
@@ -22,6 +23,55 @@ def _git(root, *args, check=True):
     if check and result.returncode != 0:
         raise CandidateWorkspaceError(result.stderr.strip() or "git command failed")
     return result.stdout.strip()
+
+
+def _git_bytes(root, *args):
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True)
+    if result.returncode:
+        raise CandidateWorkspaceError(result.stderr.decode("utf-8", errors="replace").strip())
+    return result.stdout
+
+
+def candidate_ref(candidate_id):
+    if not re.fullmatch(r"candidate_[A-Za-z0-9_-]+", candidate_id):
+        raise CandidateWorkspaceError("unsafe candidate id for persistent reference")
+    return f"refs/repoagent/candidates/{candidate_id}"
+
+
+def verify_candidate_commit(repo_root, proposal, commit_sha):
+    """Check immutable Git objects without importing or executing candidate code."""
+    if not isinstance(proposal, CandidateProposal):
+        raise TypeError("candidate verification requires CandidateProposal")
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit_sha):
+        raise CandidateWorkspaceError("candidate requires an exact commit SHA")
+    if _git(repo_root, "rev-parse", f"{commit_sha}^{{commit}}") != commit_sha:
+        raise CandidateWorkspaceError("candidate identity is not a commit")
+    base = proposal.manifest.base_commit
+    if _git(repo_root, "show", "-s", "--format=%P", commit_sha).split() != [base]:
+        raise CandidateWorkspaceError("candidate commit has an unexpected parent")
+    paths = set(_git_bytes(
+        repo_root, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, commit_sha, "--"
+    ).decode("utf-8").split("\0")) - {""}
+    if paths != set(proposal.content):
+        raise CandidateWorkspaceError("candidate commit changed undeclared paths")
+    for mutation in proposal.manifest.mutations:
+        entry = _git_bytes(repo_root, "ls-tree", "-z", commit_sha, "--", mutation.path)
+        mode = entry.split(b" ", 1)[0]
+        before_entry = _git_bytes(repo_root, "ls-tree", "-z", base, "--", mutation.path)
+        expected_mode = before_entry.split(b" ", 1)[0] if before_entry else b"100644"
+        if mode not in {b"100644", b"100755"} or mode != expected_mode:
+            raise CandidateWorkspaceError("candidate changed file type or mode")
+        after = _git_bytes(repo_root, "cat-file", "blob", f"{commit_sha}:{mutation.path}")
+        before = _git_bytes(repo_root, "cat-file", "blob", f"{base}:{mutation.path}") if before_entry else None
+        if sha256_bytes(after) != mutation.after_sha256 or (
+            sha256_bytes(before) if before is not None else None
+        ) != mutation.before_sha256:
+            raise CandidateWorkspaceError("candidate commit content differs from manifest")
+    return {
+        "candidate_id": proposal.manifest.candidate_id, "base_commit": base,
+        "commit_sha": commit_sha, "tree_sha": _git(repo_root, "rev-parse", f"{commit_sha}^{{tree}}"),
+        "patch_digest": proposal.manifest.patch_digest,
+    }
 
 
 class GitCandidateWorkspace:
@@ -91,25 +141,38 @@ class GitCandidateWorkspace:
                 )
 
     def finalize(self):
+        if self.commit_sha:
+            return verify_candidate_commit(self.repo_root, self.proposal, self.commit_sha)
+        base = self.proposal.manifest.base_commit
+        if _git(self.root, "rev-parse", "HEAD") != base:
+            raise CandidateWorkspaceError("candidate worktree HEAD moved before finalization")
+        changed = set(_git_bytes(
+            self.root, "diff", "--no-ext-diff", "--name-only", "-z", base, "--"
+        ).decode("utf-8").split("\0")) - {""}
+        untracked = set(_git_bytes(
+            self.root, "ls-files", "--others", "--exclude-standard", "-z"
+        ).decode("utf-8").split("\0")) - {""}
+        if (changed | untracked) - set(self.proposal.content):
+            raise CandidateWorkspaceError("candidate worktree contains undeclared changes")
         _git(self.root, "add", "--", *[item.path for item in self.proposal.manifest.mutations])
-        _git(
+        tree = _git(self.root, "write-tree")
+        commit_sha = _git(
             self.root,
             "-c",
             "user.name=RepoAgent Evolver",
             "-c",
             "user.email=evolver@repoagent.invalid",
-            "commit",
+            "-c", "commit.gpgsign=false",
+            "commit-tree", tree, "-p", base,
             "-m",
             f"candidate {self.proposal.manifest.candidate_id}",
         )
-        self.commit_sha = _git(self.root, "rev-parse", "HEAD")
-        return {
-            "candidate_id": self.proposal.manifest.candidate_id,
-            "base_commit": self.proposal.manifest.base_commit,
-            "commit_sha": self.commit_sha,
-            "tree_sha": _git(self.root, "rev-parse", "HEAD^{tree}"),
-            "patch_digest": self.proposal.manifest.patch_digest,
-        }
+        identity = verify_candidate_commit(self.repo_root, self.proposal, commit_sha)
+        ref = candidate_ref(self.proposal.manifest.candidate_id)
+        _git(self.repo_root, "update-ref", ref, commit_sha, "0" * len(commit_sha))
+        _git(self.root, "update-ref", "--no-deref", "HEAD", commit_sha, base)
+        self.commit_sha = commit_sha
+        return identity
 
     @property
     def workspace_digest(self):

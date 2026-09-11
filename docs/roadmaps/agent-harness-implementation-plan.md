@@ -149,8 +149,71 @@ and further paid campaigns are paused; they do not block mainline delivery.
   deletion, restart/CLI orphan reconciliation and retained uncertain-create
   records (TECH-096). On-demand cleanup, not background recovery or process-state
   restoration; real SIGKILL and controlled delayed-create acceptance included.
-- [ ] `M2-01` Connect Evolver generation, evaluation, multi-round state/resume,
+- [x] `M2-01` Connect Evolver generation, evaluation, multi-round state/resume,
   human approval, actual runtime strategy selection and rollback end to end.
+  Completed for the opt-in isolated task Runtime (TECH-108), not interactive
+  CLI hot-reloading or live-model effectiveness acceptance.
+- [x] `M2-01a` Materialize generated proposals into pinned immutable commits,
+  validate declared paths/content/modes and resume interrupted materialization
+  idempotently without changing the user's source worktree (TECH-097).
+- [x] `M2-01b` Connect candidate generation, real evaluator adapters, cumulative
+  budgets, multi-round journal/resume and sealed evaluation to the coordinator.
+- [x] `M2-01b1` Execute deterministic checks from pinned commits in Docker;
+  bind plans/receipts to source and image identities, replay completed evidence,
+  reject ambiguous automatic reruns, and preserve failed cleanup workspaces
+  (TECH-098). This is not paired quality evaluation or multi-round evolution.
+- [x] `M2-01b2` Add paired evaluator execution and measurement validity, durable
+  cumulative budgets across rounds, generator/termination scheduling and sealed
+  evaluation; define explicit recovery for uncertain started attempts.
+- [x] `M2-01b2a` Validate the full two-arm measurement matrix before attribution
+  and statistical gates; reject missing/invalid/unpriced results and preserve
+  full-matrix cost/trial accounting (TECH-099). This primitive is a pure gate;
+  executable check orchestration is tracked separately below.
+- [x] `M2-01b2b` Execute paired checks on pinned base/candidate commits; reserve
+  run-wide pair/cost budgets durably, verify per-arm receipts and resume only
+  known-safe boundaries (TECH-100). Real Docker binary grading, not Agent task
+  scoring. Reservations are conservative and never automatically refunded.
+- [x] `M2-01b2c` Connect actual Agent/model task evaluation and enforce Provider
+  call/token limits inside its adapter; add verified reservation settlement,
+  explicit uncertain-attempt reconciliation, generator/termination scheduling
+  and sealed evaluation. No paid acceptance implied by binary-check fixtures.
+- [x] `M2-01b2c1` Add a trial-local model admission gateway with call/output
+  limits, identified full-request counting, explicit pricing reservations and
+  fail-closed usage validation; verify tool/final execution through the actual
+  Agent loop with a scripted Provider (TECH-101). No paid/candidate evaluation.
+- [x] `M2-01b2c2` Load the pinned Harness snapshot into an isolated Agent worker,
+  separate task fixtures and hidden grading, connect the bounded Provider and
+  persist its evidence in the paired coordinator. Prove the candidate source,
+  not merely its checkout path, is what ran before live model acceptance.
+- [x] `M2-01b2c2a` Execute the pinned `repoagent/` package in an isolated Docker
+  worker with scripted Provider responses, separate task fixtures and host-only
+  exact-file grading; bind module hashes and paired receipts (TECH-102).
+  This verifies source execution, not inference quality or paid model budgets.
+- [x] `M2-01b2c2b` Connect the host-owned bounded Provider proxy to the isolated
+  worker, persist call evidence and reconcile costs against outer reservations.
+- [x] `M2-01b2c2b1` Add the host RPC dispatcher with bounded contract decoding,
+  sequence fencing, trusted evidence-sink ordering and fail-closed budgeted
+  calls (TECH-103). Transport and durable sink wiring remain under c2b.
+- [x] `M2-01b2c2b2` Implement owned Docker stdio model transport, worker client
+  and exclusive host-side call journal (TECH-104). Verify the Agent subprocess
+  and Docker transport separately with scripted host Providers.
+- [x] `M2-01b2c2b3` Assemble this channel into the pinned snapshot evaluator,
+  bind model/journal identities into paired receipts and outer cost limits.
+  TECH-105 verifies the path with scripted host leaf clients; live model
+  acceptance is deferred; verified settlement is connected in TECH-108.
+- [x] `M2-01b2d` Connect proposal generation, deterministic admission and paired
+  comparisons into bounded multi-round search with durable history (TECH-106).
+  Fixed-baseline search returns qualified candidates, not activated strategies.
+- [x] `M2-01b2e` Close search with isolated sealed validation and explicit
+  finalist selection, then hand verified evidence to human approval.
+- [x] `M2-01b2e1` Freeze one qualified finalist per completed search, validate
+  sealed results and expose explicit approval handoff (TECH-107). Isolated
+  backend is injected; concrete hosted sealed adapter is connected in TECH-108.
+- [x] `M2-01c` Wire human approval and activation/rollback into actual Runtime
+  strategy selection; distinguish Harness source from task workspace and verify
+  that the approved immutable strategy is the one actually executed.
+  SnapshotDeployment resolves a complete approved commit per isolated task,
+  including explicitly enabled skills. Normal CLI/TUI defaults are unchanged.
 - [ ] `M3-01` Align Skill retrieval/ranking/gating rather than equating keyword
   activation with the complete retrieval pipeline.
 - [ ] `M3-02` Integrate an explicitly available external Memory backend and

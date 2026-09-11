@@ -3821,6 +3821,655 @@ model-quality improvement. No paid model calls, commits or pushes were made.
 M1-03b3, M1-03b and M1-03 are checked within the documented Docker lifecycle
 scope; full Harness parity and the remaining M2/M3 work are not claimed.
 
+### TECH-097: Durable Candidate Materialization and Resume (2026-09-11)
+
+M2-01a connects an existing generated `CandidateProposal` to Git materialization
+and the evolution ledger via `ControlledEvolver.materialize_candidate`. It does
+not run the generator, evaluator, approval or activation automatically. This is
+the identity/persistence prerequisite for later end-to-end orchestration.
+
+Candidate commits are pinned by create-only compare-and-swap under
+`refs/repoagent/candidates/<candidate_id>`, protecting them from garbage collection
+after the detached worktree is removed. Candidate IDs are validated before they
+become ref names. The caller's branch, index and working files are not changed.
+Git plumbing constructs the commit without invoking commit hooks or GPG signing;
+the detached candidate worktree HEAD is then updated to the verified commit.
+
+Before pinning, verification reads immutable Git objects without executing the
+candidate: parent must equal the manifest base, changed paths must match the
+declared set, before/after blob hashes must match, and file type/executable mode
+must be preserved (new files are regular non-executable files). Unexpected staged
+or tracked worktree changes and undeclared non-ignored untracked files are rejected before
+finalization. The verifier checks the commit tree after staging, so transformed
+or altered candidate contents cannot silently be recorded as the original
+proposal. This does not make Git filters or arbitrary candidate Python safe to
+execute on the host; source repositories and their Git configuration remain
+trusted inputs.
+
+Materialization is serialized per ledger with the existing OS file-lock helper.
+A repeated candidate ID must bind the same complete manifest. If pinning succeeds
+but the materialization event was not written, retry verifies the existing ref
+and appends only the missing event. If an already recorded ref is missing,
+redirected or inconsistent with its identity, retry fails closed rather than
+regenerating and changing evaluated code. Different simultaneous callers sharing
+the ledger converge on one commit and one pair of creation/materialization
+events. There is no automatic deletion of candidate refs in this slice.
+
+Tests exercise actual Git worktrees and commits, interrupted ledger recording,
+concurrent materializers, reflog expiration and garbage collection in disposable
+test repositories, content/mode/extra-file rejection, ref drift and immutable
+HEAD identity. No garbage collection or candidate commits are run against the
+user's project repository during these tests. Tests do not claim model-quality
+improvement or completed evolution. M2-01b/c remain open, including the distinction
+between the Harness source repository and the coding task workspace and actual
+Runtime consumption of approved strategies. Frozen verification results follow.
+
+Frozen verification passed 790 tests in 207.62 seconds, with six existing
+deprecation warnings and no skips. This includes 13 new Git materialization
+regressions and the existing 23 real Docker cases through the Linux CLI. Ruff,
+offline wheel/sdist build, offline lock check and whitespace checks passed.
+`artifacts/verifications/mainline-evolver-materialization-20260911/manifest.json`
+retains overall `pass`, source/environment provenance, command output and JUnit;
+all 11 payload hashes were verified. Windows Docker was not rerun for this
+Git-only change. The result entry postdates the frozen run. These are dirty-tree
+local checks, not clean-tag release evidence or model-quality measurements.
+No paid model calls, project commits or pushes were made. M2-01a is checked;
+M2-01 remains open pending evaluation orchestration and actual strategy routing.
+
+### TECH-098: Executable Deterministic Candidate Checks and Receipts (2026-09-11)
+
+M2-01b1 adds `CandidateCheck`, `DockerCandidateEvaluator` and
+`ControlledEvolver.evaluate_candidate`. This runs declared deterministic commands,
+not a live model-quality benchmark. The caller supplies trusted checks and an
+evaluator; the shipped evaluator has no direct-host fallback. Custom evaluator
+implementations are trusted integration code, not a security boundary or proof
+of actual isolation by themselves. Test doubles are distinguished from real
+Docker acceptance.
+
+Admission rejects empty or duplicate check sets, invalid deadlines and output
+limits, more than 20 checks, over 300 seconds of declared command deadlines or
+over one million characters of combined stdout/stderr capture capacity. These are per-candidate
+deterministic limits, not cumulative model token/USD budgets. Container cleanup
+has its own bounded lifecycle operations and is not counted as test execution.
+Generation costs, paired trials and multi-round accounting remain M2-01b2.
+
+The coordinator first uses the verified pinned candidate identity. The Docker
+evaluator resolves a locally available image to its immutable SHA-256 ID, binds
+that ID and resource/network settings into the plan, and verifies the descriptor
+again before execution. A fresh detached checkout of the candidate is mounted
+into the persistent sandbox, using the pinned image with no pulls or installs.
+Commands run sequentially with per-check deadlines and capped output. Successful
+exit is pass, ordinary nonzero exit is fail; timeout, cancellation and reserved
+launch-failure exit codes are errors. Infrastructure errors stop further checks;
+missing checks become errors rather than silently shrinking the gate denominator.
+The caller's source workspace is not used for command execution or modified.
+
+After execution, HEAD and tracked changes are checked; source drift invalidates
+the result even when the command exited successfully. This is not protection
+against a malicious test or Git filter that temporarily changes and restores
+content: check definitions, source Git configuration and host evaluator code
+are trusted. Container Git administrative metadata outside the worktree is not
+mounted. Suites requiring a complete in-container Git administrative environment
+need an explicit evaluator adaptation; this executor does not supply it.
+
+Receipts bind the complete plan, candidate commit/tree/patch identity, exact
+commands, image/resource descriptor and raw capped stdout/stderr/process metadata.
+The coordinator records `evaluation.started` before invoking the evaluator, then
+writes the atomic receipt and anchors its digest with `evaluation.completed`.
+The deterministic gate is computed from that receipt and retains its digest.
+Exceptions append `evaluation.failed`; they never synthesize a passing gate.
+All checks must pass. This stage alone cannot request approval or activate a
+strategy and does not feed infrastructure errors into paired score arithmetic.
+
+A per-ledger OS lock serializes concurrent evaluation calls. Completed evidence
+can be replayed without re-executing commands, including recovery when the receipt
+was anchored but the gate event was not written. Changed plans, receipt hashes,
+candidate refs or gate payloads fail closed. A started attempt without anchored
+completion refuses automatic rerun, even if a receipt file happens to exist;
+an unanchored artifact is not treated as authority. Recovery of such attempts
+must be explicit in later orchestration. Docker descriptor verification is still
+required by coordinator replay; `decision_from_receipt` itself is the pure
+offline computation primitive, with integrity verification owned by the caller.
+
+The sandbox is stopped before the evaluation worktree is removed. Failed sandbox
+cleanup retains the registered worktree and reports its path; it does not delete
+the mount first or record success. Normal cleanup removes the evaluation checkout,
+while the candidate ref and ledger remain durable. There is no automated recovery
+of these retained evaluation worktrees yet; inspect `git worktree list` and the
+reported path when handling a failed evaluator cleanup.
+
+Focused tests cover real Git identities, receipt replay/drift, failed and missing
+checks, concurrent admission, interrupted execution/completion/gate writes,
+reference drift and retained cleanup workspaces. Six Docker cases exercise actual
+candidate content, raw output retention, failing checks, timeout, source mutation,
+missing executable and missing local image. No model calls are made and no task
+quality improvement is claimed. Frozen verification results follow.
+
+Frozen verification passed 816 tests in 216.89 seconds, with six existing
+deprecation warnings and no skips. This includes 20 new offline evaluation
+regressions and six new real Docker evaluator cases, alongside the 23 existing
+Docker cases. The six evaluator cases independently passed through Windows
+Docker CLI in 12.53 seconds. Ruff, offline wheel/sdist build, offline lock check
+and whitespace checks passed; no `repoagent-session-` containers remained.
+
+`artifacts/verifications/mainline-evolver-checks-20260911/manifest.json` retains
+overall `pass`, source/environment provenance, command output and both JUnit
+reports. All 14 payload hashes verified. This result entry postdates the frozen
+run. Evidence is local and dirty-worktree based, not clean-tag release evidence
+or a model-quality result. No paid model calls, project commits or pushes were
+made. M2-01b1 is checked; M2-01b2 and actual Runtime activation remain open.
+
+### TECH-099: Paired Measurement Validity Before Attribution (2026-09-11)
+
+`PairedPromotionGate.run_measurements` adds a typed evidence path alongside the
+existing trusted score-only `run` API. `PairedMeasurement` distinguishes a
+completed quality measurement (including a legitimate failed test) from Provider
+failure, infrastructure failure and inconclusive execution. Invalid measurements
+cannot carry a quality score. Unknown cost is not treated as zero; an explicitly
+reported zero remains valid for an offline, free evaluator.
+
+The caller supplies the frozen task IDs and repetition count. Both arms must
+cover the entire matrix exactly once. Missing arms, invalid execution and unknown
+cost stop evaluation before attribution or statistics. Duplicate/unplanned
+identities and malformed contracts are rejected as input errors. Optional fired
+tasks restrict credited quality only after full-matrix validity succeeds; an
+empty eligible set rejects promotion. Omitting attribution retains all tasks.
+
+Statistical evaluation reuses the existing paired lift/noninferiority/sample/CI
+gates. Trial budgets retain their existing pair-count unit, not arm count. The
+full planned pair count and all reported costs remain charged for this decision,
+including tasks excluded from attribution. The evidence digest commits to the
+plan, per-arm receipt digests and outcomes, fired tasks, budget and gate policy;
+reordering equivalent measurement rows does not change it.
+
+Boundary: this is a pure gate, not a paired executor or evidence authenticator.
+Trusted callers still have to verify the referenced raw receipts, bind them to
+immutable candidate/control identities and enforce pre-call budget admission.
+No receipt files are read by this function. Existing record-only and score-only
+APIs are not upgraded into proof of execution. Durable cross-round accounting,
+retry policy, generator scheduling, sealed evaluation and actual Runtime strategy
+activation remain open under M2-01b2/c. No model-quality improvement is claimed.
+
+Initial focused validation: 40 tests passed across the new measurement tests and
+the existing gate tests. Full frozen verification is recorded separately below.
+
+Final verification: `artifacts/verifications/mainline-evolver-measurements-final-20260911/manifest.json`
+is `pass`; 854 tests passed with six existing datetime deprecation warnings and
+no skips in 215.26 seconds. Native Docker live cases were enabled; the Windows
+CLI subset was not rerun for this pure gate change. Ruff, offline build, offline
+lock check and `git diff --check` passed. All 11 listed payload hashes verified;
+no `repoagent-session-` containers remained. The earlier 852-test bundle is
+retained separately. Two added regressions cover mixed-magnitude cost ordering
+and aggregate overflow; fixed-order `math.fsum` makes cost reduction independent
+of incoming row order. This result paragraph postdates the frozen source bundle;
+runtime code is unchanged since that run. No paid calls, commits or pushes.
+
+### TECH-100: Durable Paired-Check Execution and Budget Admission (2026-09-11)
+
+`ControlledEvolver.evaluate_paired_checks` now connects immutable materialization,
+verified deterministic prerequisites, a frozen paired plan, per-arm execution
+receipts and TECH-099's measurement/attribution gates. `DockerPairedCheckEvaluator`
+runs each check in a fresh detached worktree/container, using the baseline parent
+commit for control and the pinned candidate commit for treatment. Command,
+timeout/output limits, repetition matrix, image/configuration and binary grader
+version are shared. Normal nonzero test exits are quality failures; infrastructure
+errors are invalid measurements. There is no Agent invocation in this adapter.
+
+Before the first trial, `paired.reserved` persists the complete plan, its digest,
+pair count and worst-case cost (two arms times repetitions times per-trial cap).
+`EvolutionRunBudget` is frozen by the first reservation in the evolution ledger.
+Candidate, gate and run cost ceilings are checked before trial execution. Further
+candidates using that ledger consume the same cumulative allowance, including
+after coordinator restart. Decimal arithmetic avoids floating-point admission
+drift. A ledger-wide execution lock serializes paired coordinators; this first
+implementation does not claim parallel trial throughput.
+
+Reservation is deliberately conservative: trial slots and worst-case dollars
+are never automatically refunded, including unstarted arms after an abort. Actual
+known cost is reported separately. This avoids accidentally releasing uncertain
+spend but can exhaust a budget earlier than actual usage. The cap is passed to
+each trusted backend, not enforced against arbitrary backend code or at a shared
+Provider account. A backend reporting spend above its reservation preserves its
+receipt, latches `paired.budget_violation` and blocks further execution. Proper
+Provider call/token enforcement and reconciled settlement remain pending; the
+Docker adapter makes no billable calls and reports explicit zero model cost.
+
+Each trial writes `paired.trial_started` before execution, then atomically stores
+a JSON receipt before anchoring its digest in `paired.trial_completed`. Receipts
+include source/task/arm/repetition identities, raw structured evidence and the
+plan digest. Recovery verifies the hash chain, prerequisite and per-arm receipt
+digests and reconstructs the gate. Completed trials are never rerun. A reservation
+without a started trial can proceed; a completed arm followed by an unstarted arm
+can continue. Started-without-completed attempts, including unanchored receipt
+files, stop for explicit operator reconciliation. Missing final gate records can
+be rebuilt without new trials. Provider/infrastructure errors, unknown pricing
+and malformed evidence stop the remaining arms and fail measurement validity.
+
+The final paired decision binds the source/configuration plan and measurement
+evidence; changes to tasks, budgets, gate policy, evaluator identity or attribution
+cannot reuse the old run. Source drift before/after execution is rejected. No
+approval token is generated and no strategy is activated automatically. Existing
+record-only APIs remain trusted integration surfaces, not proof of execution.
+
+This closes M2-01b2b only. It does not run coding benchmarks, prove a quality lift,
+schedule generated candidates across rounds, score sealed tasks or load approved
+strategies into Runtime. The next slice is an actual Agent task evaluator with
+bounded model calls, followed by reconciled cost settlement and round scheduling.
+Raw local verification artifacts and source-migration notes remain ignored.
+
+Frozen verification: `artifacts/verifications/mainline-evolver-paired-execution-20260911/manifest.json`
+is `pass`. The full native-Docker-enabled suite passed 893 tests with six existing
+datetime deprecation warnings, no skips, in 245.53 seconds. The three new real
+paired-check cases also passed through the Windows Docker CLI in 20.02 seconds.
+Ruff, offline build, offline lock validation and diff whitespace checks passed;
+all 14 payload hashes verified and no `repoagent-session-` containers remained.
+The new coverage comprises 36 offline protocol/admission/recovery cases and
+three live paired-check cases. Interruption tests inject journal failures and
+KeyboardInterrupt; they are not a new OS-process SIGKILL campaign. This result
+paragraph postdates the frozen bundle; runtime code has not changed since it.
+No paid model calls, project commits or pushes were performed. The cumulative
+allowance currently covers paired trials only, not future generator model calls.
+
+### TECH-101: Trial-Local Model Admission and Usage Validation (2026-09-11)
+
+`BudgetedEvaluationClient` is an opt-in typed model client for future Agent
+evaluation workers. It runs the existing Provider contract behind a serialized
+trial-local admission gate. `EvaluationModelLimits` bounds call slots, requested
+output tokens, declared input ceiling, estimated USD and forwarded per-call
+timeout. Ordinary and compaction requests share the same allowance. The caller
+must supply an identified counter of the complete request, including messages,
+tools and protocol framing; no prompt-only estimator is silently substituted.
+
+Before invoking the leaf client, the gateway reserves one slot and a worst-case
+cost using the maximum declared fresh/cache-read/cache-write input rate and the
+requested output limit. Pricing reuses `ModelPricing`/`price_usage`, with all
+cache rates explicit. Decimal admission and conservative non-refunding match
+TECH-100's outer reservation policy. Oversized/invalid requests are rejected
+before invocation; timeout is narrowed to the configured ceiling. This is not
+an independent wall-clock kill mechanism or a Provider-account spend guarantee.
+Input admission is only as accurate as the supplied full-request counter, and
+the transport must honor output/timeout limits. Actual reported overruns are
+detected after the response and stop further calls, not retroactively prevented.
+
+The post-response budget check uses validated token ceilings and the maximum
+pricing rate, not a comparison between rounded display cost and exact Decimal
+reservation. A fractional-rate regression reproduced such a false rejection and
+now passes without adding a tolerance that could admit excess tokens.
+
+Responses must identify the configured model and report actual, nonnegative
+integer usage with unambiguous cache semantics. Unknown/estimated/mixed usage,
+invalid counters, model drift and reported overruns invalidate the measurement.
+Valid usage that exceeds a limit retains its known estimated cost for audit.
+`cost_complete` and `measurement_valid` are separate: a failed measurement can
+still have fully known cost. Exceptions, cancellation after send and interruption
+retain reservations and block further calls on that client. A pre-cancelled
+request consumes nothing. Error records retain types and local budget reason
+codes without raw prompts or exception text; requests are represented by digests.
+
+Known fallback composites are rejected, and returned fallback metadata invalidates
+single-call accounting. Arbitrary injected clients remain trusted integration
+code: hidden retries inside an opaque client cannot be inferred or prevented.
+The caller must use a leaf transport without such retries. Streaming deliberately
+emits only the validated terminal result so partial/unpriced tool calls cannot
+reach Agent execution. This is an evaluation-mode tradeoff, not a global change
+to interactive streaming. Where a `ModelProfile` exists, the wrapper exposes a
+pricing-bound copy so the normal Runtime call ledger/report remains consistent.
+
+Tests drive the real current `RepoAgent` tool loop with a scripted typed Provider:
+one admitted call writes the requested file but a denied second call fails the
+Turn; two admitted calls write the file and return a completed final answer with
+priced call evidence. Usage figures and prices in these tests are synthetic.
+They do not demonstrate inference quality, billable model behavior, candidate
+source loading, isolation of candidate Python code or hidden-grader integrity.
+
+The gateway's counters and evidence are in memory within one trial. They are not
+a new crash-resumable per-call ledger, and are not yet connected to the paired
+coordinator. The next adapter must keep the outer started-attempt fence, persist
+gateway evidence and bind its cost ceiling to the outer reservation. Loading
+the pinned Harness source into an isolated worker, separate task/grader roots,
+live Provider configuration, cost reconciliation and multi-round evolution remain
+open under M2-01b2c/c2. No existing runtime default or CLI setting was changed.
+
+Frozen verification: `artifacts/verifications/mainline-evolver-model-budget-20260911/manifest.json`
+is `pass`. The native-Docker-enabled full suite passed 934 tests with six existing
+datetime deprecation warnings, no skips, in 273.72 seconds. New model-gateway
+coverage comprises 41 cases; the combined gateway/accounting/Agent-loop focused
+run passed 59 tests. Ruff, offline build, offline lock check and diff whitespace
+checks passed; all 11 payload hashes verified and no `repoagent-session-`
+containers remained. Windows Docker CLI cases were not rerun for this model-only
+change. All new model responses/usage are scripted fixtures, with no paid calls.
+This result paragraph postdates the frozen bundle; runtime code is unchanged
+since that run. No project commit or push was performed.
+
+### TECH-102: Isolated Pinned Agent Snapshot Execution (2026-09-11)
+
+`ScriptedAgentSnapshotEvaluator` connects actual candidate Harness execution to
+the existing paired coordinator. Each arm exports the tracked `repoagent/`
+package from its pinned Git commit, without exposing Git metadata or creating a
+guest-controlled Git worktree. The trusted standalone driver imports that
+package and runs `RepoAgent.ask()` with a bounded scripted Provider, separate
+task/session directories and explicit read/write/patch/list tools. Checkpoints
+and skills are disabled for this scoped fixture adapter.
+
+The local Docker image is pinned by the evaluator descriptor. The adapter
+bundles the installed json-repair Python dependency offline, including its
+distribution/license metadata, and binds its version and file hashes. No image
+pull, package install, credential forwarding or network inference is performed.
+Only the package is exported, not the entire repository or arbitrary external
+plugins. Git export attributes apply; loaded primary-module hashes must match
+the original commit blobs.
+
+Task contracts freeze bounded text fixtures, response scripts and grading
+digests. Expected file contents never enter the worker input. After stopping the
+container, the host checks source/dependency inventories and input integrity,
+then grades exact file bytes without following symlinks or reading special
+files. Cleanup failure retains the private directory and fails the trial rather
+than grading while the worker may still be alive. Source files are writable in
+the private mount, with post-execution drift rejection; this is not a read-only
+source mount or a proof against a malicious candidate forging worker output.
+
+Receipts include loaded module paths/hashes, scripted call digests, task identity
+and host grading. Registered opaque CandidateCheck handles reuse paired plan
+binding, reservation, receipt verification and safe resume from TECH-100. A
+normal nonconverged Turn or wrong artifact scores zero; worker execution errors
+are infrastructure failures with no fabricated pass/score. Scripted model cost
+is explicitly zero, not inferred from missing Provider usage.
+
+Real Docker tests execute base and prompt-modified candidate packages and verify
+that the candidate marker appears only in the candidate worker. Both arms finish
+the same file-writing task, so the promotion gate correctly rejects a tie.
+Additional cases cover call-limit nonconvergence, incorrect artifacts and worker
+failure. Offline cases cover contract bounds, frozen inputs, hidden grading,
+source/input/dependency drift, special files and cleanup failure.
+
+This completes only M2-01b2c2a. It does not connect TECH-101's budget gateway to
+the worker, demonstrate model quality, provide tamper-proof usage attestation,
+settle reservations, run sealed evolution or activate candidates. A host-owned
+Provider proxy remains required before paid candidate evaluation. Runtime
+defaults and interactive CLI behavior are unchanged.
+
+Frozen verification: `artifacts/verifications/mainline-evolver-agent-snapshot-20260911/manifest.json`
+is `pass`. The native-Docker-enabled full suite passed 963 tests with six existing
+warnings, no skips, in 246.53 seconds. The Windows Docker CLI independently
+passed all four new live snapshot cases in 19.02 seconds. The new offline suite
+contains 25 cases. Ruff, offline build, offline lock and whitespace checks passed;
+all 14 evidence payload hashes verified and no `repoagent-session-` containers
+remained. This paragraph postdates the frozen bundle; runtime code is unchanged.
+No paid model calls, project commit or push were performed.
+
+### TECH-103: Host Model Request Dispatcher (2026-09-11)
+
+`HostModelProxy` introduces the host-side request boundary for the isolated
+worker, wrapping only a `BudgetedEvaluationClient`. JSON requests carry a strict
+sequence number and the neutral ModelRequest fields, including structured
+messages/tools. They cannot select a Provider, endpoint, credential, pricing or
+budget. Decoding bounds input bytes, rejects duplicate keys, nonfinite JSON and
+unknown top-level request fields, and reconstructs the existing typed contracts.
+This is a dispatcher, not yet a container IPC transport or network service.
+
+The host serializes dispatch and requires the exact next sequence number;
+duplicates and gaps never invoke the leaf Provider. It fences reuse before
+writing the started record, invokes the budget gateway, then delivers gateway
+evidence to a trusted sink before releasing the response. Sink failure, Provider
+failure, invalid usage or oversized response closes the proxy. Interruptions
+retain failure evidence and preserve their BaseException control flow. Successful
+replies omit arbitrary Provider metadata; error records contain exception types,
+not raw exception messages. Prompt contents are not included in proxy records.
+
+The sink is an injected trusted callback whose durable persistence contract must
+be implemented outside guest mounts. This module alone does not guarantee disk
+durability. Sequence state is trial-local, is not reconstructed after restart,
+and relies on the outer paired started-trial fence to prevent uncertain replay.
+Close serializes behind a running call rather than cancelling it. Transport
+framing, worker connection, cancellation, durable sink wiring and reservation
+settlement remain open under M2-01b2c2b. No live Provider was connected.
+
+Per the updated implementation-first workflow, verification is restricted to the
+new dispatcher and existing budget gateway tests, plus scoped lint/whitespace
+checks. Full-suite, live Docker and paid-model campaigns are deferred, not marked
+complete. The focused dispatcher/budget run passed 58 tests in 0.86 seconds;
+scoped Ruff and `git diff --check` passed. Mainline functionality remains the
+priority. No commit or push was performed.
+
+### TECH-104: Owned Model Pipes and Host Call Journal (2026-09-11)
+
+`run_model_worker` uses the existing persistent sandbox's prepare/finish process
+ownership contract to attach raw Docker exec stdin/stdout pipes. It does not use
+the MCP JSON-RPC parser, open a socket, enable container networking or forward
+host credentials. Newline-delimited bounded requests reach HostModelProxy; replies
+are written only after its evidence sink succeeds. A distinct terminal
+worker_result frame must be followed by clean EOF and a zero process exit.
+Malformed/oversized frames, duplicate keys, trailing output and idle deadlines
+fail the channel. Worker results remain untrusted and require host grading.
+
+`StdioModelClient` reconstructs the existing typed ModelResult contract in the
+worker and checks model/sequence identity. It carries structured messages and
+tool calls, omits cancellation objects and closes on failed exchanges. The
+worker must reserve stdout for protocol frames and redirect Agent diagnostics;
+the runner discards stderr to avoid unbounded diagnostic capture. This is a
+terminal-response channel, not interactive token streaming.
+
+`ModelCallJournal` creates a fresh private trial directory outside the resolved
+worker mount, rejects existing directories, and reuses EvolutionLedger's locking,
+hash chain and fsynced append. The parent directory must already exist and be
+host-owned. The new directory entry and initial journal creation are synced
+before calls. A trial directory cannot be silently reused after interruption.
+Started/completed/failed records contain host gateway evidence, not worker usage
+claims. Multi-mount isolation remains the integrating caller's responsibility.
+
+Startup and subprocess attachment capture ownership even on cancellation.
+Timeout/error paths kill and reap the attachment and finish its guest execution
+group. A synchronous Provider is settled on its host thread before proxy closure;
+it must honor its gateway timeout. This is not a hard deadline for arbitrary
+blocking transports and does not refund uncertain charges. Parent sandbox
+ownership remains with the caller, which must stop it after the trial.
+
+Focused functional coverage runs a real RepoAgent subprocess through host model
+calls, file writing and persisted journal verification. A separate opt-in Docker
+case checks the actual private-pipe transport. These use scripted host leaf
+Providers, not paid inference. They do not yet run the pinned snapshot through
+this channel. Snapshot assembly, paired plan identity, cost reconciliation and
+activation remain outstanding; TECH-104 is not the full M2 closure.
+
+The focused channel/proxy/budget test run passed all 68 cases. Scoped Ruff and
+whitespace checks passed. No full-suite or paid-model evaluation was run, and no
+project commit or push was performed.
+
+### TECH-105: Hosted Inference in Pinned Snapshot Trials (2026-09-11)
+
+`HostedAgentSnapshotEvaluator` integrates the host channel into the existing
+package-export, task-isolation and host-grading lifecycle. AgentSnapshotTask now
+declares scripted or host mode; host tasks must have no scripted responses.
+The host-mode input contains only task settings, model name and the pinned
+worker-client source, never grading answers, credentials or Provider config.
+The standalone driver uses explicit original stdin/stdout handles while Agent
+diagnostics remain redirected. Its loaded Runtime still comes from the pinned
+commit, not the controller's installed package.
+
+The evaluator descriptor freezes gateway settings, worker-client digest and the
+private journal root. The trusted factory must return a fresh unused budgeted
+client matching that descriptor for each arm. Before any model call, the adapter
+checks the positive outer USD reservation and rejects a gateway cost ceiling
+above it, incompatible call/output settings or a timeout above the task limit.
+Factories are trusted host code and must not themselves make billable calls.
+No implicit default Provider or pricing is selected.
+
+Each journal binds source identity, task digest, repetition, gateway digest and
+outer reservation. The result receipt includes host-measured cost/evidence and
+the journal path, event count and chain-tail digest. A terminal worker result
+alone cannot make missing/invalid model usage valid. Failed worker/proxy runs
+retain known cost when complete; unknown costs remain null, not zero. The
+existing paired coordinator reserves both arms, anchors these receipts and
+reuses completed results without constructing new clients. Reservations remain
+conservative: this does not implement refunds or uncertain-call reconciliation.
+
+Scripted snapshot behavior remains supported via shared worker-input/execution
+hooks. Existing source/input/dependency drift checks and post-stop grading apply
+to hosted mode as well. A later integrity or cleanup exception can leave the
+paired result with unknown cost even when a private journal contains usage;
+explicit journal reconciliation is still required. Journal integrity is anchored
+in the receipt; automatic resume revalidates the receipt, not the external journal
+file. Worker module reports are not cryptographic attestation against hostile
+Python code, and no promotion/activation guarantee is added here.
+
+Functional tests use scripted host leaf clients with synthetic usage/prices to
+run actual pinned source in Docker, reject insufficient outer reservations and
+exercise paired receipts/resume. These establish integration, not inference
+quality, paid billing correctness or optimization gains. Full-suite and paid-model
+campaigns remain deferred in accordance with the implementation-first workflow.
+The combined snapshot regression run passed 32 tests; the hosted-mode suite,
+including paired resume, passed all four tests. Scoped Ruff and whitespace checks
+passed. No project commit or push was performed.
+
+### TECH-106: Bounded Multi-Round Candidate Search (2026-09-11)
+
+`ControlledEvolver.search()` now connects a trusted proposal callback, existing
+candidate materialization/deterministic checks and paired execution into one
+multi-round workflow. The callback receives a detached training-only history and
+the fixed baseline commit, and returns CandidateProposal. It may wrap the existing
+CandidateGenerator; generation strategies are not hardcoded. Candidate baselines
+cannot change during a search and candidate IDs cannot repeat. Evaluator settings,
+checks, gate policy and budget settings are captured in the search plan and checked
+for drift before evaluation. This is fixed-baseline candidate search, not cumulative
+patch stacking or an automatically selected best candidate.
+
+Deterministic rejection skips model comparisons. Paired gate passes enter a
+qualified-candidate list, never approval or activation. TerminationTracker stops
+on round limits, consecutive non-improvements or consecutive generation errors.
+Infrastructure/error observations and execution exceptions block the search rather
+than treating uncertain work as a normal failed candidate and continuing to spend.
+Generation errors retain exception types without raw error text.
+
+Searches serialize per evolution ledger. Every transition writes a state snapshot
+and append-only ledger event. A new run directory is exclusive: existing IDs are
+refused even for completed runs. This conservative boundary does not implement
+search-level resume; candidate-level receipt recovery is still available through
+the existing APIs. Crash-time state may precede its ledger event; readers must not
+treat the standalone state JSON as approval evidence. Generator callbacks are
+trusted and their own model-call budgets are not managed by this search primitive.
+Paired execution continues enforcing cumulative evaluation reservations.
+
+Focused tests cover two real Git candidate rounds with fixture evaluators,
+unchanged user HEAD, deterministic skip, patience/error termination, detached
+history and stopping after uncertain paired execution. No model-quality campaign
+or paid calls were run. Sealed finalist validation and Runtime activation/rollback
+remain separate open steps; self-evolution is still partially implemented.
+The focused search/paired regression run passed 44 tests; scoped Ruff and
+whitespace checks passed. No commit or push was performed.
+
+### TECH-107: One-Shot Finalist Validation and Approval Handoff (2026-09-11)
+
+`ControlledEvolver.finalize_search()` reads the completed search ledger record,
+requires a finalist from its qualified list and matches the vault's training IDs
+to the actual search comparison tasks. It verifies the pinned candidate reference
+and records a protocol-protected sealed.started event before invoking an isolated
+backend. The event binds finalist commit, paired evidence, grader, sealed tasks,
+backend descriptor and explicit total cost cap. Any later attempt for that search,
+including a different finalist, is rejected. Generation has already ended and
+sealed outcomes are never added to proposal callback history.
+
+The backend contract extends the vault evaluation arguments with an explicit
+max_estimated_cost_usd. Its implementation is responsible for enforcing this cap
+before billable calls; post-result validation is not a spend-prevention mechanism.
+Finalization checks the artifact digest, complete unique task coverage, boolean
+outcomes, finite nonnegative reported cost, aggregate cost cap and unchanged
+candidate ref. The conservative initial policy requires every sealed task to pass.
+Failure or interruption is recorded and never automatically retried. Raw backend
+measurements stay in the vault artifact; the control ledger records a blind receipt
+and aggregate result. Trusted host code can access both; this is not protection
+against a hostile host/backend or a cross-search dataset-leakage guarantee.
+
+`request_finalist_approval()` only issues an approval token after a passing sealed
+result bound to the still-current paired evidence. It neither confirms approval
+nor activates anything. ActivationRegistry additionally checks that any candidate
+with sealed.started history has a newer passing sealed completion, matching paired
+evidence and a subsequent human confirmation. This prevents the old approval path
+from bypassing a failed or interrupted sealed finalization. Candidates without
+sealed history retain the previous registry contract for compatibility.
+
+The concrete hosted-snapshot sealed backend and Runtime strategy loading remain
+open. This implements finalization orchestration and approval handoff, not the full
+self-evolution deployment loop. Sealed calls are outside the search's paired
+reservation ledger and need their own budgeted backend; reservation settlement
+and automatic evidence recovery are not added here.
+
+Focused finalization/search/activation tests passed 17 cases with fixture backends;
+scoped Ruff passed. No full-suite, Docker campaign or paid inference was run.
+No project commit or push was performed.
+
+### TECH-108: Controlled Evolution Workflow Closure (2026-09-11)
+
+The opt-in isolated task path now runs from model-generated candidate to sealed
+validation, explicit human approval, execution of the approved source and rollback.
+`prepare_evolution()` coordinates search, verified paired settlement, training-only
+finalist selection, one-shot sealed execution and approval request. It rejects
+train/sealed mismatch before generation. Nothing confirms the token automatically.
+See `docs/architecture/evolver-workflow.md` for integration and scope boundaries.
+
+`ModelCandidateProposer` binds fixed Git source paths, mutation policy, training
+failure evidence and a generation-wide budget gateway. Only strict JSON text-file
+proposals are accepted; the existing CandidateGenerator constructs the bounded
+manifest. It never executes generated commands or modifies the checkout. Journal
+identity and model settings join the frozen search plan. Invalid model proposals
+can consume known generation cost but cannot become executable candidates.
+
+`SnapshotSealedBackend` uses HostedAgentSnapshotEvaluator rather than a stub
+grader. It requires the exact registered sealed task set and pre-reserves the sum
+of all task gateway ceilings under the sealed cap before execution. Runtime errors
+or missing usage abort finalization; only complete host-graded rows reach the
+all-tasks-pass policy. Generation and sealed costs have separate explicit budgets
+from paired search. The backend does not recycle unused cost between sealed tasks.
+
+`SnapshotDeployment` verifies candidate ref/tree/base identities, requires sealed
+validation and atomically confirms the candidate-specific token before registry
+activation. Approval confirmation now serializes single-use token consumption;
+wrong-candidate tokens are rejected without consumption. Each task captures the
+active immutable commit before execution and retains a deployment receipt with
+activation identity. Rollback changes subsequent tasks only. Multiple independent
+labels are not silently composed. Skill mode exports tracked `skills/` and loads
+that explicit source root; disabled-skill tasks cannot deploy a skill route.
+
+`settle_paired_costs()` verifies every anchored receipt and corresponding host
+journal, then records actual estimated cost and releases unused USD reservation
+once. Admission subtracts these protocol-authorized releases; pair quotas remain
+consumed. Incomplete, invalid or unpriced matrices do not settle. The separate
+operator reconciliation path can attribute known journal usage to a started trial
+but never invents quality, retries a call or refunds unknown work. Ambiguous
+cross-trial journal attribution fails closed. Provider-side missing usage still
+requires external evidence; no accounting mechanism can infer unreported charges.
+
+Explicit search resume now accepts finished runs and anchored completed-round
+boundaries. It reconstructs termination counters and checks the full plan before
+continuing. Uncertain rounds and attempts to restart generation after sealed
+selection are refused. A fresh model proposer journal changes plan identity,
+preventing a crash from silently resetting generation allowance. This supersedes
+TECH-106's unconditional existing-run refusal; uncertain attempts remain blocked.
+
+The end-to-end Docker fixture uses a model-generated prompt candidate, actual
+pinned RepoAgent execution and host model pipes. Baseline tasks fail the fixture,
+the approved candidate succeeds and rollback restores baseline behavior and
+module markers. A separate case verifies tracked Skill loading. Usage, pricing
+and model responses are synthetic. This demonstrates functional closure only;
+live effectiveness, the normal interactive CLI/TUI deployment surface and other
+mainline Skill/Memory parity work remain separate. No automatic user-checkout
+patch application or claim of tamper-proof Python worker attestation is made.
+
+Final recovery hardening adds `SnapshotDeployment.activate_confirmed()` for the
+durable-confirmation/before-activation crash boundary. It cannot invent approval
+or reuse a confirmation after activation/rollback. Budget-violation records block
+ordinary reservation settlement and require explicit operator review.
+
+Frozen verification bundles:
+`artifacts/verifications/mainline-evolver-workflow-20260911/manifest.json` passed
+271 Evolver/affected-Skill tests in 68.14 seconds with native Docker functional
+cases enabled. After the final recovery hardening,
+`artifacts/verifications/mainline-evolver-workflow-recovery-20260911/manifest.json`
+passed 52 targeted recovery/approval/paired tests in 7.19 seconds. These counts
+overlap and must not be added as unique test coverage. Both bundles passed scoped
+Ruff and whitespace checks; all 14 payload hashes verified. No owned test containers
+remained. This paragraph postdates both bundles; no runtime code changed after the
+recovery run. No paid calls, full-repository suite, commit or push were performed.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

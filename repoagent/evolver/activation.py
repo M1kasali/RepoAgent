@@ -9,6 +9,7 @@ import re
 import secrets
 
 from .contracts import EvolutionLabel
+from ..atomic_io import file_lock
 from .ledger import EvolutionLedger, _PROTOCOL_AUTHORITY
 
 
@@ -52,7 +53,11 @@ class ApprovalBroker:
         )
         return token
 
-    def confirm(self, token, *, actor):
+    def confirm(self, token, *, actor, expected_candidate_id=None):
+        with file_lock(self.ledger.path.parent / ".lock" / "approval-confirmation.lock"):
+            return self._confirm(token, actor=actor, expected_candidate_id=expected_candidate_id)
+
+    def _confirm(self, token, *, actor, expected_candidate_id):
         supplied = _token_digest(token)
         requests = {}
         consumed = set()
@@ -71,6 +76,8 @@ class ApprovalBroker:
         )
         if match is None:
             raise ActivationError("approval token is invalid or already consumed")
+        if expected_candidate_id is not None and match["candidate_id"] != expected_candidate_id:
+            raise ActivationError("approval token belongs to another candidate")
         return self.ledger._append_protocol(
             "approval.confirmed",
             actor=actor,
@@ -131,6 +138,14 @@ class ActivationRegistry:
         if paired[-1]["payload"].get("passed") is not True:
             raise ActivationError("latest paired gate did not pass")
         evidence_digest = paired[-1]["payload"].get("evidence_digest")
+        sealed_starts = [item for item in events if item["event_type"] == "sealed.started"]
+        if sealed_starts:
+            sealed = [item for item in events if item["event_type"] == "sealed.completed"
+                      and item["sequence"] > sealed_starts[-1]["sequence"]]
+            if not sealed or sealed[-1]["payload"].get("passed") is not True or sealed[-1]["payload"].get("paired_digest") != evidence_digest:
+                raise ActivationError("activation requires passing latest sealed evidence")
+            if approvals[-1]["sequence"] <= sealed[-1]["sequence"]:
+                raise ActivationError("approval must follow sealed finalization")
         if approvals[-1]["payload"].get("evidence_digest") != evidence_digest:
             raise ActivationError("approval does not bind the latest paired evidence")
         ordered = (

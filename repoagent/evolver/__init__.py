@@ -10,6 +10,7 @@ from .contracts import (
     MUTATION_POLICIES,
 )
 from .generator import CandidateGenerator
+from .evaluation import CandidateCheck, CandidateEvaluationError, DockerCandidateEvaluator
 from .activation import (
     ActivationError,
     ActivationRegistry,
@@ -24,6 +25,15 @@ from .gates import (
     TerminationTracker,
 )
 from .ledger import EvolutionLedger, LedgerIntegrityError
+from .measurements import PairedMeasurement
+from .paired_execution import DockerPairedCheckEvaluator, EvolutionRunBudget
+from .model_budget import BudgetedEvaluationClient, EvaluationBudgetError, EvaluationModelLimits
+from .agent_snapshot import AgentSnapshotTask, ScriptedAgentSnapshotEvaluator
+from .hosted_snapshot import HostedAgentSnapshotEvaluator
+from .search import SearchLimits
+from .sealed_snapshot import SnapshotSealedBackend
+from .deployment import SnapshotDeployment
+from .model_proposer import ModelCandidateProposer
 from .orchestrator import ControlledEvolver
 from .sealed import (
     SealedBoundaryError,
@@ -39,6 +49,21 @@ __all__ = [
     "ActiveStrategy",
     "ApprovalBroker",
     "CandidateBudget",
+    "CandidateCheck",
+    "CandidateEvaluationError",
+    "DockerCandidateEvaluator",
+    "DockerPairedCheckEvaluator",
+    "EvolutionRunBudget",
+    "BudgetedEvaluationClient",
+    "EvaluationBudgetError",
+    "EvaluationModelLimits",
+    "AgentSnapshotTask",
+    "ScriptedAgentSnapshotEvaluator",
+    "HostedAgentSnapshotEvaluator",
+    "SearchLimits",
+    "SnapshotSealedBackend",
+    "SnapshotDeployment",
+    "ModelCandidateProposer",
     "CandidateGenerator",
     "CandidateManifest",
     "CandidateMutation",
@@ -55,6 +80,7 @@ __all__ = [
     "LedgerIntegrityError",
     "MUTATION_POLICIES",
     "PairedPromotionGate",
+    "PairedMeasurement",
     "SealedBoundaryError",
     "SealedEvaluationVault",
     "SealedReceipt",
