@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import math
 import re
 import subprocess
+import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -17,6 +20,17 @@ class SandboxConfigurationError(ValueError):
 
 
 class SandboxAdapter(ABC):
+    @property
+    def supports_process_spawning(self):
+        return False
+
+    def start_process(self, command, args, *, cwd, env, startup_timeout=10):
+        """Return an owned async context of MCP streams, never host fallback."""
+        raise SandboxConfigurationError("sandbox does not support process spawning")
+
+    def close_processes(self):
+        """Retry cleanup of owned persistent processes after clients close."""
+
     @property
     @abstractmethod
     def identity(self) -> str: ...
@@ -71,6 +85,25 @@ class IsolatedSandboxAdapter(SandboxAdapter):
     def is_isolated(self):
         return True
 
+    @property
+    def supports_process_spawning(self):
+        return (
+            getattr(self._backend, "supports_process_spawning", False) is True
+            and callable(getattr(self._backend, "start_process", None))
+            and callable(getattr(self._backend, "close_processes", None))
+        )
+
+    def start_process(self, command, args, *, cwd, env, startup_timeout=10):
+        if not self.supports_process_spawning:
+            return super().start_process(command, args, cwd=cwd, env=env)
+        return self._backend.start_process(
+            command, args, cwd=cwd, env=dict(env), startup_timeout=startup_timeout
+        )
+
+    def close_processes(self):
+        if self.supports_process_spawning:
+            self._backend.close_processes()
+
     def execute(self, command, *, cwd, env, control):
         outcome = self._backend.execute(
             command, cwd=cwd, env=dict(env), control=control
@@ -99,6 +132,7 @@ class DockerSandboxAdapter(SandboxAdapter):
         workspace_path_converter=None,
         process_runner=run_bounded_process,
         cleanup_runner=subprocess.run,
+        lifecycle_runner=subprocess.run,
     ):
         self.workspace = Path(workspace).expanduser().resolve()
         self.executable = str(executable).strip()
@@ -132,6 +166,34 @@ class DockerSandboxAdapter(SandboxAdapter):
         self._workspace_path_converter = workspace_path_converter or str
         self._process_runner = process_runner
         self._cleanup_runner = cleanup_runner
+        self._lifecycle_runner = lifecycle_runner
+        self._process_names = set()
+        self._process_lock = threading.Lock()
+
+    @property
+    def supports_process_spawning(self):
+        return True
+
+    def start_process(self, command, args, *, cwd, env, startup_timeout=10):
+        from .sandbox_process import docker_process
+
+        return docker_process(
+            self, command, args, cwd=cwd, env=env, startup_timeout=startup_timeout
+        )
+
+    def close_processes(self):
+        from .sandbox_process import remove_process_container
+
+        with self._process_lock:
+            names = tuple(self._process_names)
+        errors = []
+        for name in names:
+            try:
+                remove_process_container(self, name)
+            except SandboxConfigurationError as exc:
+                errors.append(exc)
+        if errors:
+            raise SandboxConfigurationError("sandbox process cleanup failed") from errors[0]
 
     @property
     def identity(self):
@@ -174,7 +236,7 @@ class DockerSandboxAdapter(SandboxAdapter):
             "- The container root filesystem is read-only and network is disabled."
         )
 
-    def execute(self, command, *, cwd, env, control):
+    def _container_options(self, *, cwd, env, explicit_env=False):
         guest_root, guest_cwd = self._guest_paths(cwd)
         if not self.workspace.is_dir():
             raise FileNotFoundError(
@@ -185,13 +247,7 @@ class DockerSandboxAdapter(SandboxAdapter):
             raise SandboxConfigurationError(
                 "Docker workspace path conversion produced an invalid mount source"
             )
-        container_name = f"repoagent-{uuid.uuid4().hex}"
         argv = [
-            self.executable,
-            "run",
-            "--name",
-            container_name,
-            "--rm",
             "--network",
             self.network,
             "--read-only",
@@ -216,13 +272,19 @@ class DockerSandboxAdapter(SandboxAdapter):
             argv.extend(("--user", f"{os.getuid()}:{os.getgid()}"))
         for name, value in sorted(dict(env or {}).items()):
             name = str(name)
-            if name not in self._ENV_ALLOWLIST:
+            if not explicit_env and name not in self._ENV_ALLOWLIST:
                 continue
             if self._ENV_NAME.fullmatch(name) is None:
                 raise SandboxConfigurationError(
                     f"invalid Docker environment name: {name}"
                 )
             argv.extend(("--env", f"{name}={value}"))
+        return argv
+
+    def execute(self, command, *, cwd, env, control):
+        container_name = f"repoagent-{uuid.uuid4().hex}"
+        argv = [self.executable, "run", "--name", container_name, "--rm"]
+        argv.extend(self._container_options(cwd=cwd, env=env))
         argv.extend((self.image, "sh", "-lc", str(command)))
         try:
             return self._process_runner(
@@ -251,26 +313,59 @@ class DockerSandboxAdapter(SandboxAdapter):
                 pass
 
     def verify_available(self, *, timeout=10):
-        try:
-            result = subprocess.run(
-                [self.executable, "info", "--format", "{{.ServerVersion}}"],
-                cwd=self.workspace,
-                env=self._docker_environment(),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                timeout=timeout,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
             raise SandboxConfigurationError(
-                f"Docker sandbox is unavailable: {type(exc).__name__}"
-            ) from exc
-        if result.returncode != 0 or not result.stdout.strip():
-            detail = result.stderr.strip() or "Docker daemon probe failed"
-            raise SandboxConfigurationError(f"Docker sandbox is unavailable: {detail}")
-        return result.stdout.strip()
+                "Docker probe timeout must be finite and positive"
+            )
+        deadline = time.monotonic() + timeout
+        version = ""
+        probes = (
+            ("version", ["info", "--format", "{{.ServerVersion}}"]),
+            # Metadata can remain available while Desktop cannot wake its engine.
+            (
+                "container control",
+                ["container", "ls", "--all", "--filter",
+                 "name=repoagent-health-probe", "--format", "{{.ID}}"],
+            ),
+        )
+        for stage, args in probes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SandboxConfigurationError(
+                    f"Docker sandbox is unavailable: {stage} probe timed out"
+                )
+            try:
+                result = subprocess.run(
+                    [self.executable, *args],
+                    cwd=self.workspace,
+                    env=self._docker_environment(),
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=remaining,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise SandboxConfigurationError(
+                    f"Docker sandbox is unavailable: {stage} probe {type(exc).__name__}"
+                ) from exc
+            if result.returncode != 0 or (
+                stage == "version" and not result.stdout.strip()
+            ):
+                detail = result.stderr.strip() or "Docker daemon probe failed"
+                raise SandboxConfigurationError(
+                    f"Docker sandbox is unavailable: {stage} probe: {detail}"
+                )
+            if stage == "version":
+                version = result.stdout.strip()
+        return version
 
     @staticmethod
     def _docker_environment():
@@ -293,8 +388,13 @@ def build_sandbox_adapter(
     backend = str(backend or "direct").strip().lower()
     if backend == "direct":
         return DirectSandboxAdapter()
-    if backend == "docker":
-        adapter = DockerSandboxAdapter(
+    if backend in {"docker", "docker-persistent"}:
+        adapter_type = DockerSandboxAdapter
+        if backend == "docker-persistent":
+            from .sandbox_session import PersistentDockerSandboxAdapter
+
+            adapter_type = PersistentDockerSandboxAdapter
+        adapter = adapter_type(
             workspace,
             executable=docker_executable,
             image=docker_image,

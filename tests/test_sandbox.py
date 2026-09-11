@@ -310,3 +310,61 @@ def test_docker_adapter_probe_fails_before_runtime_without_daemon(
 
     with pytest.raises(SandboxConfigurationError, match="daemon unavailable"):
         adapter.verify_available()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "nonzero"])
+def test_docker_probe_rejects_version_only_health(tmp_path, monkeypatch, failure):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "info":
+            return subprocess.CompletedProcess(argv, 0, "29.7.2\n", "")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 1, "", "control plane unavailable")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SandboxConfigurationError, match="container control"):
+        DockerSandboxAdapter(tmp_path).verify_available(timeout=2)
+    assert len(calls) == 2
+
+
+def test_docker_probe_accepts_empty_list_and_shares_timeout(tmp_path, monkeypatch):
+    import time
+
+    calls = []
+    times = iter([10.0, 10.0, 13.0])
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "29.7.2\n" if argv[1] == "info" else "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(time, "monotonic", lambda: next(times))
+    assert DockerSandboxAdapter(tmp_path).verify_available(timeout=5) == "29.7.2"
+    assert [kwargs["timeout"] for _, kwargs in calls] == [5.0, 2.0]
+    assert calls[1][0][1:4] == ["container", "ls", "--all"]
+    assert all(kwargs["stdin"] == subprocess.DEVNULL for _, kwargs in calls)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), True, "5"])
+def test_docker_probe_rejects_invalid_deadline(tmp_path, monkeypatch, timeout):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not run"))
+    with pytest.raises(SandboxConfigurationError, match="finite and positive"):
+        DockerSandboxAdapter(tmp_path).verify_available(timeout=timeout)
+
+
+def test_docker_probe_does_not_start_second_command_after_deadline(tmp_path, monkeypatch):
+    import time
+
+    times = iter([10.0, 10.0, 16.0])
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "29.7.2", "")
+    monkeypatch.setattr(time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SandboxConfigurationError, match="container control probe timed out"):
+        DockerSandboxAdapter(tmp_path).verify_available(timeout=5)
+    assert len(calls) == 1

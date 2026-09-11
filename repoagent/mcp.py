@@ -8,9 +8,11 @@ import re
 from .tool_contracts import ToolDefinition, ToolEffect
 from .tool_execution import ToolRunnerOutput
 from .security import NetworkPolicy, NetworkPolicyError
+from .mcp_transport import MCPConnectionError, SDKMCPClient, StdioMCPClient, HTTPMCPClient
 
 
 MCP_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+MCP_REMOTE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 class MCPRegistrationError(ValueError):
@@ -34,16 +36,43 @@ class MCPToolRegistration:
 
 
 class MCPManager:
-    def __init__(self, servers=None, *, network_policy=None):
+    def __init__(self, servers=None, *, network_policy=None, sandbox_adapter=None, require_isolation=False):
         self._servers = dict(servers or {})
+        for client in self._servers.values():
+            if not isinstance(client, StdioMCPClient):
+                continue
+            bound = client.sandbox_adapter
+            if bound is not None and sandbox_adapter is not None and bound is not sandbox_adapter:
+                raise MCPConnectionError("stdio MCP must use the active sandbox adapter")
+            if (require_isolation or (sandbox_adapter is not None and sandbox_adapter.is_isolated)) and bound is None:
+                raise MCPConnectionError("stdio MCP cannot fall back to host execution under isolation")
         self._network_policy = network_policy or NetworkPolicy()
+        self._explicit_network_policy = network_policy
         self._registrations = ()
+        self._diagnostics = []
 
     @property
     def registrations(self):
         return self._registrations
 
+    @property
+    def diagnostics(self):
+        return tuple({**row, "connected": bool(getattr(self._servers[row["server"]], "connected", False))} for row in self._diagnostics)
+
+    def close(self):
+        errors = []
+        for client in self._servers.values():
+            if isinstance(client, SDKMCPClient):
+                try:
+                    client.close()
+                except Exception as exc:
+                    errors.append(exc)
+        if errors:
+            raise MCPConnectionError("MCP session cleanup failed") from errors[0]
+
     def discover(self, existing_names=()):
+        self._diagnostics = []
+        self._registrations = ()
         occupied = set(existing_names)
         entries = {}
         registrations = []
@@ -51,7 +80,15 @@ class MCPManager:
             self._validate_name(server_name, "server")
             client = self._servers[server_name]
             endpoint_url = getattr(client, "endpoint_url", None)
-            if endpoint_url:
+            if isinstance(client, HTTPMCPClient):
+                client.policy.network_policy = self._explicit_network_policy
+                try:
+                    client.policy.validate_url(endpoint_url)
+                except NetworkPolicyError:
+                    self._diagnostics.append({"server": server_name, "transport": client.transport,
+                                              "status": "unavailable", "tool_count": 0, "error_code": "network_denied"})
+                    raise
+            elif endpoint_url:
                 try:
                     self._network_policy.validate_url(endpoint_url)
                 except NetworkPolicyError as exc:
@@ -64,7 +101,14 @@ class MCPManager:
                 raise MCPRegistrationError(
                     f"MCP server {server_name!r} must implement list_tools and call_tool"
                 )
-            specs = client.list_tools()
+            try:
+                specs = client.list_tools()
+            except MCPConnectionError as exc:
+                self._diagnostics.append({"server": server_name, "transport": getattr(client, "transport", "injected"),
+                                          "status": "unavailable", "tool_count": 0, "error_code": exc.code})
+                if isinstance(client, SDKMCPClient) and not client.config.required and exc.code not in {"network_denied", "sandbox_failed"}:
+                    continue
+                raise
             if not isinstance(specs, (list, tuple)):
                 raise MCPRegistrationError(
                     f"MCP server {server_name!r} list_tools must return a sequence"
@@ -89,6 +133,8 @@ class MCPManager:
                         definition_id=definition.definition_id,
                     )
                 )
+            self._diagnostics.append({"server": server_name, "transport": getattr(client, "transport", "injected"),
+                                      "status": "discovered", "tool_count": len(specs), "error_code": ""})
         self._registrations = tuple(registrations)
         return entries
 
@@ -101,8 +147,10 @@ class MCPManager:
         if not isinstance(raw_spec, dict):
             raise MCPRegistrationError("MCP tool definition must be an object")
         remote_name = raw_spec.get("name")
-        self._validate_name(remote_name, "tool")
-        local_name = f"mcp_{server_name}_{remote_name}"
+        if not isinstance(remote_name, str) or not MCP_REMOTE_NAME_PATTERN.fullmatch(remote_name):
+            raise MCPRegistrationError(f"invalid MCP tool name: {remote_name!r}")
+        alias = re.sub(r"[.-]", "_", remote_name.lower())
+        local_name = f"mcp_{server_name}_{alias}"
         if len(local_name) > 64:
             raise MCPRegistrationError(f"MCP tool name is too long: {local_name}")
         schema = raw_spec.get("input_schema")

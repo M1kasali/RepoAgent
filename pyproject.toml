@@ -13,6 +13,9 @@ dependencies = [
   "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.28,<2", "anyio>=4,<5"]
+
 [project.scripts]
 repoagent = "repoagent.cli:main"
 repoagent-trace = "repoagent.trace_inspection:main"

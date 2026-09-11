@@ -27,9 +27,11 @@ from .product_commands import (
     directory_channel_report,
     doctor_report,
     gateway_report,
+    mcp_report,
     print_json,
     provider_report,
     sandbox_report,
+    sandbox_reconcile_report,
     session_report,
     skill_report,
 )
@@ -450,6 +452,10 @@ def build_arg_parser():
         help="Extra environment variable names to treat as secrets for trace/report redaction.",
     )
     parser.add_argument(
+        "--mcp-config", default=None,
+        help="Explicit trusted JSON configuration for MCP servers (requires repoagent[mcp]).",
+    )
+    parser.add_argument(
         "--max-steps",
         type=int,
         default=20,
@@ -480,9 +486,9 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--sandbox-backend",
-        choices=("direct", "docker"),
+        choices=("direct", "docker", "docker-persistent"),
         default="direct",
-        help="Shell execution backend; docker is isolated and fail-closed.",
+        help="Execution backend; docker-persistent shares shell/MCP state until shutdown.",
     )
     parser.add_argument(
         "--sandbox-image",
@@ -549,6 +555,7 @@ PRODUCT_COMMANDS = frozenset(
         "eval",
         "evolver",
         "gateway",
+        "mcp",
         "provider",
         "sandbox",
         "session",
@@ -569,6 +576,16 @@ def build_product_parser():
     doctor = commands.add_parser("doctor", help="Check the local runtime environment.")
     doctor.add_argument("--cwd", default=".")
 
+    mcp = commands.add_parser("mcp", help="Check explicitly configured MCP servers.")
+    mcp_commands = mcp.add_subparsers(dest="mcp_command", required=True)
+    mcp_check = mcp_commands.add_parser("check", help="Connect, discover and close without calling a model.")
+    mcp_check.add_argument("--config", required=True)
+    mcp_check.add_argument("--cwd", default=".")
+    mcp_check.add_argument("--backend", choices=("direct", "docker", "docker-persistent"), default="direct")
+    mcp_check.add_argument("--image", default="python:3.12-slim")
+    mcp_check.add_argument("--docker-executable", default="docker")
+    mcp_check.add_argument("--wsl-windows-path", action="store_true")
+
     provider = commands.add_parser("provider", help="Inspect model profiles.")
     provider_commands = provider.add_subparsers(dest="provider_command", required=True)
     provider_commands.add_parser("list", help="List configured model profiles.")
@@ -587,11 +604,16 @@ def build_product_parser():
     sandbox_commands = sandbox.add_subparsers(dest="sandbox_command", required=True)
     sandbox_status = sandbox_commands.add_parser("status", help="Show sandbox status.")
     sandbox_status.add_argument(
-        "--backend", choices=("direct", "docker"), default="direct"
+        "--backend", choices=("direct", "docker", "docker-persistent"), default="direct"
     )
     sandbox_status.add_argument("--cwd", default=".")
     sandbox_status.add_argument("--image", default="python:3.12-slim")
     sandbox_status.add_argument("--require-isolation", action="store_true")
+    sandbox_reconcile = sandbox_commands.add_parser(
+        "reconcile", help="Reclaim inactive owned persistent sandboxes; retain uncertain creates."
+    )
+    sandbox_reconcile.add_argument("--cwd", default=".")
+    sandbox_reconcile.add_argument("--docker-executable", default="docker")
 
     gateway = commands.add_parser("gateway", help="Inspect the local gateway.")
     gateway_commands = gateway.add_subparsers(dest="gateway_command", required=True)
@@ -641,6 +663,14 @@ def run_product_command(argv):
     try:
         if args.command == "doctor":
             payload = doctor_report(args.cwd)
+        elif args.command == "mcp":
+            from .evaluation.container import wsl_windows_path
+
+            payload = mcp_report(
+                args.config, args.cwd, backend=args.backend, image=args.image,
+                docker_executable=args.docker_executable,
+                path_converter=wsl_windows_path if args.wsl_windows_path else None,
+            )
         elif args.command == "provider":
             payload = provider_report(
                 args.name if args.provider_command == "show" else None
@@ -651,12 +681,13 @@ def run_product_command(argv):
                 args.session_id if args.session_command == "show" else None,
             )
         elif args.command == "sandbox":
-            payload = sandbox_report(
-                backend=args.backend,
-                cwd=args.cwd,
-                image=args.image,
-                require_isolation=args.require_isolation,
-            )
+            if args.sandbox_command == "reconcile":
+                payload = sandbox_reconcile_report(cwd=args.cwd, docker_executable=args.docker_executable)
+            else:
+                payload = sandbox_report(
+                    backend=args.backend, cwd=args.cwd, image=args.image,
+                    require_isolation=args.require_isolation,
+                )
         elif args.command == "gateway":
             payload = gateway_report(args.cwd)
         elif args.command == "channel":
@@ -683,6 +714,10 @@ def run_product_command(argv):
         print(str(exc), file=sys.stderr)
         return 2
     print_json(payload)
+    if args.command == "sandbox" and args.sandbox_command == "reconcile" and payload["status"] != "pass":
+        return 2
+    if args.command == "mcp" and payload["status"] != "pass":
+        return 2
     return 0
 
 

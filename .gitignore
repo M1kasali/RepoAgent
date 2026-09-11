@@ -45,6 +45,7 @@ docs/architecture/*
 !docs/architecture/implementation-ledger.md
 !docs/architecture/current-architecture.md
 !docs/architecture/polyglot-convergence-diagnosis-20260907.md
+!docs/architecture/polyglot-input-contract-audit-20260910.md
 !docs/roadmaps/
 docs/roadmaps/*
 !docs/roadmaps/agent-harness-implementation-plan.md

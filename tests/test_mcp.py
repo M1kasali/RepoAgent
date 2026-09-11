@@ -130,3 +130,13 @@ def test_mcp_discovery_rejects_private_endpoint_before_listing_tools(tmp_path):
 
     with pytest.raises(MCPRegistrationError, match="endpoint denied"):
         build_agent(tmp_path, client)
+
+
+def test_mcp_alias_preserves_original_remote_name_and_rejects_collisions(tmp_path):
+    client = FakeMCPClient([spec(name="Docs.Lookup-v2")])
+    agent = build_agent(tmp_path, client)
+    result = agent.execute_tool("mcp_docs_docs_lookup_v2", {"query": "x"})
+    assert result.status == "ok"
+    assert client.calls[0][0] == "Docs.Lookup-v2"
+    with pytest.raises(MCPRegistrationError, match="duplicate MCP tool name"):
+        build_agent(tmp_path, FakeMCPClient([spec(name="a-b"), spec(name="a.b")]))

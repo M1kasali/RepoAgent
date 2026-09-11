@@ -76,7 +76,7 @@ Copy this section for each completed capability.
 | Tool execution lifecycle | `repoagent/tool_execution.py`, `repoagent/tool_gateway.py`, `repoagent/tools.py` | deadlines, cancellation, bounded output, and process-tree convergence implemented | TECH-021 |
 | Tool batch scheduling | `repoagent/tool_gateway.py`, `repoagent/agent_loop.py` | bounded safe-read parallelism with deterministic result and evidence order | TECH-022 |
 | Mutation conflict policy | `repoagent/tool_scheduling.py`, `repoagent/tool_gateway.py` | explicit serial policy and auditable scheduling decisions | TECH-023 |
-| MCP runtime | `repoagent/mcp.py`, `repoagent/runtime.py` | namespaced discovery, schema validation, capability-scoped Gateway execution | TECH-024 |
+| MCP runtime | `repoagent/mcp.py`, `repoagent/mcp_transport.py`, `repoagent/runtime.py` | real stdio SDK sessions, explicit config, owned cleanup and Gateway execution; HTTP/SSE pending | TECH-024, TECH-089 |
 | Sandbox adapters | `repoagent/sandbox.py`, `repoagent/tools.py` | explicit direct-host identity and injected isolated-backend contract | TECH-025 |
 | Isolation enforcement | `repoagent/tool_gateway.py`, `repoagent/runtime.py` | definition- and task-level fail-closed isolation gate | TECH-026 |
 | Agent shell sandbox | `repoagent/sandbox.py`, `repoagent/runtime_assembly.py` | direct-host declaration plus fail-closed Docker isolation backend | TECH-073 |
@@ -3168,6 +3168,658 @@ candidate must be bound to a clean commit and a complete admitted paired budget.
 Eight deliberately selected development tasks are not a held-out benchmark;
 no quality claim or 225-task release is authorized by these contract tests.
 Go workspace-snapshot overhead remains a separate measurement/fix candidate.
+
+## TECH-087 - Frozen Environment-Context Paired Acceptance
+
+- Plan item: `P11-08` readiness, not the 225-task release gate
+- Status: experiment and offline evidence audit complete; quality promotion blocked
+- Completed: 2026-09-07
+- Production code change: none beyond the clean TECH-086 candidate `2f310fa`
+- Full protocol, task table and interpretation: [development result](polyglot-convergence-diagnosis-20260907.md#eight-pair-live-result)
+- Local artifacts: `artifacts/experiments/environment-pair-20260907/`
+
+Eight selected development tasks ran once per variant from separate clean detached
+worktrees: `b031b9a` control and `2f310fa` treatment. The local frozen driver uses
+the existing Polyglot Campaign, Docker grader and pairing APIs, not an alternate
+Agent implementation. Model, task/grader inputs, dataset commit, image digest,
+temperature and budgets were identical. The schedule alternated pair order.
+The entire USD 2.72 allocation was admitted before paid execution; no attempt
+was retried, skipped or silently replaced. All 16 campaigns passed engineering
+gates, including cost completeness and stable source provenance.
+
+End-to-end pass was 2/8 for both variants; hidden-code pass was 4/8 for both.
+Natural completion increased from 2/8 to 5/8, but the end-to-end pairing was
+1 win, 6 ties and 1 loss (exact two-sided McNemar p=1.0). The existing
+zero-paired-regression check fails. Task calls decreased from 92 to 74 and
+peak-rate estimated task cost from USD 0.119995896 to USD 0.106078688, while
+summed attempt duration increased from 1157.346 to 1275.838 seconds. These costs
+exclude the two uncached Provider probes. They use a new shared official pricing
+snapshot, not the historical run's rates or a billing invoice. Lower cost and
+more final answers do not establish improved coding quality.
+
+The environment description remained factually correct, but traces still showed
+temporary-file execution/lifetime mistakes in treatment. No success criteria,
+forced-summary classification, sandbox permissions or budgets were relaxed.
+The result does not authorize a quality-improvement claim or a 225-task run.
+
+The offline audit revalidated plan/driver binding, source identities, task/runtime
+pairings, logs/results and 96 checksummed Agent evidence files. It regenerated
+all eight strict paired comparisons without a model call and retained a whole-
+experiment checksum manifest; all 274 recorded experiment files also passed an
+independent hash/size check. Fresh closeout verification passed 637 tests in
+104.54 seconds, plus Ruff, diff checks, evaluation CLI and Polyglot plan checks.
+The six existing deprecation warnings remain. Logs, JUnit XML and checksums are
+retained in `artifacts/verifications/environment-pair-closeout-20260907/`.
+Only verification notes were updated afterward; the tested runtime is unchanged.
+This slice changes documentation and ignored local experiment/audit scripts,
+not production code beyond TECH-086.
+
+Review also found an input-contract risk: Rust accumulate directs the solver to
+withheld tests for its signature, and JavaScript beer-song does not expose the
+return-type requirement enforced by its hidden grader. Five dataset-file hashes
+bind these preliminary observations. Neither score was changed or excused.
+Before more paid quality tuning, audit public interface/build requirements and
+the runner/grader boundary. Any protocol correction requires a new version and
+fresh paired evidence; it must not leak current hidden tests or task answers.
+Go snapshot timing remains a separate, initially model-free measurement task.
+
+## TECH-088 - Canary Input-Contract Audit
+
+- Plan item: `P11-08` input-quality readiness
+- Status: offline audit complete; input-policy fix and new live trial not implemented
+- Completed: 2026-09-10
+- Production code changes: none
+- Detailed checklist: [24-task input audit](polyglot-input-contract-audit-20260910.md)
+- Local evidence: `artifacts/audits/polyglot-input-contract-20260910/`
+
+The audit replays the existing workspace materializer for the exact 24-task canary,
+checking task order, dataset commit/digest, task/grader pairing identities and
+visible-file bytes. It verifies all 144 files in the historical Agent bundles and
+the manifests/grades. It does not run the Agent, generated code, Docker or a model.
+Source instructions/files, metadata and grading observations are compared offline;
+reviewer-only evidence has no connection to runtime context assembly.
+
+Twenty tasks omit original build metadata. Four omit metadata-declared editor
+files, but their roles differ: two Java exception classes are missing public
+support candidates, while two Go `cases_test.go` files contain test answers and
+must stay hidden under the existing policy. This rules out blind `files.editor`
+copying as a fix. CMake/package scripts also contain grader-facing commands and
+cannot all be copied as supposedly harmless build context.
+
+Manual review records 17 identifiable contract gaps, four clarification items and
+three tasks with no specific interface gap found. These are scoped judgments,
+not an automated semantic completeness score or a count of excusable failures.
+Examples directly supported by old grades include exact Java exception wording,
+Python currency units, output line/list framing and C++ undeclared interfaces.
+JavaScript modulo errors, Rust type/ownership failures and unchanged solution
+stubs remain implementation failures. Append instructions were confirmed visible,
+including the Go cents and Python exception contracts; the adapter does not
+universally omit language-specific guidance.
+
+Eight local audit tests pass, including coverage/duplicate rejection, safe evidence
+paths, explicit editor-role review, real workspace isolation and support omissions.
+The separate structural readiness command still exits 1, reproducing the metadata
+gap. Passing audit tests do not claim that the underlying protocol is repaired.
+The historical 24-task and eight-pair results remain unchanged. Any next input
+correction must explicitly version its roles/contracts and visible-content digest,
+keep hidden answers isolated, and obtain fresh paired evidence rather than revise
+old scores. Go timing remains a separate offline measurement task.
+
+Closeout verification: 637 repository tests passed in 126.85 seconds with six
+existing deprecation warnings; Ruff, diff-check, CLI help and 24-task plan passed.
+The restricted attempt was interrupted; these results come from the approved
+unrestricted rerun. Audit and regression logs are retained in
+`artifacts/verifications/input-contract-audit-local-20260910/` and
+`artifacts/verifications/input-contract-audit-20260910/`. All 25 files listed by
+the audit and verification manifests passed hash checks. No paid model calls,
+production Python edits, commit or push were made for this audit.
+
+## TECH-089 - Runtime-owned Stdio MCP
+
+- Plan items: `M1-01`, partial `P3-08`
+- Status: stdio implemented; HTTP/SSE and sandbox-owned processes remain open
+- Implemented: 2026-09-11
+- Owning modules: `repoagent/mcp_transport.py`, `repoagent/mcp.py`
+- Integration: `runtime_assembly.py`, `runtime.py`, `cli.py`
+- Tests: `tests/test_mcp_transport.py`, `tests/test_mcp.py`
+
+Previously MCP accepted injected Python clients but did not establish real SDK
+connections. The `mcp` optional extra now provides the official v1 SDK (bounded
+below v2) and AnyIO. `--mcp-config` explicitly selects a trusted JSON file;
+repository-local files and environment variables never auto-enable server
+startup. Commands are executable/argv pairs, not shell strings. SDK-default
+minimal environment plus explicit config values replaces full environment
+inheritance. Secret-shaped configured environment values are redacted from tool
+output; stderr is discarded rather than published into logs or model context.
+
+A dedicated AnyIO portal bridges the synchronous Gateway to the SDK. One owner
+Task enters and leaves the stdio and ClientSession contexts so async cancellation
+scopes never cross Tasks. Discovery initializes the protocol, enumerates bounded
+pages and closes its temporary connection. The first actual tool call opens a
+persistent session, validates the catalog against discovery, and subsequent calls
+reuse it until Runtime shutdown. Catalog drift fails closed and requires Agent
+reconstruction, rather than silently changing the model-visible tool contract.
+
+Names are projected into RepoAgent's lowercase namespace while preserving the
+original remote name for calls. Alias collisions are rejected. Remote annotations
+cannot grant local read-only trust: configured server tools default to external,
+serial and subject to the existing approval/capability/argument/output controls.
+SDK text content is preserved, structured-only output has a JSON fallback, and
+`isError` becomes a failed Gateway result instead of a successful textual reply.
+
+Cancellation and deadlines are observed during startup and calls. Calls are
+cancelled and the uncertain session is closed; SDK cleanup owns process teardown.
+All owned clients are closed after scheduler drain, including when Memory or
+plugin shutdown fails. Injected legacy clients remain caller-owned. The standard
+CI test matrix installs the optional extra to execute real stdio fixtures rather
+than silently skipping them.
+
+Current isolated adapters do not expose persistent process spawning. Both config
+assembly and direct SDK-client injection reject stdio when isolation is required;
+there is no host fallback. Direct-mode servers are trusted local processes with
+the user's privileges: approval controls calls, not arbitrary server startup
+code. No hostile multi-tenant or unbounded wire-payload containment is claimed.
+Unsupported transports and invalid configuration fail explicitly. Unlike the
+reference's optional-server degradation, explicit configured startup failures
+currently fail Agent construction; per-server diagnostics/degradation is M1-02.
+
+Final verification: 654 tests passed in 134.10 seconds, with six existing
+`datetime.utcnow()` deprecation warnings. The MCP and product-entry subset passed
+39 tests in 9.81 seconds. Offline wheel/sdist build, frozen-lock check, Ruff,
+whitespace and CLI help passed. SDK versions were MCP 1.30.0 and AnyIO 4.15.1.
+Real stdio tests also verify process exit after shutdown/startup cancellation,
+no late tool side effect after cancellation, and cleanup despite Memory failure.
+
+Exact command argv, stdout/stderr and JUnit reports are retained in
+`artifacts/verifications/mainline-mcp-stdio-final-20260911/manifest.json`;
+all 16 payload hashes verified. These are local development checks, not a
+release-tag claim or paid Agent benchmark. The initial 653-test run is retained
+separately and superseded by this final run with the handshake-boundary test.
+No paid model calls, Polyglot executions, commits or pushes occurred.
+
+This slice is not a complete MCP, sandbox, Evolver or mainline-completion claim.
+The roadmap matrix was reconciled with actual implementation boundaries, and
+Polyglot work is paused.
+
+## TECH-090 - HTTP/SSE MCP and Connection Diagnostics
+
+- Plan item: `M1-02`; `M1-03` remains open
+- Implemented: 2026-09-11
+- Owning modules: `mcp_transport.py`, `mcp_http.py`, `mcp.py`
+- Integration: Runtime assembly, CLI `mcp check`, explicit network policy
+- Tests: `tests/test_mcp_http.py`, existing MCP and product-entry regression
+
+The official v1 SDK now supplies SSE and Streamable HTTP as well as stdio.
+`SDKMCPClient` owns the shared initialize/discover/reconnect/call/close protocol;
+transport subclasses only open streams and redact configured secrets. One owner
+Task retains the SDK contexts. Discovery sessions close immediately; calls
+revalidate the catalog and reuse a session until Runtime shutdown. Existing
+Gateway approval, schema, serial execution, error and cancellation behavior is
+preserved. HTTP configuration does not spawn a host process under Docker;
+sandbox-owned stdio remains explicitly unsupported.
+
+HTTP configuration accepts static authentication headers, positive finite
+startup/tool deadlines, `required` and `allow_private`. Reserved transport
+headers, duplicate names, malformed values and unknown config fields are rejected.
+No automatic OAuth or environment-proxy inheritance is enabled. Configuration
+must be selected explicitly; it is never auto-loaded from an untrusted repo.
+
+Each HTTP request is limited to the configured origin and all redirects are
+rejected. DNS results are checked in full before a verified IP is passed to the
+HTTP transport; the original Host and TLS SNI/verification hostname are retained.
+This prevents validation of one address followed by a second unvalidated DNS
+lookup for the actual socket. Private networks require a per-server explicit
+grant, intersected with any explicitly supplied Runtime NetworkPolicy. Default
+web-tool policy remains strict. Link-local/metadata, multicast, unspecified and
+reserved destinations remain denied even with a private-network grant. DNS runs
+in an abandonable worker so resolver delay does not hold a cancelled portal open;
+the abandoned lookup cannot initiate a later MCP connection.
+
+Configured services are required by default. `required: false` permits ordinary
+connection/authentication failure to leave that server unavailable without
+registering its tools. Network-policy denial and invalid configuration still
+fail closed. Safe diagnostics expose server name, transport, discovery state,
+tool count, current connection state and error code, not endpoint credentials.
+`repoagent mcp check --config ...` checks discovery and closes all owned sessions
+without a model call; any attempted unavailable server produces exit code 2.
+A required failure stops subsequent discovery rather than claiming unattempted
+servers passed. Configured header values are redacted from tool output; this is
+not a claim that arbitrary third-party debug logging is sanitized.
+
+Local real-SDK fixtures cover both wire transports, authenticated discovery and
+calls, server tool errors, cancellation/deadlines, Streamable HTTP session DELETE,
+required/optional failure, CLI/Agent integration, DNS destination pinning,
+blocked resolver cancellation, redirect refusal and proxy-environment isolation.
+HTTP cancellation closes the client session and is advisory to the remote
+server: remote side effects cannot be promised absent or rolled back. No hostile
+payload containment, OAuth, isolated persistent MCP process, live performance
+gain or upstream resume metric is claimed by this slice.
+
+Final verification: 684 tests passed in 122.16 seconds, with six existing
+`datetime.utcnow()` deprecation warnings; the MCP/product-entry subset passed
+69 tests in 15.84 seconds. Offline wheel/sdist build, frozen-lock check, Ruff,
+whitespace check and `mcp check --help` all passed. Compared with the preceding
+stdio slice, this adds 30 HTTP/SSE configuration, transport and policy tests.
+
+Commands, stdout/stderr, JUnit and source/environment provenance are retained in
+`artifacts/verifications/mainline-mcp-http-20260911/manifest.json`. All 16 payload
+hashes verified. This is local development evidence against a dirty worktree;
+the final documentation-only result entry was added after the frozen code run.
+No paid model calls, Polyglot campaigns, commits or pushes were made.
+
+## TECH-091 - Sandbox-owned MCP Process Lifecycle (Live Gate Open)
+
+Historical gate state at implementation time; local live acceptance is closed
+by TECH-093 below. Failed evidence is intentionally preserved.
+
+- Plan item: `M1-03a`; **not complete**, real Docker acceptance pending
+- Implemented: 2026-09-11
+- Modules: `sandbox.py`, `sandbox_process.py`, `mcp_transport.py`, `mcp.py`
+- Integration: Runtime shutdown, assembly, `mcp check --backend docker`
+- Tests: `test_sandbox_process.py`, opt-in `test_sandbox_mcp_live.py`
+
+The sandbox contract now advertises `supports_process_spawning` and exposes an
+owned async stream context plus retryable process cleanup. Unsupported adapters
+still reject the request. Injected backends must explicitly declare support and
+implement both startup and cleanup. A configured stdio client is bound to the
+active adapter instance; an isolated Runtime rejects host clients or a client
+bound to a different sandbox. MCP cannot silently fall back to host execution.
+
+Docker creates a named, non-running container before opening an attached stdin/
+stdout connection. The official MCP SDK owns JSON-RPC streams and host CLI
+teardown; the adapter owns the daemon-side container. Each MCP session has one
+container, reused across tool calls. Discovery releases its temporary session.
+The container uses the existing network-off, read-only root, non-root user,
+capability-drop, no-new-privileges, memory/CPU/PID and workspace-mount settings.
+The executable is an explicit image entrypoint, not a shell command, and image
+pulling is disabled. Only explicitly configured server environment values cross
+into the container; unrelated model credentials are not inherited. Docker
+administrators can inspect configured container environment; this is not a
+secret store or an isolation boundary against a hostile Docker daemon.
+
+Creation is shielded and bounded before attach, so ordinary startup cancellation
+does not abandon the CLI worker midway and then proceed to attach. Close removes
+the entire container before awaiting SDK CLI teardown, because killing a host
+Docker client alone does not terminate daemon-owned processes. Cleanup failure
+retains the name for retry and is surfaced, not silently treated as success.
+A reachable daemon must confirm absence after a failed remove. Runtime finally
+retries adapter cleanup even if MCP manager shutdown raises. Network-policy or
+sandbox lifecycle failure cannot be hidden by `required: false`.
+
+The diagnostic command can explicitly select Docker, image, executable and WSL
+path conversion. Ordinary Agent CLI assembly also passes the selected adapter
+into stdio clients. HTTP/SSE behavior is unchanged. Shell and MCP still use
+different containers and only share workspace files; shared VM/container state,
+durable ownership across host crashes and startup-request reconciliation after
+daemon timeouts are **not** claimed. Those lifecycle extensions remain M1-03b.
+
+Offline tests combine a fake Docker control plane with real official-SDK server
+subprocesses. They verify reuse, exact entrypoint/argv, resource flags, explicit
+environment, shutdown, timeout, create failure, cancellation during create,
+cleanup retry, optional-server fail-closed behavior, adapter binding and CLI/
+Runtime integration. These tests do not prove actual Docker isolation.
+
+Real Docker tests use an existing image with the workspace-installed SDK, no
+model or package download. The current host reports Docker 29.7.2, but MCP
+creation/cleanup failed with timeouts. Independent minimal create/remove and
+name-filter queries also timed out, while version, unfiltered container listing
+and an absent-object inspect succeeded. Both inherited and restricted host
+environments passed the version probe. Root cause remains unresolved; neither
+MCP correctness nor Docker health is inferred solely from these probes. Docker
+was not restarted because other project containers are running. Failed live
+fixture cleanup records pending names in local artifacts for operator follow-up.
+
+Frozen-code verification: 697 tests passed, three opt-in Docker tests skipped,
+and six existing deprecation warnings in 155.50 seconds. The sandbox/MCP/product
+subset passed 98 tests in 19.50 seconds. Offline build, lock check, Ruff,
+whitespace and MCP diagnostic help passed. These results include 13 new offline
+process-lifecycle tests and are not substituted for the Docker gate.
+
+The separately enabled real Docker run stopped at its first test with one
+startup failure and one teardown error in 40.46 seconds. Consequently the bundle
+at `artifacts/verifications/mainline-sandbox-mcp-20260911/manifest.json` is
+intentionally **fail**, not pass. All 19 payload hashes verified. Captured argv,
+stdout/stderr, JUnit and provenance retain both passing regressions and the
+failed acceptance. Cleanup-unconfirmed names are separately recorded under
+`artifacts/sandbox-mcp-live/`. The final result entry is documentation-only and
+postdates the frozen source run. No paid calls, image downloads, commits or
+pushes were performed.
+
+The final structured container-list snapshot also timed out. Its two hashed
+stdout/stderr payloads are retained in
+`artifacts/verifications/mainline-sandbox-cleanup-check-20260911/`; that bundle
+also reports fail. No final absence/cleanup claim is made from earlier successful
+unfiltered name/ID probes. Do not restart Docker without operator approval: other
+project containers were present during diagnosis.
+
+## TECH-092 - Docker Control-plane Preflight and WSL Diagnosis
+
+- Plan item: supporting `M1-03a`; real Docker gate remains open
+- Implemented: 2026-09-11
+- Modules: `sandbox.py`, `product_commands.py`
+- Tests: `test_sandbox.py`, `test_product_cli.py`
+
+The previous availability probe accepted a nonempty Docker version response.
+The actual failing host returned that response while a filtered container query
+timed out, allowing Agent construction to reach MCP creation against an unusable
+backend. New regression tests first reproduced this false positive: both a
+container-query timeout and a nonzero exit incorrectly passed the old probe.
+
+`verify_available` now requires both the version query and a read-only filtered
+container-control query to succeed. An empty container list is valid. Both
+subprocesses share one monotonic deadline; invalid/nonfinite deadlines fail
+before execution, and exhausting the first-stage budget prevents a second
+command from starting. Noninteractive probes use closed stdin. Errors identify
+the failing stage. Existing Agent assembly and sandbox status already consume
+this probe; Docker `mcp check` now also runs it before loading or starting any
+server. This is a control-plane gate, not proof that an image, mount or MCP server
+will work: real execution acceptance is still required.
+
+Host diagnosis found Docker Desktop repeatedly in `starting`. Backend logs
+reported WSL bootstrap failure while detecting the expected data disk; the same
+error exists in logs predating the restart attempts. The Docker VHDX file exists,
+but existence alone says nothing about disk integrity or successful attachment.
+Inherited stdin, closed stdin and empty stdin all reproduced the filtered-query
+timeout; both inherited and restricted process environments could read version
+metadata. Do not infer engine health from those partial responses.
+
+With operator approval, a 120-second normal Docker restart was attempted and
+failed to stop its processes. A targeted forced restart then stopped only
+processes from the Docker Desktop installation and terminated only the
+`docker-desktop` distribution before relaunching Desktop. The missing-disk
+bootstrap error persisted. No distribution was unregistered, no VHDX/data volume
+was deleted, and no Docker factory reset was performed. Current Ubuntu and other
+WSL distributions were not terminated. The environment remains unavailable;
+other project containers cannot be claimed restored from cached/partial lists.
+
+The next operator-controlled recovery step is a full WSL shutdown/restart, then
+rechecking Docker and the existing applications. It is not guaranteed to repair
+the disk attachment. `wsl --shutdown` terminates all running distributions and
+the WSL 2 VM, including this coding session, so it was deliberately not issued
+from this task. See the [Microsoft command reference](https://learn.microsoft.com/en-us/windows/wsl/basic-commands).
+Do not attempt unregister, reset or filesystem repair as a substitute without
+separate approval and data-protection planning.
+
+Frozen-code verification: 708 tests passed, three opt-in Docker tests skipped,
+and six existing deprecation warnings in 160.42 seconds. The focused sandbox,
+MCP and product-entry subset passed 92 tests in 16.77 seconds. All 11 new
+regressions passed; offline build, lock check, Ruff and whitespace check passed.
+
+The real five-second Docker probe reported `available: false` and a version-stage
+timeout after the restart attempts. The bundle
+`artifacts/verifications/mainline-sandbox-preflight-20260911/manifest.json`
+therefore intentionally reports fail despite the passing code checks; all 16
+payload hashes verified. No new live MCP containers were started during this
+verification because the prerequisite backend remained unavailable.
+
+The separate local bundle `artifacts/verifications/docker-wsl-diagnosis-20260911/`
+contains before/after host-log excerpts, file existence/size (not disk integrity)
+and Desktop's `starting` status. Its two payload hashes verified; successful
+evidence capture is not successful environment recovery. The result entry was
+added after the frozen source run. No paid model calls, commits or pushes were
+made. `M1-03a` and `M1-03b` remain unchecked.
+
+## TECH-093 - Real Docker MCP Acceptance and WSL Integration Recovery
+
+- Plan item: `M1-03a` accepted locally; `M1-03b` remains open
+- Implemented/verified: 2026-09-11
+- Tests: `tests/test_sandbox_mcp_live.py`
+- Production runtime behavior: unchanged from TECH-091/092
+
+After the operator restarted WSL, both Docker preflight stages succeeded again.
+The first real MCP attempt then failed immediately instead of timing out:
+Docker could not access the Ubuntu distribution's mount service. Host settings
+showed default-distribution integration disabled, and the default distribution
+was Ubuntu-24.04. Integration was explicitly enabled in the local Docker Desktop
+settings, then Desktop was stopped/started. Its first distro-agent connection
+timed out; after an independent WSL execution succeeded, another bounded Desktop
+restart established `/var/run/docker.sock` and the workspace mount service.
+This setting change is outside the Git repository and remains enabled. No host
+execution fallback, Windows staging copy of the repository, image download or
+WSL data reset was used to obtain passing results.
+
+The real official-SDK fixture runs inside the existing Python image against the
+actual WSL workspace mount. Six cases now cover discovery/session reuse,
+environment filtering and secret redaction, timeout, explicit cancellation,
+server crash with cleanup and reconnect, handshake timeout cleanup, and the
+isolated RepoAgent Tool Gateway entry with Runtime shutdown. Timeout and cancel
+checks require both daemon-confirmed container absence and absence of the
+fixture's delayed workspace side effect. Resource settings are inspected on the
+running container. These are local execution checks, not a hostile-code escape
+audit or a multi-tenant isolation guarantee.
+
+The earlier failed evidence bundles and cleanup-unconfirmed records are retained
+as historical observations. A new cleanup snapshot reconciles their names
+against the now-responsive daemon rather than rewriting those old records.
+No other project containers are started or deleted by these tests.
+
+This closes sandbox-owned MCP process acceptance only. Shell calls still use
+disposable containers and MCP sessions use separately owned containers; they
+share workspace files but not processes or `/tmp`. A shared persistent execution
+environment, durable crash ownership and daemon-timeout reconciliation remain
+M1-03b. Broader mainline completion and upstream performance numbers are not
+claimed.
+
+Frozen verification: the full suite passed 714 tests in 149.56 seconds,
+including all six real Docker cases through the Linux CLI, with six existing
+deprecation warnings and no skips. The same six Docker cases independently
+passed through the Windows CLI in 18.56 seconds. Both clients passed preflight;
+MCP SDK was 1.30.0 and the image ID, distro-integration flag and socket presence
+are retained in the recovery receipt. No MCP containers remained in the final
+snapshot, including the previously cleanup-unconfirmed name.
+
+`artifacts/verifications/mainline-sandbox-mcp-recovered-20260911/` contains the
+test output, JUnit and recovery receipt. All 16 payload hashes verified. This
+bundle retains overall fail solely because its offline build command selected
+the now-empty `/tmp/repoagent-uv-cache`; it does not conceal that failure.
+Without changing code or dependencies, `uv build --offline` using the existing
+user cache succeeded. The supplementary
+`artifacts/verifications/mainline-sandbox-mcp-build-recheck-20260911/` passes
+build, lock and whitespace checks; all six payload hashes verified. No package
+or image downloads were needed. Ruff also passed in the main bundle.
+
+These are dirty-worktree local checks, not clean-tag release evidence. The
+result entry postdates the frozen test run. No paid model calls, commits or
+pushes were made. M1-03a and P3-08 are checked; M1-03b remains unchecked.
+
+### TECH-094: Persistent Shell Lifecycle Foundation (2026-09-11)
+
+M1-03b1 adds `repoagent/sandbox_session.py:PersistentDockerSandboxAdapter` as a
+staged implementation, not a new CLI backend or a change to the product factory.
+The existing Docker shell/MCP behavior remains compatible. The staged adapter
+explicitly rejects MCP process spawning rather than inheriting the separate
+container implementation and falsely claiming a shared environment.
+
+`start()` or the first shell call creates one named, resource-bounded container
+with `--pull never`; subsequent calls use `docker exec` with per-call cwd and
+filtered environment. Workspace mounts and isolation flags reuse the existing
+Docker adapter. `/tmp` survives calls until `stop()`, but `cd` and `export` do
+not: each call still starts a new shell interpreter. Stop removes the owned
+container and resets its lifecycle; Runtime's existing `close_processes()` hook
+also invokes stop. No image or dependency installation occurs in the sandbox.
+
+A lock serializes start, execution and stop, prevents duplicate initialization,
+and avoids destroying a peer shell during cancellation. Waiting tool calls
+check cancellation and their original deadline before launching any work.
+Initialization consumes the same tool deadline. An interrupted call or runner
+exception removes the entire container, including daemon-owned descendants,
+and latches a broken-state error. The next call cannot silently substitute an
+empty sandbox; the caller must explicitly stop/reset it. Ordinary nonzero shell
+exit codes do not discard state. Failed cleanup retains the owned container
+name so a subsequent stop can retry.
+
+This container-wide cancellation policy is a conservative intermediate behavior,
+not the final shared MCP process contract. There is no parallel execution in
+this adapter yet. Background processes may survive normally completed calls
+until stop. Scratch state is not durable across stop/crash, and mounted workspace
+writes are not rolled back. Durable owner records and reconciliation of a Docker
+create request that completes after a daemon timeout remain open; immediate
+absence checks alone do not prove crash-safe cleanup. This is not a hostile-code
+escape audit or a multi-tenant isolation claim.
+
+Initial focused checks: 19 unit tests and four real Linux-Docker tests passed.
+The real cases verify scratch persistence with shell-local cwd/env reset, scratch
+removal versus workspace durability on restart, deadline and explicit cancellation
+with daemon-confirmed container absence and no delayed child write, and Tool
+Gateway execution with Runtime shutdown. M1-03b2 still needs independently owned
+MCP exec processes, mixed-call verification and product wiring; M1-03b remains
+unchecked. Frozen full-regression results are recorded below after execution.
+
+Frozen verification passed 737 tests in 161.19 seconds, with six pre-existing
+deprecation warnings and no skips. This includes the six existing MCP Docker
+cases and four new persistent-shell Docker cases through `/usr/bin/docker`.
+Ruff, offline wheel/sdist build, offline lock check and whitespace checks passed.
+`artifacts/verifications/mainline-persistent-shell-20260911/manifest.json` retains
+the commands, output, JUnit, source/environment provenance and overall `pass`;
+all 11 payload hashes were checked. A final daemon query found no remaining
+`repoagent-session-` containers. The Windows CLI was not rerun for this adapter.
+This result paragraph postdates the frozen run and does not change executable
+code. Evidence describes a local dirty worktree, not a clean-tag release or
+model-quality benchmark. No paid calls, commits or pushes were made.
+
+### TECH-095: Shared Docker Shell and MCP Process Ownership (2026-09-11)
+
+M1-03b2 replaces TECH-094's staged shell-only contract with independently owned
+execution groups in a shared container. `docker-persistent` is now an explicit
+factory/CLI selection for Agent execution, MCP diagnostics and sandbox status.
+The `direct` default and existing `docker` disposable semantics are unchanged.
+Runtime closes MCP clients before stopping the adapter; a subsequent tool call
+can lazily start a new container and reconnect MCP. Synchronous `ask()` still
+closes the Runtime after each invocation, so scratch lifetime is not cross-ask
+persistence. Shared state means workspace and scratch files, not shell-local
+cwd/environment inheritance.
+
+`sandbox_exec.py` keeps the official MCP SDK stdio bridge and owns its async
+context on the existing portal task. It uses Docker exec with a standalone guest
+supervisor from `sandbox_exec_guest.py`, sent as an argv string rather than
+installed into the repository or container. Startup validates Linux Python,
+`fcntl` and `waitid`, and captures the absolute interpreter path so explicit MCP
+PATH configuration cannot substitute the supervisor executable. Dependencies
+and images are never installed or pulled by this backend.
+
+Each execution receives a random handle bound to the container generation. A
+guest file lock serializes launch, PID registration and cancellation. Cancellation
+creates a tombstone before killing the process group; even an exec launch that
+arrives after cancellation cannot spawn its command. Tombstones persist until
+container stop. The supervisor waits with `WNOWAIT`, retaining the group leader's
+PID until the registry is cleared under the lock, avoiding a PID-reuse kill race.
+Normal completion also reaps remaining group members. The SDK transport does not
+parse JSON manually. Stream cleanup invokes guest cancellation before waiting
+for the host CLI to exit; cancellation of the portal does not skip cleanup.
+
+Normal shell/MCP timeout, cancellation, crash and client close preserve the
+container, scratch files and peer sessions. Shell calls remain serialized, but
+MCP sessions coexist with shell execution. A cancelled shell waiting for startup
+does not invalidate a peer. A failed guest cleanup fails closed by invalidating
+the whole container, preserving the broken-state latch until stop/reset. Cleanup
+of an old generation cannot target a replacement container. This is an explicit
+exceptional failure domain, not a promise that infrastructure failures preserve
+all peers.
+
+The registry is for trusted same-user workloads, not hostile tenants. Commands
+that detach into another session or tamper with control files are outside the
+per-execution cleanup guarantee; container stop still removes the environment.
+No rollback of workspace side effects is claimed. Tombstone storage grows with
+execution count within the bounded tmpfs until stop. Durable host-crash ownership,
+late Docker container-create reconciliation and restart recovery remain M1-03b3;
+M1-03b and overall sandbox parity remain unchecked. Shell parallelism, network
+allowlists and MicroVM isolation are not introduced here.
+
+Focused live checks cover scratch exchange in both directions, independent MCP
+close, peer PID survival under shell timeout/MCP timeout/cancellation/crash,
+handshake failure, reconnect, delayed-launch cancellation, and mixed Runtime
+shutdown/reuse. Product-entry tests cover factory selection and startup preflight.
+The frozen full-suite evidence and results are recorded below after execution.
+
+Required MCP discovery failure during Agent construction now closes the manager
+and sandbox before propagating the error. A failed constructor cannot rely on
+the caller later invoking `aclose()`. A real Docker regression covers this path.
+
+Frozen verification: 757 tests passed in 193.16 seconds, with six existing
+deprecation warnings and no skips, including 20 real Docker cases through the
+Linux CLI. The 14 shared-sandbox cases independently passed through Windows
+Docker CLI in 61.43 seconds. Ruff, offline wheel/sdist build, offline lock check
+and whitespace checks passed. The resulting wheel includes the shared adapter,
+stdio bridge and standalone guest supervisor. The final daemon query found no
+remaining `repoagent-session-` containers.
+
+Evidence is retained at
+`artifacts/verifications/mainline-shared-sandbox-20260911/manifest.json`, with
+overall `pass`; all 14 output/JUnit payload hashes were verified. This result
+entry postdates the frozen run. Evidence is for a local dirty worktree, not a
+clean-tag release or model-quality benchmark. No paid model calls, commits or
+pushes were made. M1-03b2 is checked; M1-03b3 remains the next lifecycle gap.
+
+### TECH-096: Durable Sandbox Ownership and Orphan Reconciliation (2026-09-11)
+
+M1-03b3 adds `sandbox_ownership.py` for the explicitly selected persistent Docker
+backend. Before sending Docker create, it writes and fsyncs a versioned ownership
+intent using existing atomic replacement primitives. Records live outside the
+workspace mount under the user's XDG state directory, keyed by resolved workspace
+hash and random container token. A record contains no command text, environment
+credentials or MCP payloads. Selecting a record directory inside the mounted
+workspace is rejected.
+
+A nonblocking host file lease remains held for the owned container lifetime.
+It protects live instances without PID-based liveness guesses or PID reuse
+assumptions, and is released by the OS when the owning process exits. Recoverers
+use the same per-record lease, so concurrent recovery skips an already-held
+record. Record replacement does not replace the lock inode. On normal shutdown
+or failed startup, cleanup updates the durable record and releases the lease;
+failed cleanup leaves the record available for retry.
+
+Creation receives random owner and workspace-scope labels. Reconciliation checks
+the recorded Docker engine ID and queries exact name plus both labels, validates
+full container IDs, then removes by ID rather than reusable name. A foreign
+engine is reported without deletion. Invalid records and unconfirmed daemon
+operations remain visible errors rather than being silently discarded. A required
+startup reconciliation error blocks new sandbox creation.
+
+The intent becomes `created` only after Docker acknowledges create. If the host
+or CLI fails earlier and no matching container is visible, reconciliation returns
+`watching` and retains the intent. It does not interpret one absence snapshot as
+proof that an outstanding daemon request cannot create later. An observed owned
+container can be removed and the record closed; an acknowledged creation that
+is now absent can also close. Closed records are retained as receipts. There is
+no automatic record compaction in this slice.
+
+New persistent sandbox starts reconcile old records, and
+`repoagent sandbox reconcile --cwd ... [--docker-executable ...]` exposes the
+same operation without starting a container or model. Structured output distinguishes
+active, removed, absent, closed, watching, other-engine, invalid and failed owners.
+Unconfirmed results produce `pending` and exit code 2. Recovery is on-demand,
+not an always-running reaper: a container appearing after one sweep is removed
+on a subsequent sweep. Deleting/moving host records loses automatic ownership
+discovery. This does not restore guest processes, roll back workspace writes,
+recover unrecorded legacy containers or promise power-loss recovery on every
+filesystem. Durable ownership applies to `docker-persistent`, not the historical
+disposable `docker` backend. Multi-tenant security and MicroVM isolation remain
+outside this delivery.
+
+Tests cover live-owner exclusion, uncertain absence then late appearance, known
+absence, changed engine, malformed records/IDs, journal write failure, daemon
+failure and immutable-ID deletion with both labels. Real Docker acceptance kills
+a child host process with SIGKILL and reclaims its container while preserving a
+live peer. Another case delays a captured create until after the timeout/absence
+path, then reclaims it through the real daemon; this is controlled fault injection,
+not a claim of reproducing a real Docker outage. A foreign-labelled same-name
+container remains untouched by reconciliation and is removed only by its test
+fixture. Frozen verification results follow after execution.
+
+Frozen verification passed 777 tests in 215.85 seconds, with six existing
+deprecation warnings and no skips, including 23 real Docker cases through the
+Linux CLI. The 17 persistent-sandbox cases independently passed through Windows
+Docker CLI in 88.41 seconds. Ruff, offline wheel/sdist build, offline lock check
+and whitespace checks passed. A final daemon query found no remaining
+`repoagent-session-` containers.
+
+`artifacts/verifications/mainline-sandbox-ownership-20260911/manifest.json`
+retains overall `pass`, source/environment provenance, stdout/stderr and JUnit;
+all 14 payload hashes were verified. This result entry postdates the frozen
+run. Evidence represents a local dirty worktree, not a clean-tag release or
+model-quality improvement. No paid model calls, commits or pushes were made.
+M1-03b3, M1-03b and M1-03 are checked within the documented Docker lifecycle
+scope; full Harness parity and the remaining M2/M3 work are not claimed.
 
 ## 5. Decision Index
 

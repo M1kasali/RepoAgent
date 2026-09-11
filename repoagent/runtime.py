@@ -233,9 +233,19 @@ class RepoAgent:
         self.active_skills = ()
         self.plugin_manager = plugin_manager
         self.network_policy = network_policy or securitylib.NetworkPolicy()
-        self.mcp_manager = MCPManager(mcp_servers, network_policy=self.network_policy)
+        self.mcp_manager = MCPManager(
+            mcp_servers, network_policy=network_policy,
+            sandbox_adapter=self.sandbox_adapter, require_isolation=self.require_isolation,
+        )
         self.tools = self.build_tools()
-        discovered_mcp_tools = self.mcp_manager.discover(self.tools)
+        try:
+            discovered_mcp_tools = self.mcp_manager.discover(self.tools)
+        except BaseException:
+            try:
+                self.mcp_manager.close()
+            finally:
+                self.sandbox_adapter.close_processes()
+            raise
         self.tools.update(discovered_mcp_tools)
         if self.plugin_manager is not None:
             self.tools = self.plugin_manager.register_tools(self.tools)
@@ -894,12 +904,20 @@ class RepoAgent:
         finally:
             self._scheduler = None
             self._scheduler_loop = None
-            if self._memory_backend_started:
-                await self.memory_backend.stop()
-                self._memory_backend_started = False
-            self.skill_watcher.stop()
-            if self.plugin_manager is not None:
-                self.plugin_manager.stop()
+            try:
+                if self._memory_backend_started:
+                    await self.memory_backend.stop()
+                    self._memory_backend_started = False
+            finally:
+                self.skill_watcher.stop()
+                try:
+                    if self.plugin_manager is not None:
+                        self.plugin_manager.stop()
+                finally:
+                    try:
+                        await asyncio.to_thread(self.mcp_manager.close)
+                    finally:
+                        await asyncio.to_thread(self.sandbox_adapter.close_processes)
 
     def next_tool_call_id(self):
         self._tool_call_sequence += 1

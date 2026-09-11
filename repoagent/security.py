@@ -31,7 +31,7 @@ class NetworkPolicy:
         host = parsed.hostname.lower().rstrip(".")
         if self.allowed_hosts and host not in self.allowed_hosts:
             raise NetworkPolicyError(f"network host is not allowlisted: {host}")
-        if host == "localhost" or host.endswith(".localhost"):
+        if not self.allow_private and (host == "localhost" or host.endswith(".localhost")):
             raise NetworkPolicyError("loopback network targets are denied")
         try:
             address = ipaddress.ip_address(host)

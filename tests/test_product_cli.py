@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from repoagent import FakeModelClient
 from repoagent.cli import build_arg_parser, main
 from repoagent.runtime_assembly import RuntimeAssembly
@@ -68,6 +70,62 @@ def test_doctor_provider_and_sandbox_commands_are_structured(tmp_path, capsys):
     assert sandbox["status"] == "fail"
     assert sandbox["is_isolated"] is False
     assert sandbox["available"] is True
+
+
+def test_persistent_sandbox_product_selection(tmp_path, capsys, monkeypatch):
+    from repoagent.sandbox_session import PersistentDockerSandboxAdapter
+
+    probes = []
+    monkeypatch.setattr(PersistentDockerSandboxAdapter, "verify_available", lambda self: probes.append(self.identity))
+    args = build_arg_parser().parse_args([
+        "--cwd", str(tmp_path), "--sandbox-backend", "docker-persistent"
+    ])
+    def client_factory(_):
+        client = FakeModelClient([])
+        client.profile = type("Profile", (), {
+            "max_output_tokens": 64, "context_window_tokens": 4096,
+            "context_window_source": "test",
+        })()
+        return client
+
+    assembly = RuntimeAssembly.from_arguments(
+        args, model_client_factory=client_factory,
+        secret_names_factory=lambda _: (),
+    )
+    agent = assembly.build()
+    assert isinstance(agent.sandbox_adapter, PersistentDockerSandboxAdapter)
+    assert agent.sandbox_adapter.container_name is None
+    assert probes
+    assert main(["sandbox", "status", "--cwd", str(tmp_path), "--backend", "docker-persistent"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["identity"].startswith("docker-persistent:")
+    assert report["is_isolated"] is True
+
+
+def test_sandbox_reconcile_reports_uncertain_ownership(tmp_path, capsys, monkeypatch):
+    from repoagent.sandbox_ownership import SandboxOwnership
+
+    monkeypatch.setattr(SandboxOwnership, "reconcile", lambda self, adapter: [{"token": "test", "status": "watching"}])
+    assert main(["sandbox", "reconcile", "--cwd", str(tmp_path)]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["schema"] == "repoagent.sandbox-reconcile/v1"
+    assert report["status"] == "pending"
+
+
+def test_mcp_check_rejects_version_only_docker_before_server_start(tmp_path, capsys, monkeypatch):
+    import subprocess
+    from repoagent.sandbox import DockerSandboxAdapter
+
+    config = tmp_path / "mcp.json"
+    config.write_text(json.dumps({"mcpServers": {"docs": {"command": "must-not-run"}}}))
+    def run(argv, **kwargs):
+        if argv[1] == "info":
+            return subprocess.CompletedProcess(argv, 0, "29.7.2", "")
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(DockerSandboxAdapter, "start_process", lambda *a, **k: pytest.fail("must not start MCP"))
+    assert main(["mcp", "check", "--backend", "docker", "--config", str(config), "--cwd", str(tmp_path)]) == 2
+    assert "container control" in capsys.readouterr().err
 
 
 def test_sandbox_status_reports_unavailable_docker_without_claiming_success(

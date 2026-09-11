@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .config import load_project_env, load_user_env
 from .paths import workspace_state_root
+from .mcp_transport import load_mcp_servers
 from .run_store import RunStore
 from .runtime import RepoAgent
 from .sandbox import build_sandbox_adapter
@@ -73,7 +74,7 @@ class RuntimeAssembly:
                 docker_workspace_path_converter=getattr(
                     args, "sandbox_workspace_path_converter", None
                 ),
-                verify=getattr(args, "sandbox_backend", "direct") == "docker",
+                verify=getattr(args, "sandbox_backend", "direct") in {"docker", "docker-persistent"},
             ),
             "max_new_tokens": profile.max_output_tokens,
             "context_token_budget": getattr(args, "context_token_budget", 3000),
@@ -83,6 +84,12 @@ class RuntimeAssembly:
             "checkpoint_policy": getattr(args, "checkpoint_policy", "interactive"),
             "interactive": not bool(getattr(args, "prompt", [])),
         }
+        if getattr(args, "mcp_config", None):
+            options["mcp_servers"] = load_mcp_servers(
+                args.mcp_config, cwd=self.workspace.repo_root,
+                sandbox_adapter=options["sandbox_adapter"],
+                require_isolation=options["require_isolation"],
+            )
         agent = (
             RepoAgent.from_session(session_id=session_id, **options)
             if session_id

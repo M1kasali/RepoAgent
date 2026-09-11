@@ -16,7 +16,7 @@ from .gateway import GatewayLease
 from .paths import workspace_state_root
 from .providers.profiles import BUILTIN_MODEL_PROFILES
 from .session_store import SessionStore
-from .sandbox import DockerSandboxAdapter
+from .sandbox import DockerSandboxAdapter, build_sandbox_adapter
 from .skills import SkillCatalog
 from .workspace import WorkspaceContext
 
@@ -26,6 +26,39 @@ def _workspace(cwd):
     load_user_env()
     load_project_env(workspace.repo_root)
     return workspace
+
+
+def mcp_report(config, cwd=".", *, backend="direct", image="python:3.12-slim", docker_executable="docker", path_converter=None):
+    from .mcp import MCPManager
+    from .mcp_transport import MCPConnectionError, load_mcp_servers
+    from .sandbox import build_sandbox_adapter
+
+    adapter = build_sandbox_adapter(
+        backend, cwd, docker_image=image, docker_executable=docker_executable,
+        docker_workspace_path_converter=path_converter,
+        verify=backend in {"docker", "docker-persistent"},
+    )
+    manager = MCPManager(
+        load_mcp_servers(config, cwd=cwd, sandbox_adapter=adapter),
+        sandbox_adapter=adapter,
+    )
+    try:
+        try:
+            manager.discover()
+        except MCPConnectionError:
+            pass
+    finally:
+        try:
+            manager.close()
+        finally:
+            adapter.close_processes()
+    rows = manager.diagnostics
+    return {
+        "schema": "repoagent.mcp-check/v1",
+        "status": "pass" if all(row["status"] == "discovered" for row in rows) else "fail",
+        "servers": rows,
+        "sandbox_identity": adapter.identity,
+    }
 
 
 def doctor_report(cwd="."):
@@ -116,6 +149,19 @@ def session_report(cwd=".", session_id=None):
     }
 
 
+def sandbox_reconcile_report(*, cwd=".", docker_executable="docker"):
+    from .sandbox_session import PersistentDockerSandboxAdapter
+
+    adapter = PersistentDockerSandboxAdapter(cwd, executable=docker_executable)
+    rows = adapter.ownership.reconcile(adapter)
+    incomplete = {"failed", "invalid", "watching", "other_engine"}
+    return {
+        "schema": "repoagent.sandbox-reconcile/v1",
+        "status": "pending" if any(row["status"] in incomplete for row in rows) else "pass",
+        "owners": rows,
+    }
+
+
 def sandbox_report(
     *,
     backend="direct",
@@ -126,8 +172,11 @@ def sandbox_report(
     backend = str(backend)
     available = True
     error = ""
-    if backend == "docker":
-        adapter = DockerSandboxAdapter(cwd, image=image)
+    if backend in {"docker", "docker-persistent"}:
+        adapter = (
+            DockerSandboxAdapter(cwd, image=image) if backend == "docker"
+            else build_sandbox_adapter(backend, cwd, docker_image=image)
+        )
         isolated = True
         identity = adapter.identity
         try:
@@ -255,6 +304,7 @@ def print_json(payload):
 
 
 __all__ = [
+    "mcp_report",
     "doctor_report",
     "directory_channel_report",
     "evolver_report",

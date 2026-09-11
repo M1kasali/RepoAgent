@@ -90,26 +90,76 @@ No TODO is complete merely because code exists. Completion requires:
 
 | Capability | Current RepoAgent | Target | Phase |
 | --- | --- | --- | --- |
-| Agent loop | PARTIAL: synchronous `ask()` loop | Turn-based runner with terminal outcomes | P1 |
-| Session state | PARTIAL: JSON sessions | versioned session manager, export, atomic lifecycle | P1 |
-| Scheduling | Missing | per-session FIFO, cross-session concurrency, quotas, cancellation | P1 |
-| Provider layer | PARTIAL: four clients | typed request/result, streaming, fallback, routing | P2 |
-| Call efficiency | PARTIAL: prompt metadata | actual usage ledger, pricing, cache accounting | P2 |
-| Tool execution | PARTIAL: registry and executor | one typed gateway, audit, timeout, bounded parallel reads | P3 |
-| MCP | Missing | discovery, schema projection, execution, trust policy | P3 |
-| Sandbox | Missing | direct and isolated adapters, fail-closed policy | P3 |
-| Context engine | PARTIAL: bounded prompt builder | segment assembly, token budgets, curator, compaction | P4 |
-| Memory | PARTIAL: working and durable Markdown | backend contract, consolidation, provenance, lifecycle | P4 |
-| Skills | Missing | discovery, activation, lazy loading, references, local pool | P4 |
-| Tracing | PARTIAL: JSONL events | correlation context, semantic events, usage, query/export | P5 |
-| Evaluation | PARTIAL: scripted metrics | reproducible campaign runner, paired trials, scorecards | P6 |
-| Subagents | Complete | isolated manager, budgets, messaging, roles, evidence | P7 |
-| Model routing | Complete | deterministic profiles, fallback chain, explainable selection | P7 |
-| Plugin system | Complete | manifest, discovery, external trust, lifecycle, Gateway-only tools | P7 |
-| CLI/TUI/Gateway | Complete | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
-| Channels/Cron | Complete | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
-| Evolver | Missing | isolated candidates, sealed gates, activation, rollback | P9 |
+| Agent loop | Core implemented, including native replay and recovery | Turn-based runner with terminal outcomes | P1 |
+| Session state | Core implemented | versioned session manager, export, atomic lifecycle | P1 |
+| Scheduling | Core implemented; live performance acceptance pending | per-session FIFO, cross-session concurrency, quotas, cancellation | P1 |
+| Provider layer | Core implemented; transport coverage parity incomplete | typed request/result, streaming, fallback, routing | P2 |
+| Call efficiency | Accounting implemented; paired live cost acceptance pending | actual usage ledger, pricing, cache accounting | P2 |
+| Tool execution | Core implemented | one typed gateway, audit, timeout, bounded parallel reads | P3 |
+| MCP | Three real transports, diagnostics and Docker-owned stdio implemented and locally verified | discovery, schema projection, execution, trust policy | P3 |
+| Sandbox | Docker lifecycle delivered: shared shell/MCP and durable on-demand orphan reconciliation; not full BoxLite parity | direct and isolated adapters, fail-closed policy | P3 |
+| Context engine | Budgeting, admission and deterministic compaction implemented | segment assembly, token budgets, curator, compaction | P4 |
+| Memory | Local backend implemented; external Memory integration pending | backend contract, consolidation, provenance, lifecycle | P4 |
+| Skills | PARTIAL: local catalog/keyword activation; retrieval pipeline parity pending | discovery, activation, lazy loading, references, local pool | P4 |
+| Tracing | Core implemented; own release-bound measurements required | correlation context, semantic events, usage, query/export | P5 |
+| Evaluation | Framework implemented; multidimensional acceptance parity incomplete | reproducible campaign runner, paired trials, scorecards | P6 |
+| Subagents | Base contracts implemented; live benefit unverified | isolated manager, budgets, messaging, roles, evidence | P7 |
+| Model routing | Deterministic profiles implemented | deterministic profiles, fallback chain, explainable selection | P7 |
+| Plugin system | Declarative tools implemented; upstream extension coverage incomplete | manifest, discovery, external trust, lifecycle, Gateway-only tools | P7 |
+| CLI/TUI/Gateway | PARTIAL: CLI/host/transport; native TUI parity pending | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
+| Channels/Cron | PARTIAL: directory adapter and basic schedules | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
+| Evolver | PARTIAL: components; multi-round execution and runtime activation pending | isolated candidates, sealed gates, activation, rollback | P9 |
 | Release engineering | Complete | clean-head evidence bundle, CI gates, migration docs | P10 |
+
+### Mainline Reconciliation - 2026-09-11
+
+The original phase checkboxes describe the implemented slices at their stated
+gates, not complete upstream behavioral parity. A component test is not a
+product workflow or live benefit demonstration. The current matrix above takes
+precedence over historical completion labels for remaining work. The mainline
+is the complete Harness, prioritized by scheduling, cost, memory/context, tools,
+tracing, reproducible evaluation and controlled evolution. P11 Polyglot tuning
+and further paid campaigns are paused; they do not block mainline delivery.
+
+- [x] `M1-01` Real stdio MCP SDK session, explicit configuration, discovery,
+  Gateway execution, cancellation, shutdown and no isolated-to-host fallback.
+  (TECH-089; not complete MCP parity.)
+- [x] `M1-02` HTTP/SSE transports with endpoint/redirect trust enforcement,
+  per-server connection diagnostics and real transport lifecycle tests.
+  (TECH-090; static authentication headers, not automatic OAuth.)
+- [x] `M1-03` Persistent sandbox process lifecycle and sandbox-owned MCP stdio;
+  preserve fail-closed behavior until a backend supports it. Split into:
+- [x] `M1-03a` Docker-owned persistent MCP processes: implementation, offline
+  regression and local real-Docker acceptance delivered (TECH-091/092/093).
+  WSL recovery and distro integration restored workspace mounting. Verified
+  discovery/reuse, cancellation/deadlines, crash/reconnect and runtime teardown.
+- [x] `M1-03b` A shared persistent sandbox for shell and MCP, with explicit
+  start/stop, cross-call state and cancellation ownership. Select
+  `docker-persistent`; the old `docker` backend retains disposable semantics.
+  Delivery is scoped to local Docker lifecycle, not full BoxLite parity:
+- [x] `M1-03b1` Staged persistent-shell adapter: explicit/lazy start, idempotent
+  stop, shared scratch state, serialized ownership and fail-closed invalidation;
+  unit and real-Docker checks (TECH-094; staged behavior superseded by TECH-095).
+- [x] `M1-03b2` Share the persistent container with MCP; independently terminate
+  exec processes, handle discovery/session teardown, wire the opt-in
+  `docker-persistent` factory/CLI and verify mixed calls and runtime reuse
+  (TECH-095). Normal cancellation preserves peers; cleanup failure invalidates
+  the environment. Shell calls remain serialized; no multi-tenant guarantee.
+- [x] `M1-03b3` Durable host-only ownership, live-owner leases, engine/label-bound
+  deletion, restart/CLI orphan reconciliation and retained uncertain-create
+  records (TECH-096). On-demand cleanup, not background recovery or process-state
+  restoration; real SIGKILL and controlled delayed-create acceptance included.
+- [ ] `M2-01` Connect Evolver generation, evaluation, multi-round state/resume,
+  human approval, actual runtime strategy selection and rollback end to end.
+- [ ] `M3-01` Align Skill retrieval/ranking/gating rather than equating keyword
+  activation with the complete retrieval pipeline.
+- [ ] `M3-02` Integrate an explicitly available external Memory backend and
+  verify recall/store/Turn injection; do not claim Myna or LoCoMo results from
+  local memory tests or unavailable external artifacts.
+- [ ] `M4-01` Complete product surfaces and channel adapters after core loops.
+- [ ] `M5-01` Run own module-specific paired acceptance for the seven mainline
+  areas, with frozen workload, baseline and retained receipts; do not borrow
+  upstream resume numbers or substitute Polyglot scores.
 
 ## 6. Dependency Order
 
@@ -141,7 +191,7 @@ Goal: establish a clean independent project identity and a green baseline.
 - [x] `P0-04` Verify the real CLI/model/session/trace/report path.
 - [x] `P0-05` Establish this implementation plan and technical ledger.
 - [x] `P0-06` Establish dependency-closed, module-by-module implementation boundaries.
-- [ ] `P0-07` Add CI for Ruff, full pytest, CLI smoke, script smoke, and package build.
+- [x] `P0-07` Add CI for Ruff, full pytest, CLI smoke, script smoke, and package build. (Delivered in P10.)
 - [ ] `P0-08` Freeze a baseline evidence manifest bound to the exact clean commit.
 
 Gate:
@@ -210,7 +260,7 @@ Goal: make one execution seam responsible for validation, authorization, isolati
 - [x] `P3-05` Implement timeout, cancellation, output limits, and structured failures.
 - [x] `P3-06` Add read-only bounded parallel execution with deterministic result order.
 - [x] `P3-07` Keep mutations serial unless an explicit conflict policy permits them.
-- [x] `P3-08` Implement MCP discovery, registration, execution, and schema validation.
+- [x] `P3-08` Implement MCP discovery, registration, execution, and schema validation. (Stdio, HTTP/SSE, diagnostics and Docker-owned stdio locally verified; shared persistent sandbox remains M1-03b.)
 - [x] `P3-09` Implement direct and isolated sandbox adapters.
 - [x] `P3-10` Fail closed when a task requires isolation but no sandbox is available.
 - [x] `P3-11` Add filesystem traversal, symlink, command injection, secret, SSRF, and network-policy tests.
@@ -378,13 +428,15 @@ inferring coding quality from scripted runtime contracts.
 - [x] `P11-07` Add paired baseline-versus-Harness execution with identical model, task, attempt, and decoding configuration. (The 24-pair live canary completed with matching identities: RepoAgent 4 wins, 20 ties, 0 losses versus pico-harness; exact two-sided McNemar p=0.125, so the result is directional rather than statistically significant.)
 - [ ] `P11-08` Run the frozen 225-task release campaign only after the canary safety, completion, and budget gates pass.
 
-`P11-08` readiness work (2026-09-07, TECH-085):
+`P11-08` readiness work (2026-09-07 onward, TECH-085 through TECH-088):
 
 - [x] Retain all five single-task budget/recovery diagnostics, including protocol failure and false convergence; none is a release-quality improvement result.
 - [x] Withdraw unproven budget-reminder and retry-correction prompt candidates.
 - [x] Stop exhausted empty recovery without manufacturing a successful final answer; retain checkpoint and unsuccessful-task cost evidence.
-- [x] Diagnose the four code-pass/non-converged traces and define an eight-task, single-variable development protocol with explicit stop criteria. ([Diagnosis](../architecture/polyglot-convergence-diagnosis-20260907.md); no paid run yet.)
-- [ ] Bind the environment-context candidate to a clean commit and an admitted paired budget, then execute the development protocol.
+- [x] Diagnose the four code-pass/non-converged traces and define an eight-task, single-variable development protocol with explicit stop criteria. ([Diagnosis](../architecture/polyglot-convergence-diagnosis-20260907.md).)
+- [x] Bind the environment-context candidate to a clean commit and an admitted paired budget, then execute the development protocol. (Clean `b031b9a` versus `2f310fa`: 16/16 executed, 96 Agent evidence files verified, engineering gates passed. Both variants passed 2/8 end-to-end and 4/8 code checks; 1W/6T/1L fails the zero-regression promotion gate. See TECH-087.)
+- [x] Audit model-visible task contracts and build metadata before more paid quality tuning. (TECH-088: all 24 canary tasks reviewed; 20 omit build metadata, two omit Java support candidates, and two Go editor files correctly remain hidden test data. [Per-task audit](../architecture/polyglot-input-contract-audit-20260910.md). No scores or runtime behavior changed.)
+- [ ] Implement a versioned runner-input policy with explicit file roles and reviewed public interface/build contracts; prevent editor/test-data leakage, bind visible contents and roles in pairing identities, and verify with offline fixtures before any paid rerun. Do not retrospectively rescore v1 or combine the Go performance change into this treatment.
 - [ ] Measure workspace-snapshot overhead separately before changing Go tool deadlines or cache tracking.
 - [ ] Re-run the complete canary against a clean, fixed baseline before authorizing the 225-task campaign.
 

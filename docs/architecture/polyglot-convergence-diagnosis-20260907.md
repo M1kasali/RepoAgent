@@ -1,6 +1,6 @@
 # Polyglot Convergence Diagnosis
 
-Date: 2026-09-07. Current baseline: `b031b9a`.
+Date: 2026-09-07. Diagnosis baseline: `b031b9a`; evaluated candidate: `2f310fa`.
 
 ## Scope and Evidence
 
@@ -108,7 +108,7 @@ diff checks, evaluation CLI and Polyglot plan checks. Six existing deprecation
 warnings remain. Logs and JUnit XML are retained under
 `artifacts/verifications/sandbox-execution-context-20260907/`.
 
-## Next Experiment
+## Frozen Development Protocol
 
 - Baseline: clean `b031b9a`; candidate: a clean commit containing only this
   environment-context change and its tests/docs. Do not run a dirty live candidate.
@@ -131,9 +131,148 @@ warnings remain. Logs and JUnit XML are retained under
 - Stop on isolation/provenance/budget failure. Do not keep rerunning individual
   tasks until a favorable result appears. A net quality loss or new regression
   blocks promotion; an unchanged result does not justify an improvement claim.
-- No live quality experiment was launched in this diagnosis. Verify the real
+- No live quality experiment was launched during the initial diagnosis. Verify the real
   container contract without a model first. Measure Go snapshot overhead as a
   separate candidate, not part of the same treatment.
 - Only after a useful development signal, repeat the complete 24-task confirmation
   canary. Because that set has already informed debugging, do not call it an
   untouched holdout. The 225-task release remains gated.
+
+## Eight-Pair Live Result
+
+The protocol above subsequently completed all 16 attempts on 2026-09-07. Control
+was clean `b031b9a4346da342b1c094445a22e7b940378c2a`; treatment was clean
+`2f310faa576e1ae6f226d0e6d48a37d200642cf4`. Both ran from separate detached
+worktrees, not the documentation worktree. No task was rerun or skipped.
+Task order was fixed, alternating control-first and treatment-first by pair.
+All per-campaign engineering gates passed, including source stability, execution
+coverage, infrastructure errors, call limits and complete task-cost accounting.
+
+Model/runtime settings remained those listed above. Dataset commit was
+`7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f`; the Docker image was
+`repoagent-polyglot@sha256:abb4183a827978e195474e6a0594ffa59916a1efcd625ecde6ab5d3386381096`.
+Both variants used Windows-backed workspaces through WSL/Docker Desktop, with
+1 GiB memory, one CPU, 128 PIDs and no container network.
+
+The [official price snapshot](https://api-docs.deepseek.com/quick_start/pricing/)
+used USD 0.44 input/cache-miss, 1.32 output and 0.014 cache-read per million tokens.
+These peak-rate estimates replace the older experiment's price assumptions for
+this run only; they are not invoices. Admission allowed USD 0.17 per attempt,
+USD 2.72 total, with a conservative USD 2.568192 upper estimate including probes.
+
+| Metric, eight tasks per variant | Control | Treatment |
+| --- | ---: | ---: |
+| End-to-end passes | 2/8 | 2/8 |
+| Hidden-code passes | 4/8 | 4/8 |
+| Naturally completed turns | 2/8 | 5/8 |
+| Task Provider calls | 92 | 74 |
+| Tool steps | 78 | 64 |
+| Sum of attempt durations, seconds | 1157.346 | 1275.838 |
+| Estimated task cost, USD | 0.119996 | 0.106079 |
+
+Durations include grading and applicable preflight work; they are not a pure
+model or Tool microbenchmark. Costs exclude the two uncached Provider probes
+(one per variant). There were 166 task calls plus two probe calls. All task
+costs were complete; combined estimated task cost was USD 0.226074584.
+Fewer calls (19.6%) and lower task cost (11.6%) coincided with greater total
+duration (10.2%), not a quality improvement.
+
+`E/C/N` below denotes end-to-end pass, code pass and natural completion. `1` means
+the criterion passed. A forced summary remains unsuccessful.
+
+| Task | Control E/C/N | Treatment E/C/N | Calls, control/treatment |
+| --- | --- | --- | --- |
+| `go/alphametics` | 0/0/0 | 0/1/0 | 10/13 |
+| `rust/accumulate` | 0/1/0 | 0/0/1 | 13/7 |
+| `rust/acronym` | 0/0/0 | 0/0/1 | 13/9 |
+| `rust/book-store` | 0/0/0 | 0/0/0 | 13/13 |
+| `go/book-store` | 0/1/0 | 0/1/0 | 14/14 |
+| `javascript/beer-song` | 1/1/1 | 0/0/1 | 10/7 |
+| `python/affine-cipher` | 1/1/1 | 1/1/1 | 6/6 |
+| `python/bottle-song` | 0/0/0 | 1/1/1 | 13/5 |
+
+The end-to-end comparison is **1 win, 6 ties, 1 loss**, with exact two-sided
+McNemar p=1.0. The existing zero-paired-regression gate fails on
+`javascript/beer-song`; the win on `python/bottle-song` does not cancel that gate.
+This small, selected development sample neither establishes superiority nor
+statistical equivalence. The environment contract is verified as factual, but
+its promotion as a quality optimization is not supported. No 24-task confirmation
+or 225-task campaign was launched from this result.
+
+### Mechanism and Failure Review
+
+Manual trace review counted affected tasks, not error strings or independent
+statistical samples. These are post-hoc observations, not new scoring rules:
+
+| Observed environment failure | Control tasks | Treatment tasks |
+| --- | --- | --- |
+| Host source path used inside Docker | `rust/book-store` (request 10) | None observed |
+| Execution denied under `/tmp` | `rust/accumulate` (10), `rust/acronym` (11) | `rust/acronym` (6), `rust/book-store` (8) |
+| Reuse of discarded `/tmp` project/files | `rust/acronym` (12), `rust/book-store` (11), `go/book-store` (8) | `go/alphametics` (5-6), `rust/book-store` (9) |
+
+The context did not eliminate temporary-file mistakes. The treatment's Rust
+book-store attempt validated algorithms in scratch files but never replaced the
+target implementation before the step limit. Its Rust acronym implementation
+missed camel-case handling; its own checks also initially used an incorrect
+expected value. A shell status of `ok` was not treated as proof that self-tests
+passed: pipelines and trailing cleanup commands sometimes masked nonzero exits.
+
+The control Go alphametics attempt exhausted empty-response recovery without
+writing its solution. Both Go book-store attempts passed hidden tests but failed
+to finish naturally. Large Tool durations remain visible; this experiment does
+not separate snapshot hashing, Docker startup and command execution costs.
+
+### Input-Contract Risk
+
+The visible Rust accumulate instructions explicitly direct the solver to tests
+for the expected signature, while the append document suggests generalizing
+against those tests. The visible skeleton fixes `Vec<i32>`, but the runner
+withholds the tests that require generic input/output and a mutable closure.
+The JavaScript beer-song instructions and skeleton do not specify whether the
+return value is a string or an array; the hidden grader requires an array.
+Treatment used a string and failed, while control happened to return an array.
+
+Both variants received identical frozen inputs, so the paired observations remain
+valid for this protocol. However, attributing every failure to coding ability
+would be unjustified. This is a custom hidden-test protocol over the Polyglot
+dataset, not evidence of an official Aider leaderboard score. No grader content
+was sent back to these attempts and no result was rescored after this finding.
+
+Before further paid quality tuning, audit the model-visible interface contracts
+and build metadata across the canary. Distinguish public task requirements from
+hidden assertions/reference solutions; do not silently expose the current grader
+or insert task-specific answers. Any input-policy correction must have a new
+contract/digest and a newly frozen paired experiment. Separately measure Go
+snapshot overhead without a model before changing deadlines or cache tracking.
+
+### Evidence and Reproduction
+
+Local, ignored evidence is retained in
+`artifacts/experiments/environment-pair-20260907/`. Active `plan.json` binds the
+driver hash, clean sources, dataset, image, schedule and budget. `progress.json`,
+`summary.json`, eight paired reports and all 16 per-attempt outputs retain failures
+as well as passes. The preflight-v1 driver/plan are archived setup versions, not
+additional paid trials.
+
+`analyze.py` revalidates the plan/driver binding, result and log hashes, clean-source
+identities, task/runtime pairings and all 96 files in the 16 Agent bundles. It
+also records the five source-file hashes supporting the input-contract findings.
+`analysis.json` contains totals and request-indexed timelines; `audit-manifest.json`
+checksums the local experiment files. All 274 recorded files passed an independent
+hash/size check. Timeline previews are truncated; original traces remain
+authoritative. The offline audit passed and made zero Provider calls.
+
+```bash
+.venv/bin/python artifacts/experiments/environment-pair-20260907/analyze.py
+```
+
+The live driver intentionally refuses automatic resume/rerun. Provider model
+aliases, remote cache state and stochastic outputs prevent a promise of identical
+future live results. Offline evidence reconstruction is distinct from rerunning
+the model. These observations are not resume-ready quality-improvement claims.
+
+Fresh closeout verification passed 637 tests in 104.54 seconds, with the six
+existing deprecation warnings, plus Ruff, diff checks, evaluation CLI and
+Polyglot plan checks. The checksummed logs and JUnit XML are in
+`artifacts/verifications/environment-pair-closeout-20260907/`. Only verification
+notes were updated after this check; the tested runtime did not change.
