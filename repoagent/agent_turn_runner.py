@@ -196,8 +196,10 @@ class AgentTurnRunner:
         task_state = self._agent.current_task_state
         messages = self._agent.redact_artifact(
             [
-                {"role": "user", "content": request.text},
-                {"role": "assistant", "content": final_answer},
+                {"role": "user", "content": request.text,
+                 "metadata": {"session_id": str(request.session_id), "turn_id": str(request.turn_id)}},
+                {"role": "assistant", "content": final_answer,
+                 "metadata": {"session_id": str(request.session_id), "turn_id": str(request.turn_id)}},
             ]
         )
         try:

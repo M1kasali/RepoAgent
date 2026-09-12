@@ -50,6 +50,7 @@ docs/architecture/*
 !docs/roadmaps/
 docs/roadmaps/*
 !docs/roadmaps/agent-harness-implementation-plan.md
+!docs/roadmaps/mainline-status.md
 !docs/migration.md
 !docs/release.md
 !docs/security/

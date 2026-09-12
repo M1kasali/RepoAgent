@@ -181,6 +181,26 @@ Manage 支持会话改名、导出和删除非当前会话。删除需二次确�
 预览，收到 `turn.terminal` 后用最终回答替换预览，不要再追加一次最终回答。
 默认订阅仍只接收接收/终态事件，兼容已有客户端。
 
+### SQLite 跨会话记忆
+
+显式启用内置持久化后端，并为需要共享记忆的会话指定相同轨道：
+
+```bash
+repoagent --memory-backend sqlite --memory-track personal "项目部署区域是杭州"
+repoagent --memory-backend sqlite --memory-track personal "项目部署区域是什么？"
+```
+
+默认数据库位于工作区状态目录下的 `memory.sqlite3`；默认仍是原有 `local` 后端。
+省略 `--memory-track` 时按会话隔离。仓库路径和轨道共同限定检索范围，续接会话不能
+悄悄切换已保存的轨道；轨道是显式共享配置，不是用户认证机制。
+可用 `--memory-config memory.json` 指定 `{"database":".repoagent/memory.sqlite3","max_records":10000}`。
+
+该后端保存脱敏后的对话片段，使用全文检索，不调用模型提炼记忆、不做向量检索，
+也不会自动判断冲突信息的真假。需要 Python SQLite 支持 FTS5；缺失时启动报错，不静默降级。
+数据未加密，新数据库在 POSIX 上采用 `0600` 权限。会话删除或清空不等于删除共享记忆；
+后端提供 `await backend.forget(track)`，仅删除当前仓库该轨道的记忆及其检索索引，
+不删除会话日志、反馈日志或备份。
+
 架构、迁移、安全和发布证据分别见：
 
 - [当前架构](docs/architecture/current-architecture.md)

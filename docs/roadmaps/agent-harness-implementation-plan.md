@@ -99,16 +99,16 @@ No TODO is complete merely because code exists. Completion requires:
 | MCP | Three real transports, diagnostics and Docker-owned stdio implemented and locally verified | discovery, schema projection, execution, trust policy | P3 |
 | Sandbox | Docker lifecycle delivered: shared shell/MCP and durable on-demand orphan reconciliation; not full BoxLite parity | direct and isolated adapters, fail-closed policy | P3 |
 | Context engine | Budgeting, admission and deterministic compaction implemented | segment assembly, token budgets, curator, compaction | P4 |
-| Memory | Local backend implemented; external Memory integration pending | backend contract, consolidation, provenance, lifecycle | P4 |
-| Skills | PARTIAL: local catalog/keyword activation; retrieval pipeline parity pending | discovery, activation, lazy loading, references, local pool | P4 |
+| Memory | Local and optional SQLite/FTS5 implemented; original Myna deferred | backend contract, consolidation, provenance, lifecycle | P4 |
+| Skills | Retrieval, fusion, admission and hydration implemented (TECH-109); live benefit unverified | discovery, activation, lazy loading, references, local pool | P4 |
 | Tracing | Core implemented; own release-bound measurements required | correlation context, semantic events, usage, query/export | P5 |
 | Evaluation | Framework implemented; multidimensional acceptance parity incomplete | reproducible campaign runner, paired trials, scorecards | P6 |
 | Subagents | Base contracts implemented; live benefit unverified | isolated manager, budgets, messaging, roles, evidence | P7 |
 | Model routing | Deterministic profiles implemented | deterministic profiles, fallback chain, explainable selection | P7 |
 | Plugin system | Declarative tools implemented; upstream extension coverage incomplete | manifest, discovery, external trust, lifecycle, Gateway-only tools | P7 |
-| CLI/TUI/Gateway | PARTIAL: CLI/host/transport; native TUI parity pending | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
-| Channels/Cron | PARTIAL: directory adapter and basic schedules | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
-| Evolver | PARTIAL: components; multi-round execution and runtime activation pending | isolated candidates, sealed gates, activation, rollback | P9 |
+| CLI/TUI/Gateway | Native terminal, RPC, session/model management and durable directory Gateway implemented (TECH-111 through TECH-121); not blanket upstream parity | separated assembly, unified commands, TUI transport, single-instance gateway | P8 |
+| Channels/Cron | Directory adapter, schedules and optional QQ implemented; QQ live acceptance pending; Feishu/WeCom paused | intake, delivery, media, deduplication, claims, scheduled execution | P8 |
+| Evolver | Multi-round isolated execution, sealed validation and approved activation implemented (TECH-102 through TECH-108); live benefit unverified | isolated candidates, sealed gates, activation, rollback | P9 |
 | Release engineering | Complete | clean-head evidence bundle, CI gates, migration docs | P10 |
 
 ### Mainline Reconciliation - 2026-09-11
@@ -220,14 +220,25 @@ and further paid campaigns are paused; they do not block mainline delivery.
   lazy references, availability/tool admission, optional model gate and resource
   hydration to Runtime. Default local retrieval has no Provider call; injected
   multi-source/gate paths have offline coverage, not live effectiveness claims.
-- [ ] `M3-02` Integrate an explicitly available external Memory backend and
+- [ ] `M3-02` Integrate the original Pico Myna backend after establishing its
+  source/version identity and availability, and
   verify recall/store/Turn injection; do not claim Myna or LoCoMo results from
   local memory tests or unavailable external artifacts.
+  Deferred by user decision; do not substitute another memory project.
 - [x] `M3-02a` Connect explicit installed-plugin selection to Runtime assembly,
   fail closed for unavailable/ambiguous plugins, align recall with user track,
   and clean up partially started backends (TECH-110). Fixture-tested only.
-  M3-02 remains open: the reference release excludes the Myna implementation
-  and installation artifacts, and this environment has no installed backend.
+  M3-02 remains open. The CodeCairn bridge was withdrawn at the user's request;
+  its trial does not establish original Myna identity or complete this task.
+- [x] `M3-03` With user approval, implement an independent built-in SQLite/FTS5
+  backend instead of claiming unavailable external implementation parity
+  (TECH-133). Verify process restart, repository/owner isolation, bounded
+  persistence and new-session prompt injection. External Myna installation and
+  LoCoMo effectiveness remain unverified; this is not an external-plugin result.
+- [x] `M3-04` Run one bounded real-model cross-session memory case with an
+  empty-track control (TECH-134). Three processes / three model calls: control
+  answered UNKNOWN, shared track returned the exact stored fact, all Turns
+  completed. No generalized memory accuracy or external benchmark claim.
 - [ ] `M4-01` Complete product surfaces and channel adapters after core loops.
 - [x] `M4-01a` Ship a runnable directory Gateway CLI with explicit sender policy,
   safe non-interactive approval, lifecycle cleanup, malformed-message isolation
@@ -296,16 +307,19 @@ and further paid campaigns are paused; they do not block mainline delivery.
   small-context edit/test history retention offline and clarify edited_files
   provenance with workspace snapshots disabled before any further paid rerun
   (TECH-126/127). No general convergence improvement is claimed.
-- [ ] `M6-05` Define retention of verified execution outcomes and inspect complete
-  request composition before evaluating any context-policy change. Observed file
-  changes do not prove tests passed or that the task is complete; no paid rerun yet.
+- [x] `M6-05` Retain verified execution outcomes and inspect native request
+  composition (TECH-129, TECH-131, TECH-132). The dedicated run_tests tool binds
+  unittest evidence to source and exposes current/stale state in model context.
+  This does not retroactively validate older traces or prove failure recovery.
 - [x] `M6-05a` Retain bounded historical shell command/status/exit-code observations
   in task checkpoints independently of workspace snapshots (TECH-128). These are
-  raw process observations, not verified test outcomes; `M6-05` remains open.
+  raw process observations, not verified test outcomes; dedicated evidence was
+  subsequently added in TECH-131.
 - [x] `M6-05b` Inspect current native request assembly and refresh stale current-Turn
   context before normal calls and step-limit synthesis (TECH-129). Cover budget
   reduction, prior history and provider message projections offline. Original
-  live-request replay and verified test-outcome retention remain unproven.
+  live-request replay remains unproven; verified outcome retention was
+  subsequently added in TECH-131 and observed live in TECH-132.
 - [x] `M6-06` Repeat the same bounded real coding smoke on clean commit 207f09b
   with unchanged task/model/budget/image (TECH-130): original tests 6/6, tests
   unchanged, normal Runtime completion in five calls / 9.18 seconds. Preserve
@@ -314,6 +328,15 @@ and further paid campaigns are paused; they do not block mainline delivery.
   tool; retain framework verdicts and invalidate stale records after file changes
   (TECH-131). Shell exit codes alone remain insufficient. This is local test
   evidence, not independent validation against adversarial or weakened tests.
+- [x] `M6-08` Observe real model adoption of run_tests on clean commit f10806f
+  without explicitly requesting that tool (TECH-132): six original tests passed,
+  current verification reached the final native request, and Runtime completed
+  in five calls / 8.76 seconds. Failure recovery was not exercised in this run;
+  its existing coverage remains offline, not a live effectiveness claim.
+- [ ] `M6-09` Run one bounded, clean-source real-model failure-recovery case:
+  observe an in-Turn failing run_tests result before editing, repair the source,
+  rerun unchanged tests, independently verify the result, and require normal
+  Runtime completion. A final passing suite alone is insufficient evidence.
 
 ## 6. Dependency Order
 
@@ -615,6 +638,20 @@ For each TODO:
 8. Mark the TODO complete only after code, documentation, and evidence are in the same commit.
 
 ## 9. Immediate Next Slice
+
+Current status and explicit deferrals are summarized in
+[Mainline Status](mainline-status.md). Original Myna and further platform
+adaptation are paused. First commit the independent SQLite work and reconciled
+documents after local verification, then perform the bounded M6-09 recovery
+acceptance on that clean source. Do not start a full Polyglot campaign or
+substitute unrelated memory integrations. Module-level paired effectiveness
+measurements remain separate work under M5-01.
+
+## 10. Historical Delivery Notes
+
+The following notes preserve earlier phase gates and campaign chronology.
+Their statements about the next step or completion are historical, not the
+current queue or an assertion of complete upstream parity.
 
 The completed implementation slice is `P1-01` through `P1-05`:
 

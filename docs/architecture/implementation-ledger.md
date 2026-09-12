@@ -5486,6 +5486,179 @@ hashes in `artifacts/verifications/mainline-test-verification-20260912-r2/` were
 verified. Earlier successful bundles are retained. This paragraph postdates the
 final bundle; runtime code is unchanged. No paid model calls, commit or push.
 
+### TECH-132: Real Model Adoption of Source-Bound Verification
+
+Committed and pushed the verification tool as f10806f, then ran one bounded
+TTL-cache acceptance on that clean commit. The frozen task files, original user
+request, DeepSeek deepseek-v4-flash model, Docker image, 3,000-token input budget,
+eight-call limit and 2,048-token output limit remained unchanged. The runner
+reused the previous checksummed runner without modifying either prior receipt.
+No instruction told the model to choose run_tests.
+
+The model spontaneously selected run_tests after patching cache.py. Its report
+recorded all six test IDs, six tests, no failures/errors/skips and current source
+freshness. The final native request contained the checkpoint's test evidence.
+Independent frozen tests also passed 6/6 in a separate read-only offline
+container; the original test file remained unchanged. Runtime completed with
+final_answer_returned in five calls and 8.76 seconds. No running containers
+remained after cleanup.
+
+Receipts: `artifacts/acceptance/live-coding-20260912-r3/`, with 28 original
+manifest-bound files and append-only adoption/offline-inspection records. The
+local fixture itself was repaired, not the product repository. The code change
+used patch_file; the tool sequence included no run_shell invocation. All five
+model calls were unpriced, so there is no dollar-cost claim.
+
+This single successful run demonstrates unprompted tool adoption and completion
+for this fixture, not a general adoption rate or quality improvement. No failed
+run_tests result occurred: real-model failure recovery and revalidation were not
+exercised. Those paths retain deterministic Runtime and Docker coverage from
+TECH-131. No further paid retry or larger benchmark was started.
+
+Follow-up verification passed 53 focused tests in 5.91 seconds, checked all 28
+live receipt hashes and passed diff check. All eight payload hashes in
+`artifacts/verifications/mainline-test-verification-adoption-20260912/` were
+verified. This paragraph postdates that bundle. Runtime code remained unchanged
+after the clean-commit live run; the new result documentation is not committed.
+
+### TECH-133: Built-In SQLite Long-Term Conversation Memory
+
+User-approved implementation independent of the unavailable external backend.
+SQLiteMemoryBackend implements the existing five async MemoryBackend methods.
+Explicit --memory-backend sqlite selects it without importing plugins or making
+network calls; local remains the default. --memory-config accepts only database
+and max_records. Database identity/version checks refuse foreign or future
+schemas without migration. FTS5 availability is checked at start, never silently
+replaced by the in-memory fixture. New POSIX database files use mode 0600.
+
+The workspace's canonical absolute path defines a repository namespace. Recall
+also requires exactly one explicit owner track. --memory-track persists that
+identity in the session so new sessions can opt into shared memory. Without it,
+the original session-scoped behavior remains. Resuming with a different explicit
+track fails closed. Tracks are sharing configuration, not authentication; a
+multi-user host must not assign a shared track unintentionally. Moving a checkout
+changes its namespace; worktrees are not automatically merged into one scope.
+
+Store accepts redacted user/assistant messages, not tool output. AgentTurnRunner
+now attaches original session/Turn IDs as optional message metadata. Text is
+split into at-most-2,000-character chunks; each role/content digest is deduplicated
+within repository/owner. Repeated content updates last_seen but preserves first
+source provenance. Default retention is 10,000 records per repository/owner;
+deletion triggers remove FTS entries transactionally. The explicit forget(owner)
+API deletes that scope, not sessions, feedback or backups.
+
+Retrieval uses [SQLite FTS5 and BM25](https://www.sqlite.org/fts5.html), with bounded
+literal query terms and SQL-bound owner/namespace filters. ASCII identifier terms
+and basic CJK bigrams support lexical English/Chinese matching, not semantic
+understanding. Results include source IDs, role, timestamps and a monotonic bounded
+BM25 score, not a calibrated probability. Runtime labels these hits as quoted
+historical conversation data before applying existing context budgets. Metadata
+does not make model-generated statements authoritative or resolve contradictions.
+
+Database work runs off the event loop, with a per-instance thread lock, short-lived
+connections, transactional writes and a five-second SQLite busy timeout. Separate
+instances/processes share SQLite locking. Stop waits behind active operations;
+cancelling an awaiting caller does not roll back an already-running transaction.
+Feedback is a bounded audit log only, not a learning or ranking update. Retention
+limits are per owner, not a global disk quota; data is unencrypted.
+
+No extraction model, embeddings, remote service or external memory benchmark is
+used. Tests cover lifecycle, restart, shared-database repository isolation, owner
+isolation, Chinese recall, literal query handling, deduplication/index cleanup,
+concurrent writers, invalid batches, schema refusal, permissions, long-message
+tails, Runtime redaction, CLI assembly and session-track preservation.
+
+Local acceptance at `artifacts/acceptance/sqlite-memory-20260912-r2/` runs three
+separate Runtime processes: write, recall in a new session with the same track,
+and isolation with another track. The second prompt contains the stored fact and
+historical-data label; the third does not. Actual SQLite stores/session reports
+are retained, but the model is FakeModelClient. This proves persistence and
+prompt delivery, not real-model recall accuracy or task-quality improvement.
+The first acceptance-runner attempt failed on incomplete fake-profile metadata
+before store; r2 also explicitly binds the fixture workspace root. No paid calls.
+
+Final regression passed 329 tests in 32.52 seconds; scoped Ruff and diff check
+passed. All seven payload hashes in
+`artifacts/verifications/mainline-sqlite-memory-20260912/` and all 49 acceptance
+receipt hashes were checked. The separate SQLite-focused run passed 22 tests.
+These suites overlap and their counts must not be summed. This paragraph
+postdates the verification bundle; runtime source is unchanged. No commit/push.
+
+### TECH-134: Bounded Real-Model Cross-Session Memory Acceptance
+
+Ran one synthetic memory-dependent question against DeepSeek deepseek-v4-flash
+with actual SQLite persistence. Three separate processes/new sessions performed
+seed, empty-track control and shared-track recall in that order. Each Turn had a
+one-call limit, 3,000-token input budget and 256-token output limit. All model
+tools were disabled in the fixture, so repository inspection could not provide
+the answer. The synthetic branch-prefix value appeared only in the seed Turn,
+not the fixture README or either follow-up question.
+
+All three Turns completed normally using three logical model calls in total.
+Seed answered ACK and stored two conversation messages. The empty-track control
+had zero memory hits and answered UNKNOWN. Shared-track recall had one memory
+hit and answered the exact previously specified prefix. Captured native request
+projections confirm the value was absent from the control input and present in
+the shared-track input. Both query arms used the same question and model; they
+differed in the explicit memory track. No real secrets were used as test facts.
+
+Local receipts: `artifacts/acceptance/sqlite-memory-live-20260912/`, containing
+53 manifest-bound files with configuration, separate session/Runtime reports,
+request projections, call ledgers, SQLite data and objective checks. The working
+tree was dirty relative to f10806f; this is development acceptance, not clean-tag
+release evidence. Native transport retries were not altered; the logical-call
+budget is not an HTTP-attempt guarantee. All recorded calls were unpriced, so
+there is no dollar-cost claim.
+
+This demonstrates an answer-level benefit in one controlled synthetic case.
+It does not measure a general recall/answer accuracy, robustness across tasks,
+semantic retrieval, conflict resolution, latency improvement or LoCoMo results.
+No further paid trials were run after this successful acceptance.
+
+Follow-up verification passed 61 focused tests in 2.40 seconds, rechecked all 53
+live receipt hashes and the objective answer/request-presence checks, and passed
+diff check. All seven payload hashes in
+`artifacts/verifications/mainline-sqlite-memory-live-20260912/` were verified.
+This paragraph postdates the bundle. No runtime source changed during this
+acceptance slice; the implementation and result documents remain uncommitted.
+
+### TECH-135/136: Withdrawn External Memory Experiment
+
+The CodeCairn trial and bridge were withdrawn at the user's request. The
+adapter, plugin registration, bridge tests and README instructions were
+removed. M3-02 is incomplete: original Pico Myna identity and integration
+remain unverified. Existing SQLite work is unaffected. Historical experiment
+notes and receipts remain in local artifacts only; they are not current
+product capabilities or original Myna acceptance evidence.
+
+Withdrawal verification: 61 memory/plugin/context regression tests passed in
+2.55 seconds; diff check passed. The temporary RepoAgent installation in the
+reference environment was removed, stale local egg-info registration was
+cleaned, and selecting `codecairn` now fails as unavailable. No commit or push
+was performed.
+
+### TECH-137: Mainline Status Reconciliation and SQLite Regression
+
+Added `docs/roadmaps/mainline-status.md` as a concise current delivery index.
+Reconciled the roadmap with delivered Skills, Evolver, product surfaces and
+source-bound verification. M6-05 is delivered at its stated scope; M6-09 now
+separately tracks a real failed-test -> repair -> retest case. Original Myna
+and additional platform work remain deferred, not silently replaced. This is
+status reconciliation, not a fresh full-source upstream parity audit.
+
+The retained SQLite backend is independent of Myna. Full regression initially
+found two stale expectations: detailed patch results and final-answer secret
+redaction. Updated those assertions to the existing behavior without changing
+runtime behavior or weakening secret checks. Both focused tests passed.
+
+Full verification then passed 1,284 tests with 43 skips and six existing
+deprecation warnings in 210.44 seconds. Ruff, diff check and evaluation CLI
+help also passed. Local receipt:
+`artifacts/verifications/mainline-status-sqlite-20260912-r2/`.
+The first failed bundle is retained beside it. This is pre-commit development
+verification, not clean-tag release evidence. This ledger entry postdates
+the bundle; no runtime source changed after verification.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

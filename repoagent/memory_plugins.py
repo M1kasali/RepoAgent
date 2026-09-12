@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .memory_backend import MemoryBackend
+from .paths import workspace_state_root
 
 
 class MemoryPluginError(ValueError):
@@ -31,6 +32,23 @@ def load_memory_backend(name, *, workspace, config_path=None):
         return None
     if not isinstance(name, str) or not name.strip():
         raise MemoryPluginError("memory backend name must be non-empty")
+    if name == "sqlite":
+        from .sqlite_memory import SQLiteMemoryBackend
+
+        workspace = Path(workspace).resolve()
+        config = _read_config(workspace, config_path)
+        if set(config) - {"database", "max_records"}:
+            raise MemoryPluginError("unknown SQLite memory configuration fields")
+        path = config.get("database", str(workspace_state_root(workspace) / "memory.sqlite3"))
+        if not isinstance(path, str) or not path.strip():
+            raise MemoryPluginError("SQLite memory database must be a path string")
+        path = Path(path).expanduser()
+        if not path.is_absolute():
+            path = Path(workspace) / path
+        try:
+            return SQLiteMemoryBackend(path, workspace=workspace, max_records=config.get("max_records", 10000))
+        except ValueError as exc:
+            raise MemoryPluginError(str(exc)) from exc
     points = tuple(metadata.entry_points(group="repoagent.memory_backends"))
     matches = [point for point in points if point.name == name]
     if len(matches) != 1:
@@ -39,19 +57,7 @@ def load_memory_backend(name, *, workspace, config_path=None):
             f"configured memory backend {name!r} is {reason}; install a compatible "
             "trusted plugin or explicitly select --memory-backend local"
         )
-    config = {}
-    if config_path is not None:
-        path = Path(config_path).expanduser()
-        if not path.is_absolute():
-            path = Path(workspace) / path
-        try:
-            config = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise MemoryPluginError(
-                "cannot read memory plugin JSON configuration"
-            ) from exc
-        if not isinstance(config, dict):
-            raise MemoryPluginError("memory plugin configuration must be an object")
+    config = _read_config(workspace, config_path)
     try:
         factory = matches[0].load()
         backend = factory(
@@ -69,3 +75,18 @@ def load_memory_backend(name, *, workspace, config_path=None):
             "memory plugin must implement all five async backend methods"
         )
     return backend
+
+
+def _read_config(workspace, config_path):
+    if config_path is None:
+        return {}
+    path = Path(config_path).expanduser()
+    if not path.is_absolute():
+        path = Path(workspace) / path
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise MemoryPluginError("cannot read memory plugin JSON configuration") from exc
+    if not isinstance(config, dict):
+        raise MemoryPluginError("memory plugin configuration must be an object")
+    return config

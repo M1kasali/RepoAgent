@@ -548,7 +548,7 @@ def test_patch_file_replaces_exact_match(tmp_path):
         },
     )
 
-    assert result == "patched sample.txt"
+    assert result == "patched sample.txt (1 replacement(s), exact)"
     assert file_path.read_text(encoding="utf-8") == "hello agent\n"
 
 
@@ -1409,7 +1409,7 @@ def test_trace_and_report_redact_secret_env_values(tmp_path):
 
         assert (
             agent.ask("Mask the secret sk-test-secret-123")
-            == "Masked sk-test-secret-123."
+            == "Masked <redacted>."
         )
 
     runs_root = tmp_path / ".repoagent" / "runs"

@@ -381,11 +381,15 @@ def build_arg_parser():
     parser.add_argument("--cwd", default=".", help="Workspace directory.")
     parser.add_argument(
         "--memory-backend", default="local",
-        help="Use local memory or an explicitly trusted installed memory plugin name.",
+        help="Use local memory, built-in sqlite, or a trusted installed memory plugin.",
     )
     parser.add_argument(
         "--memory-config", default=None,
-        help="External memory plugin JSON configuration path, relative to the workspace.",
+        help="SQLite or external memory JSON configuration path, relative to the workspace.",
+    )
+    parser.add_argument(
+        "--memory-track", default=None,
+        help="Explicit shared memory owner for related sessions; otherwise session-scoped.",
     )
     parser.add_argument(
         "--profile",

@@ -58,6 +58,7 @@ class RuntimeAssembly:
         )
         options = {
             "memory_backend": memory_backend,
+            "memory_track_id": getattr(args, "memory_track", None),
             "model_client": self.model_client,
             "workspace": self.workspace,
             "session_store": self.session_store,

@@ -126,6 +126,7 @@ class RepoAgent:
         context_window_tokens=None,
         context_window_source=None,
         memory_backend=None,
+        memory_track_id=None,
         skill_roots=None,
         skill_sources=None,
         skill_gate=None,
@@ -210,6 +211,13 @@ class RepoAgent:
             "memory": memorylib.default_memory_state(),
         }
         self._ensure_session_shape()
+        if memory_track_id is not None:
+            if not isinstance(memory_track_id, str) or not memory_track_id.strip() or len(memory_track_id) > 256:
+                raise ValueError("memory_track_id must be a non-empty string of at most 256 characters")
+            track = memory_track_id.strip()
+            if self.session.get("memory_track_id") not in (None, "", track):
+                raise ValueError("cannot change the memory track of an existing session")
+            self.session["memory_track_id"] = track
         self.memory = memorylib.LayeredMemory(
             self.session.setdefault("memory", memorylib.default_memory_state()),
             workspace_root=self.root,

@@ -216,10 +216,11 @@ def test_runtime_memory_backend_lifecycle_recall_store_and_evidence(tmp_path):
     assert backend.stopped == 1
     assert backend.queries[0][3] == 3
     assert "deploy key is blue" in client.prompts[0]
-    assert backend.stored[0][1] == [
+    assert [{key: row[key] for key in ("role", "content")} for row in backend.stored[0][1]] == [
         {"role": "user", "content": "What color is the deploy key?"},
         {"role": "assistant", "content": "It is blue."},
     ]
+    assert backend.stored[0][1][0]["metadata"]["session_id"] == agent.session["id"]
     assert agent.last_memory_backend_metadata["recall_status"] == "completed"
     assert agent.last_memory_backend_metadata["store_status"] == "completed"
     report = agent.build_report(agent.current_task_state)
