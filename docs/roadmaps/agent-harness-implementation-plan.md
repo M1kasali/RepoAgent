@@ -306,6 +306,10 @@ and further paid campaigns are paused; they do not block mainline delivery.
   context before normal calls and step-limit synthesis (TECH-129). Cover budget
   reduction, prior history and provider message projections offline. Original
   live-request replay and verified test-outcome retention remain unproven.
+- [x] `M6-06` Repeat the same bounded real coding smoke on clean commit 207f09b
+  with unchanged task/model/budget/image (TECH-130): original tests 6/6, tests
+  unchanged, normal Runtime completion in five calls / 9.18 seconds. Preserve
+  the prior eight-call incomplete result; no statistical or causal claim.
 
 ## 6. Dependency Order
 

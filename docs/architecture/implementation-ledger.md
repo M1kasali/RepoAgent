@@ -5394,6 +5394,45 @@ passed; all seven payload hashes in
 This results paragraph postdates the bundle; runtime code is unchanged. No paid
 rerun, commit or push was performed.
 
+### TECH-130: Bounded Real Coding Repeat on a Clean Commit
+
+Repeated the frozen TTL-cache fixture on clean commit
+`207f09b5ab399ba7bd1b5407be04609985c18df2`. The original source/tests/README,
+user request, DeepSeek deepseek-v4-flash model, 3,000-token input budget,
+eight-call limit, 12-step limit, 2,048 output tokens per call and Python slim
+image ID were held fixed. The original 24 receipt hashes were checked before
+execution. The earlier source checkout was dirty, so this is a bounded before/
+after observation, not an exact single-change ablation.
+
+The repeat passed independent original tests (6/6), preserved the test file and
+completed normally with final_answer_returned. It used five Provider calls and
+9.18 seconds of Agent invocation time, versus eight calls and 15.85 seconds with
+a stopped Turn previously. The model read the repository, rewrote cache.py,
+ran tests and returned a final summary. It used write_file, not patch_file, so
+this repeat does not directly validate patch fallback effectiveness.
+
+The model again used a shell pipeline ending in tail; its exit code is not the
+correctness oracle. The verifier ran frozen original tests without a pipeline
+in a fresh read-only, network-disabled container. Redacted provider-boundary
+request captures show observed file changes in request four and both file and
+execution observations in request five. These are message projections, not
+captured HTTP headers or full transport payloads. No running containers remained.
+
+Local receipts: `artifacts/acceptance/live-coding-20260912-r2/`, containing 30
+manifest-bound files plus an append-only offline inspection. The strict verdict
+requires both independent checks and normal Runtime completion. Original receipt
+files were not rewritten. Pricing remains unavailable for all five calls: no
+dollar-cost or cost-reduction claim is supported. This single transparent task
+does not establish general reliability, statistical improvement, or a causal
+effect of any one fix. The 225-task campaign was not started.
+
+Follow-up verification passed 35 focused tests in 5.10 seconds, independently
+rechecked both smoke manifests (24 original / 30 repeat files), and passed diff
+check. All 11 payload hashes in
+`artifacts/verifications/mainline-live-coding-repeat-20260912/` were checked.
+Runtime source remained unchanged; only documentation was updated after the
+clean-commit run. This results paragraph postdates the verification bundle.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
