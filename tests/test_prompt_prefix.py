@@ -135,7 +135,8 @@ def test_native_prefix_keeps_schemas_and_call_result_replay(tmp_path):
     (tmp_path / "README.md").write_text("retained evidence")
     provider = Provider()
     agent = RepoAgent(model_client=provider, workspace=WorkspaceContext.build(tmp_path),
-                      session_store=SessionStore(tmp_path / ".repoagent/sessions"), approval_policy="auto")
+                      session_store=SessionStore(tmp_path / ".repoagent/sessions"), approval_policy="auto",
+                      max_steps=4, max_provider_calls=3)
     assert agent.ask("Read README.md") == "Inspected."
     assert all("<tool>" not in request.prompt for request in provider.requests)
     tools = {tool.name: tool for tool in provider.requests[0].tools}
@@ -143,3 +144,8 @@ def test_native_prefix_keeps_schemas_and_call_result_replay(tmp_path):
     replay = provider.requests[1].messages
     assert any(m.role == "assistant" and m.tool_calls[0].id == "read" for m in replay if m.tool_calls)
     assert any(m.role == "tool" and m.tool_call_id == "read" and "retained evidence" in m.content for m in replay)
+    assert '"tool_calls_remaining":4' in provider.requests[0].prompt
+    assert '"tool_calls_remaining":3' in provider.requests[1].prompt
+    assert '"provider_calls_remaining_including_this_request":3' in provider.requests[0].prompt
+    assert '"provider_calls_remaining_including_this_request":2' in provider.requests[1].prompt
+    assert "Runtime budget" not in agent.session["history"][0]["content"]

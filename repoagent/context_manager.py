@@ -230,6 +230,7 @@ class ContextManager:
         include_history=True,
         history_override=None,
         segment_budget_overrides=None,
+        runtime_budget=None,
     ):
         """按预算组装一轮完整 prompt。
 
@@ -282,6 +283,14 @@ class ContextManager:
         checkpoint_text = ""
         if hasattr(self.agent, "render_checkpoint_text"):
             checkpoint_text = str(self.agent.render_checkpoint_text() or "").strip()
+        if runtime_budget is not None:
+            budget_text = (
+                "Runtime budget:\n"
+                + json.dumps({key: value for key, value in runtime_budget.items() if value is not None},
+                             ensure_ascii=True, separators=(",", ":"))
+                + "\nReserve a final answer; disclose unfinished work."
+            )
+            checkpoint_text = budget_text + ("\n\n" + checkpoint_text if checkpoint_text else "")
         if checkpoint_text:
             section_texts["checkpoint"] = checkpoint_text
         selected_notes = []

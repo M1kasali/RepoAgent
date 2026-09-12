@@ -341,6 +341,7 @@ class AgentLoop:
                 include_history=not use_structured_history,
                 history_override=prompt_history_override,
                 segment_budget_overrides=prompt_segment_budget_overrides,
+                runtime_budget=remaining_budget(),
             )
             synthesis_prompt = f"{prompt}\n\n{_MAX_STEP_SYNTHESIS_PROMPT}"
             task_state.record_attempt()
@@ -549,6 +550,15 @@ class AgentLoop:
         # 3. 行动：如果是工具调用，就执行工具
         # 4. 记录：把结果写回 history / task_state / trace / memory
         # 然后进入下一轮，直到停机条件满足
+        def remaining_budget():
+            return {
+                "tool_calls_remaining": max(0, agent.max_steps - tool_steps),
+                "provider_calls_remaining_including_this_request": (
+                    None if agent.max_provider_calls is None
+                    else max(0, agent.max_provider_calls - len(call_entries))
+                ),
+            }
+
         while (
             tool_steps < agent.max_steps
             and attempts < max_attempts
@@ -574,6 +584,7 @@ class AgentLoop:
                 include_history=not use_structured_history,
                 history_override=prompt_history_override,
                 segment_budget_overrides=prompt_segment_budget_overrides,
+                runtime_budget=remaining_budget(),
             )
             if not provider_messages:
                 current_message = ModelMessage(role="user", content=prompt)

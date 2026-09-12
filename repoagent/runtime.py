@@ -630,6 +630,7 @@ class RepoAgent:
         include_history=True,
         history_override=None,
         segment_budget_overrides=None,
+        runtime_budget=None,
     ):
         refresh = self.refresh_prefix()
         self.skill_watcher.poll()
@@ -653,7 +654,10 @@ class RepoAgent:
             include_history=include_history,
             history_override=history_override,
             segment_budget_overrides=segment_budget_overrides,
+            runtime_budget=runtime_budget,
         )
+        if runtime_budget is not None:
+            metadata["runtime_budget"] = dict(runtime_budget)
         admission = self.context_window_budget.admit(metadata["prompt_tokens"])
         metadata["skill_selection"] = self.skill_diagnostics
         # 这里把“这轮 prompt 是怎么拼出来的”连同缓存相关状态一起记下来，

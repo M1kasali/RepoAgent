@@ -5875,6 +5875,57 @@ payload hashes verified in `artifacts/verifications/native-prefix-20260912/`.
 Offline prefix receipt hashes also verified. This paragraph postdates the
 pre-commit bundle; runtime source did not change after verification.
 
+### TECH-146: Native Prefix Alone Did Not Close Bounded Acceptance
+
+One frozen-protocol run on clean `e5ac7db` took 14.54 seconds and eight model
+calls. The Agent reproduced failures, repaired code and produced fresh passing
+test evidence; independent unchanged tests passed. It continued inspection
+and reached the provider-call limit without returning normally. Overall
+acceptance remains failed/incomplete. Source stayed clean, tests/README were
+unchanged and no extra files were added. All 29 payload hashes verified in
+`artifacts/acceptance/live-recovery-20260912-r5/`.
+
+This does not establish faster or more reliable recovery: the run did not meet
+the completion criterion and differs stochastically from prior runs. The
+native-prefix correction remains supported by the deterministic duplication
+and compatibility evidence, not an end-to-end success claim.
+
+### TECH-147: Live Runtime Budget Feedback
+
+A new native Runtime regression showed the model received no remaining-budget
+counters before exhaustion. Each normal request now supplies remaining tool
+executions and remaining recorded Provider calls (including the pending
+request), computed from the same loop counters used for admission. An
+unconfigured Provider cap is null in metadata and omitted from prompt text. The snapshot is also passed
+to exhaustion synthesis and recorded in prompt metadata.
+
+The compact JSON and instruction to reserve a final response are placed in
+the mandatory checkpoint section before normal token accounting; they cannot
+silently bypass the context budget. The original user request/history is not
+rewritten, the stable prefix cache is unchanged, and task completion is never
+inferred from counters. Existing hard limits, cancellation, retry admission,
+permissions and incomplete-result classification remain intact. Counters are
+a pre-request snapshot, not a reservation against transport retries.
+
+The native call/replay regression checks changing tool and Provider counters
+across requests without polluting the stored user message. 76 prefix, context
+and Provider tests passed in 7.28 seconds. Live effectiveness remains pending;
+this is budget-state visibility rather than a larger budget or forced success.
+
+The first full regression exposed six failures in existing 300-token contract
+fixtures: verbose mandatory budget prose increased the minimum prompt to 347
+tokens. Compacted the prose and omitted unconfigured-cap fields from display,
+without widening fixture budgets. The small-budget campaign and prefix tests
+then passed eight tests in 3.99 seconds. The initial failed verification bundle
+is retained at `artifacts/verifications/live-budget-feedback-20260912/`.
+
+Full rerun passed 1,299 tests with 43 skips and six existing warnings in
+176.49 seconds. Ruff, diff check and evaluation CLI help passed. All nine
+payload hashes verified in
+`artifacts/verifications/live-budget-feedback-20260912-r2/`.
+This paragraph postdates the pre-commit bundle; runtime source has not changed
+since that verification.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
