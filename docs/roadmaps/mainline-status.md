@@ -16,13 +16,14 @@ Implemented behavior and measured effectiveness are separate claims.
 | Tracing and evaluation | Correlation, retained receipts, replay and paired evaluation infrastructure | Own mainline metric campaigns remain pending; no borrowed resume numbers |
 | Subagents and Evolver | Budgets, messaging, isolated candidate execution, multi-round search, sealed checks, human approval and activation | Real-model effectiveness remains unverified; TECH-102 through TECH-108 |
 | Product surfaces | CLI, native terminal, RPC, session/model management, durable directory Gateway | Optional QQ is fixture-tested, not live-platform accepted |
-| Coding verification | Source-bound unittest records, freshness checks, native prompt propagation | Success/adoption smoke passed; bounded live failure recovery failed on 252c157, TECH-138 |
+| Coding verification | Source-bound unittest records, freshness checks, native prompt propagation | Recovery on 52a3418 repaired code (independent 6/6) but did not retest or complete; TECH-140 |
 
 ## Remaining Work
 
 - M6-09: repair the observed context eviction/repeated-read failure and obtain
   a real failed-test, repair, retest and normal-completion case. The first
-  bounded run failed; it is not a completed acceptance.
+  bounded run failed; the scoped reduction fix passed regression, but its live
+  rerun repaired code without retesting or completing. Acceptance is still open.
 - M5-01: module-specific paired acceptance for the mainline, with own workloads,
   denominators, costs and immutable evidence. Infrastructure is not itself a
   measured improvement.
@@ -46,9 +47,12 @@ Implemented behavior and measured effectiveness are separate claims.
 2. Done: one bounded M6-09 run on clean source, with unchanged independent
    tests, was recorded as failed. Eight model calls / 16.57 seconds, 12 tool
    calls, no source repair and Runtime stopped at the step limit.
-3. Next: reproduce the observed context eviction offline, test a scoped fix,
-   then rerun bounded live acceptance. Do not increase budgets merely to claim
-   success, or generalize a single case into a recovery success rate.
+3. Done: selective old-output reduction committed as 52a3418; 1,287 tests
+   passed with 43 skips. Same-budget rerun repaired the code (independent 6/6)
+   but did not rerun tests and stopped at the step limit (TECH-140).
+4. Next: diagnose lost mutation evidence and test-failure interpretation using
+   offline regressions before further live acceptance. Do not increase budgets
+   merely to claim success or generalize a single case into a recovery rate.
 
 Details and historical evidence are in the
 [implementation ledger](../architecture/implementation-ledger.md) and

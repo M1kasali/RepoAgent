@@ -5723,6 +5723,32 @@ payload hashes verified in
 This paragraph postdates the pre-commit verification bundle; runtime source
 has not changed since that run.
 
+### TECH-140: Same-Budget Recovery Rerun Repaired Code but Did Not Complete
+
+Reran the frozen TECH-138 protocol once on clean `52a3418`, retaining the same
+model, fixture, request, 3,000-token input budget, eight-call cap and 12-tool
+step limit. The runner reuses the original hash-verified protocol; no grader,
+test or success criterion was relaxed. Receipt:
+`artifacts/acceptance/live-recovery-20260912-r2/` (29 payload hashes verified).
+
+Observed: 17.51 seconds, eight model calls and 12 tool calls. The model first
+ran the failing tests and successfully patched cache.py on call four. The
+unchanged independent suite passed all six tests afterward. However, the model
+did not rerun run_tests; its only verification record became stale after the
+patch. Subsequent reads exhausted the step limit and Runtime stopped. The
+coding classifier correctly returned `incomplete`; overall recovery acceptance
+returned `fail`. Tests/README remained unchanged, there were no extra files,
+and the checked RepoAgent source stayed clean throughout.
+
+Compared with the earlier failed run, this run reached a correct source edit,
+but one stochastic pair does not establish a causal or general improvement.
+The final answer also denied a confirmed edit despite a successful patch trace,
+showing that action continuity is still deficient. Next diagnosis should test
+whether completed mutation evidence survives later context reduction and
+distinguish a completed failing test from a test execution error. These are
+diagnostic leads, not verified fixes. M6-09 remains open. No second paid rerun
+was launched in this slice; calls remain unpriced and no cost claim is made.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

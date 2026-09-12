@@ -340,6 +340,9 @@ and further paid campaigns are paused; they do not block mainline delivery.
   First bounded attempt on clean 252c157 failed (TECH-138): earlier context was
   elided, repeated reads/tests consumed 12 tool calls, and no repair occurred.
   Retain this failure; next reproduce context eviction offline before retrying.
+  Selective reduction is implemented and regression-tested (TECH-139). Same-budget
+  rerun on 52a3418 repaired code and passed independent tests (6/6), but the Agent
+  did not retest or complete (TECH-140). M6-09 remains open.
 
 ## 6. Dependency Order
 
@@ -645,9 +648,10 @@ For each TODO:
 Current status and explicit deferrals are summarized in
 [Mainline Status](mainline-status.md). Original Myna and further platform
 adaptation are paused. SQLite and reconciled documents were committed as
-252c157 after full regression. The bounded M6-09 acceptance failed (TECH-138).
-Next reproduce its context eviction/repeated-read pattern offline and test a
-scoped correction before another live attempt. Do not start a full Polyglot campaign or
+252c157 after full regression. Selective context reduction followed in 52a3418
+(TECH-139). The same-budget rerun repaired code but did not retest or complete
+(TECH-140). Next diagnose mutation-evidence retention and test-failure semantics
+offline before another live attempt. Do not start a full Polyglot campaign or
 substitute unrelated memory integrations. Module-level paired effectiveness
 measurements remain separate work under M5-01.
 
