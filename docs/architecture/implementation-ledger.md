@@ -5689,6 +5689,40 @@ reproduction of this failure path, regression coverage and a scoped context
 fix before another bounded live attempt. SQLite and status work is committed;
 this result documentation postdates that commit and the captured clean run.
 
+### TECH-139: Budget-Aware Old Tool Output Reduction
+
+An offline regression reproduced unnecessary evidence loss: a transcript
+fits after eliding one large old output, but the previous all-but-three
+reduction also removed small code/contract outputs and complete exchanges.
+The focused test failed before the change and passes after it.
+
+Normal request-budget admission now ranks old tool outputs by estimated token
+savings, replaces them one at a time and stops as soon as the budget fits.
+It skips non-saving replacements and initially protects the latest assistant
+tool batch. Small outputs are not guaranteed retention: complete exchange
+dropping and final payload clipping remain fallback stages when necessary.
+Provider context-overflow emergency handling remains unchanged. Neither tool
+arguments nor signed thinking blocks are rewritten, and caller input is not
+mutated. This is a scoped departure from the previous blanket reduction,
+justified by the reproduced loss of still-affordable working evidence.
+
+Added coverage for selective elision, latest multi-tool batch retention,
+short-output non-expansion, signed replay preservation and within-budget
+no-op behavior. Context regression passed 26 tests in 1.28 seconds.
+Reconstructed old-history comparison is retained locally at
+`artifacts/acceptance/context-recovery-offline-20260912/`: requests 4 and 5
+retain four unchanged results instead of three. Later crowded requests are
+not uniformly improved. This reconstruction is not an exact wire replay or
+proof that a real model will stop repeating reads. M6-09 remains open pending
+bounded live acceptance with unchanged model and budgets.
+
+Full verification passed 1,287 tests, with 43 skips and six existing warnings,
+in 174.57 seconds. Ruff, diff check and evaluation CLI help passed. All nine
+payload hashes verified in
+`artifacts/verifications/context-budget-recovery-20260912/`.
+This paragraph postdates the pre-commit verification bundle; runtime source
+has not changed since that run.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

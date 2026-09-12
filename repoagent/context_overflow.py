@@ -71,7 +71,7 @@ def fit_messages_to_token_budget(messages, token_counter, token_budget):
             "fitted": True,
         }
 
-    shrunk, elided_tool_results = emergency_shrink_messages(original)
+    shrunk = original
     without_thinking_only = tuple(
         message
         for message in shrunk
@@ -84,6 +84,9 @@ def fit_messages_to_token_budget(messages, token_counter, token_budget):
     )
     dropped_thinking_only = len(shrunk) - len(without_thinking_only)
     shrunk = without_thinking_only
+    shrunk, elided_tool_results = _elide_old_outputs_to_budget(
+        shrunk, token_counter, token_budget
+    )
     shrunk, dropped_tool_exchanges = _drop_old_tool_exchanges_to_budget(
         shrunk, token_counter, token_budget
     )
@@ -178,6 +181,34 @@ def fit_messages_to_token_budget(messages, token_counter, token_budget):
         "dropped_tool_exchanges": dropped_tool_exchanges,
         "fitted": True,
     }
+
+
+def _elide_old_outputs_to_budget(messages, token_counter, token_budget):
+    """Save small working evidence before discarding complete exchanges."""
+
+    working = list(messages)
+    latest_calls = next(
+        ({call.id for call in message.tool_calls}
+         for message in reversed(working)
+         if message.role == "assistant" and message.tool_calls),
+        set(),
+    )
+    candidates = []
+    for index, message in enumerate(working):
+        if message.role != "tool" or message.tool_call_id in latest_calls:
+            continue
+        replacement = replace(message, content=OVERFLOW_ELISION_PLACEHOLDER)
+        savings = (model_messages_token_count((message,), token_counter)
+                   - model_messages_token_count((replacement,), token_counter))
+        if savings > 0:
+            candidates.append((savings, index))
+    elided = 0
+    for _, index in sorted(candidates, key=lambda item: (-item[0], item[1])):
+        if model_messages_token_count(working, token_counter) <= token_budget:
+            break
+        working[index] = replace(working[index], content=OVERFLOW_ELISION_PLACEHOLDER)
+        elided += 1
+    return tuple(working), elided
 
 
 def _drop_old_tool_exchanges_to_budget(messages, token_counter, token_budget):

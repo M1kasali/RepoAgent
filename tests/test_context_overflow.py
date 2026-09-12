@@ -16,6 +16,65 @@ from repoagent.providers import (
     ToolCall,
 )
 from repoagent.tokenization import Utf8TokenEstimator
+from repoagent.conversation import model_messages_token_count
+
+
+def test_budget_fit_preserves_small_reads_when_one_large_old_output_is_enough():
+    counter = Utf8TokenEstimator(provider="test", model="test")
+    messages = [ModelMessage(role="user", content="Fix the cache after testing.")]
+    for index, (name, content) in enumerate((
+        ("read_file", "Cache values expire at the deadline."),
+        ("read_file", "if self.clock() > deadline: return default"),
+        ("read_file", "test fixture " * 1000),
+        ("run_tests", "FAILED: test_at_deadline; expected missing, got value"),
+        ("read_file", "Expired lookups remove the entry."),
+    )):
+        call = ToolCall(str(index), name, {"path": str(index)})
+        messages.extend((ModelMessage(role="assistant", tool_calls=(call,)),
+                         ModelMessage(role="tool", name=name, tool_call_id=call.id, content=content)))
+    fitted, evidence = fit_messages_to_token_budget(messages, counter, 500)
+    results = {m.tool_call_id: m.content for m in fitted if m.role == "tool"}
+    assert evidence["fitted"]
+    assert model_messages_token_count(fitted, counter) <= 500
+    assert results["0"] == messages[2].content
+    assert results["1"] == messages[4].content
+    assert results["3"] == messages[8].content
+    assert results["4"] == messages[10].content
+    assert results["2"] == OVERFLOW_ELISION_PLACEHOLDER
+    assert evidence["elided_tool_results"] == 1
+    assert evidence["dropped_tool_exchanges"] == 0
+
+
+def test_budget_fit_does_not_elide_latest_batch_or_expand_short_outputs():
+    counter = Utf8TokenEstimator(provider="test", model="test")
+    old = ToolCall("old", "read_file", {"path": "old"})
+    latest = (ToolCall("code", "read_file", {"path": "cache.py"}),
+              ToolCall("tests", "run_tests", {}))
+    thinking = ({"type": "thinking", "thinking": "check", "signature": "sig"},)
+    messages = (
+        ModelMessage(role="user", content="repair"),
+        ModelMessage(role="assistant", tool_calls=(old,)),
+        ModelMessage(role="tool", name="read_file", tool_call_id="old", content="ok"),
+        ModelMessage(role="assistant", tool_calls=latest, thinking_blocks=thinking),
+        ModelMessage(role="tool", name="read_file", tool_call_id="code", content="code " * 30),
+        ModelMessage(role="tool", name="run_tests", tool_call_id="tests", content="failure " * 30),
+    )
+    budget = model_messages_token_count(messages[0:1] + messages[3:], counter)
+    fitted, evidence = fit_messages_to_token_budget(messages, counter, budget)
+    assert fitted == messages[0:1] + messages[3:]
+    assert evidence["elided_tool_results"] == 0
+    assert evidence["dropped_tool_exchanges"] == 1
+    assert fitted[1].thinking_blocks == thinking
+
+
+def test_budget_fit_is_noop_and_does_not_mutate_input_when_within_budget():
+    counter = Utf8TokenEstimator(provider="test", model="test")
+    messages = (ModelMessage(role="user", content="request"),)
+    fitted, evidence = fit_messages_to_token_budget(
+        messages, counter, model_messages_token_count(messages, counter)
+    )
+    assert fitted == messages
+    assert evidence["clipped_messages"] == 0
 
 
 def test_emergency_shrink_elides_all_but_three_recent_tool_results():
