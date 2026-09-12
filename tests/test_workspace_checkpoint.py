@@ -1,4 +1,5 @@
 import json
+import pytest
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -224,6 +225,53 @@ def test_checkpoint_policy_matches_runtime_mode():
     assert checkpoint_policy_active("interactive", interactive=True) is True
     assert checkpoint_policy_active("interactive", interactive=False) is False
     assert checkpoint_policy_active("never", interactive=True) is False
+
+
+def test_tool_changes_survive_without_workspace_snapshots(tmp_path):
+    (tmp_path / "README.md").write_text("baseline\n")
+    model = FakeModelClient([
+        '<tool>{"name":"write_file","args":{"path":"changed.txt","content":"done"}}</tool>',
+        '<tool>{"name":"read_file","args":{"path":"README.md"}}</tool>',
+        "<final>done</final>",
+    ])
+    agent = RepoAgent(model_client=model, workspace=WorkspaceContext.build(tmp_path),
+                      session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+                      approval_policy="auto", checkpoint_policy="never")
+    agent.ask("Create changed.txt then read README")
+    state = agent.current_task_state
+    assert state.workspace_checkpoint_status == "disabled"
+    assert state.edited_files == []
+    assert state.observed_changed_files == ["changed.txt"]
+    checkpoint = agent.current_checkpoint()
+    assert checkpoint["observed_changed_files"] == ["changed.txt"]
+    assert "Observed tool changes (not a snapshot): changed.txt" in model.prompts[-1]
+    stored = json.loads(agent.run_store.report_path(state).read_text())
+    assert stored["task_state"]["observed_changed_files"] == ["changed.txt"]
+
+
+@pytest.mark.parametrize("approval,content", [("never", "new"), ("auto", "same")])
+def test_denied_and_noop_writes_are_not_observed_changes(tmp_path, approval, content):
+    (tmp_path / "file.txt").write_text("same")
+    model = FakeModelClient([
+        '<tool>' + json.dumps({"name": "write_file", "args": {"path": "file.txt", "content": content}}) + '</tool>',
+        '<final>done</final>',
+    ])
+    agent = RepoAgent(model_client=model, workspace=WorkspaceContext.build(tmp_path),
+                      session_store=SessionStore(tmp_path / ".repoagent" / "sessions"),
+                      approval_policy=approval, checkpoint_policy="never")
+    agent.ask("Write file")
+    assert agent.current_task_state.observed_changed_files == []
+
+
+def test_observed_file_state_roundtrips_and_old_states_default_empty():
+    from repoagent.task_state import TaskState
+
+    state = TaskState.create("task", "request")
+    old = state.to_dict()
+    old.pop("observed_changed_files")
+    assert TaskState.from_dict(old).observed_changed_files == []
+    state.observed_changed_files = ["file.txt"]
+    assert TaskState.from_dict(state.to_dict()).observed_changed_files == ["file.txt"]
 
 
 def test_agent_turn_persists_workspace_checkpoint_evidence(tmp_path):

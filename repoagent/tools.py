@@ -100,12 +100,13 @@ BASE_TOOL_DEFINITIONS = {
     ),
     "patch_file": ToolDefinition(
         name="patch_file",
-        description="Replace one exact text block in a file.",
+        description="Edit a text block: exact match first, then whole-line leading/trailing whitespace fallback. LF/CRLF equivalent; multiple matches require replace_all=true. Supply new_text with intended indentation.",
         parameters=_object_schema(
             {
                 "path": {"type": "string", "minLength": 1},
                 "old_text": {"type": "string", "minLength": 1},
                 "new_text": {"type": "string"},
+                "replace_all": {"type": "boolean", "default": False},
             },
             ["path", "old_text", "new_text"],
         ),
@@ -283,18 +284,17 @@ def validate_tool(context, name, args):
         return args
 
     if name == "patch_file":
-        # patch_file 故意做得很严格：old_text 必须精确命中且只能出现一次，
-        # 这样修改行为才是确定的，失败原因也更容易解释。
+        # Preflight and execution must apply the same matching rules.
         path = context.path(args["path"])
         if not path.is_file():
             raise ValueError("path is not a file")
         old_text = str(args.get("old_text", ""))
         if not old_text:
             raise ValueError("old_text must not be empty")
-        text = path.read_text(encoding="utf-8")
-        count = text.count(old_text)
-        if count != 1:
-            raise ValueError(f"old_text must occur exactly once, found {count}")
+        from .text_patch import prepare_text_patch
+
+        prepare_text_patch(path.read_bytes(), old_text, str(args["new_text"]),
+                           replace_all=args.get("replace_all", False))
         return args
 
     if name == "git_diff":
@@ -470,12 +470,15 @@ def tool_patch_file(context, args, control=None):
         raise ValueError("old_text must not be empty")
     if "new_text" not in args:
         raise ValueError("missing new_text")
-    text = path.read_text(encoding="utf-8")
-    count = text.count(old_text)
-    if count != 1:
-        raise ValueError(f"old_text must occur exactly once, found {count}")
-    path.write_text(text.replace(old_text, str(args["new_text"]), 1), encoding="utf-8")
-    return f"patched {path.relative_to(context.root)}"
+    from .text_patch import prepare_text_patch
+
+    replacement = prepare_text_patch(path.read_bytes(), old_text, str(args["new_text"]),
+                                     replace_all=args.get("replace_all", False))
+    path.write_bytes(replacement.content)
+    return ToolRunnerOutput(
+        f"patched {path.relative_to(context.root)} ({replacement.replacements} replacement(s), {replacement.match_mode})",
+        {"patch_replacements": replacement.replacements, "patch_match_mode": replacement.match_mode},
+    )
 
 
 def tool_delegate(context, args, control=None):

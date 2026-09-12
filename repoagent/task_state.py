@@ -5,8 +5,10 @@
 """
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from datetime import datetime
 from uuid import uuid4
+from .execution_observations import MAX_EXECUTION_OBSERVATIONS
 
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
@@ -40,6 +42,8 @@ class TaskState:
     resume_status: str = ""
     workspace_checkpoint_id: str = ""
     edited_files: list[str] = field(default_factory=list)
+    observed_changed_files: list[str] = field(default_factory=list)
+    execution_observations: list[dict] = field(default_factory=list)
     workspace_checkpoint_status: str = "disabled"
 
     @classmethod
@@ -66,6 +70,8 @@ class TaskState:
                 data.get("workspace_checkpoint_id", "")
             ),
             edited_files=[str(path) for path in data.get("edited_files", [])],
+            observed_changed_files=[str(path) for path in data.get("observed_changed_files", [])],
+            execution_observations=deepcopy(data.get("execution_observations", [])[-MAX_EXECUTION_OBSERVATIONS:]),
             workspace_checkpoint_status=str(
                 data.get("workspace_checkpoint_status", "disabled")
             ),
@@ -123,5 +129,7 @@ class TaskState:
             "resume_status": self.resume_status,
             "workspace_checkpoint_id": self.workspace_checkpoint_id,
             "edited_files": list(self.edited_files),
+            "observed_changed_files": list(self.observed_changed_files),
+            "execution_observations": deepcopy(self.execution_observations),
             "workspace_checkpoint_status": self.workspace_checkpoint_status,
         }

@@ -1,8 +1,10 @@
 """Checkpoint and resume-state helpers."""
 
 import uuid
+from copy import deepcopy
 
 from .compaction import HISTORY_COMPACTION_STRATEGY
+from .execution_observations import render_execution_observations
 from .features import memory as memorylib
 from .workspace import clip, now
 
@@ -190,6 +192,14 @@ def render_checkpoint_text(agent):
     ]
     if edited_files:
         lines.append("- Workspace files from previous turn: " + ", ".join(edited_files))
+    observed = checkpoint.get("observed_changed_files", [])
+    if observed:
+        names = [str(path).replace("\n", "\\n").replace("\r", "\\r")[:160] for path in observed[:8]]
+        suffix = f" (+{len(observed) - 8} more)" if len(observed) > 8 else ""
+        lines.append("- Observed tool changes (not a snapshot): " + ", ".join(names) + suffix)
+    execution_note = render_execution_observations(checkpoint.get("execution_observations", []))
+    if execution_note:
+        lines.append(execution_note)
     workspace_checkpoint_id = str(
         checkpoint.get("workspace_checkpoint_id", "")
     ).strip()
@@ -238,6 +248,8 @@ def create_checkpoint(agent, task_state, user_message, trigger):
         "workspace_checkpoint_id": task_state.workspace_checkpoint_id,
         "workspace_checkpoint_status": task_state.workspace_checkpoint_status,
         "edited_files": list(task_state.edited_files),
+        "observed_changed_files": list(task_state.observed_changed_files),
+        "execution_observations": deepcopy(task_state.execution_observations),
     }
     state["items"][checkpoint_id] = checkpoint
     state["current_id"] = checkpoint_id

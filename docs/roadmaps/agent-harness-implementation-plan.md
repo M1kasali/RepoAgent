@@ -282,6 +282,30 @@ and further paid campaigns are paused; they do not block mainline delivery.
 - [ ] `M5-01` Run own module-specific paired acceptance for the seven mainline
   areas, with frozen workload, baseline and retained receipts; do not borrow
   upstream resume numbers or substitute Polyglot scores.
+- [x] `M6-01` Harden coding-file edits for LF/CRLF equivalence without rewriting
+  untouched mixed endings; retain exact unique-match checks and verify the full
+  read/edit/check tool workflow (TECH-123). No fuzzy patching or coding-quality
+  improvement claim is implied.
+- [x] `M6-02` Add exact-first, line-whitespace-only edit fallback and explicit
+  boolean replace_all; reject overlapping spans, report match mode/count and
+  verify approval and Runtime tool integration (TECH-124).
+- [x] `M6-03` Run one bounded live coding smoke and independently inspect its
+  outcome: code tests pass, but the eight-call Turn stops without normal completion
+  (TECH-125; not a successful end-to-end acceptance claim).
+- [x] `M6-04` Fix smoke verdict classification for budget-stopped Turns; replay
+  small-context edit/test history retention offline and clarify edited_files
+  provenance with workspace snapshots disabled before any further paid rerun
+  (TECH-126/127). No general convergence improvement is claimed.
+- [ ] `M6-05` Define retention of verified execution outcomes and inspect complete
+  request composition before evaluating any context-policy change. Observed file
+  changes do not prove tests passed or that the task is complete; no paid rerun yet.
+- [x] `M6-05a` Retain bounded historical shell command/status/exit-code observations
+  in task checkpoints independently of workspace snapshots (TECH-128). These are
+  raw process observations, not verified test outcomes; `M6-05` remains open.
+- [x] `M6-05b` Inspect current native request assembly and refresh stale current-Turn
+  context before normal calls and step-limit synthesis (TECH-129). Cover budget
+  reduction, prior history and provider message projections offline. Original
+  live-request replay and verified test-outcome retention remain unproven.
 
 ## 6. Dependency Order
 

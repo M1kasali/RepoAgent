@@ -4,6 +4,7 @@ import time
 from dataclasses import replace
 
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
+from .execution_observations import MAX_EXECUTION_OBSERVATIONS, observe_execution
 from .checkpoint import (
     CHECKPOINT_NONE_STATUS,
     CHECKPOINT_PARTIAL_STALE_STATUS,
@@ -162,6 +163,7 @@ class AgentLoop:
         usage_rows = []
         call_entries = []
         provider_messages = []
+        current_prompt_index = None
         use_structured_history = bool(
             getattr(agent.model_client, "supports_structured_messages", False)
         )
@@ -347,6 +349,8 @@ class AgentLoop:
                 if deadline is not None
                 else None
             )
+            if use_structured_history and current_prompt_index is not None:
+                provider_messages[current_prompt_index] = ModelMessage(role="user", content=prompt)
             synthesis_messages = tuple(provider_messages) + (
                 ModelMessage(role="user", content=_MAX_STEP_SYNTHESIS_PROMPT),
             )
@@ -587,7 +591,11 @@ class AgentLoop:
                     )
                     provider_messages.extend(structured_history.messages)
                     history_selection_metadata = structured_history.to_metadata()
+                current_prompt_index = len(provider_messages)
                 provider_messages.append(current_message)
+            elif use_structured_history:
+                # Refresh this Turn's context, not older user messages or signed replay.
+                provider_messages[current_prompt_index] = ModelMessage(role="user", content=prompt)
             request_messages = tuple(provider_messages)
             if use_structured_history:
                 projected_tokens = model_messages_token_count(
@@ -1085,6 +1093,15 @@ class AgentLoop:
                         name, args = details[id(tool_request)]
                         tool_call_id = tool_request.call_id
                         result = tool_result.content
+                        observation = observe_execution(tool_request, tool_result, redact=agent.redact_text)
+                        if observation is not None:
+                            task_state.execution_observations = (
+                                task_state.execution_observations + [observation]
+                            )[-MAX_EXECUTION_OBSERVATIONS:]
+                        if tool_result.workspace_changed:
+                            task_state.observed_changed_files = sorted(set(
+                                task_state.observed_changed_files
+                            ).union(tool_result.affected_paths))
                         if tool_call_id in native_call_ids:
                             provider_messages.append(
                                 ModelMessage(

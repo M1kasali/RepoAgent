@@ -5185,6 +5185,215 @@ and CLI help checks passing. All nine bundle payload hashes were verified. This
 results paragraph postdates the bundle; runtime code is unchanged. No real QQ
 credentials, remote platform/model calls, commit or push were used.
 
+### TECH-123: Byte-Stable LF/CRLF Code Patching
+
+The existing patch tool read files through universal newline translation, then
+wrote the entire normalized text back. This converted unrelated CRLF lines to LF
+and rejected old_text supplied with CRLF even when the file contained that block.
+Three regression cases reproduced both symptoms before the implementation change.
+
+`prepare_text_patch` now shares matching behavior between preflight and execution.
+It decodes UTF-8 without newline translation, treats LF/CRLF as equivalent only
+at newline boundaries, and requires exactly one literal block match. Replacement
+newlines follow the matched block's first line ending, or the file's first ending
+for a single-line match. Bytes before and after the match remain unchanged,
+including mixed line endings, BOM and absent final newline. File mode is preserved
+by the existing in-place write. Execution recomputes the match from current bytes,
+so a changed/missing target after preflight fails without writing.
+
+This does not add whitespace fallback, approximate matching, replace-all, atomic
+file replacement or a cross-process edit lock. A concurrent external editor can
+still race a read/write; this slice makes no transactional filesystem claim.
+Schema names and required arguments are unchanged. The tool description now
+states newline equivalence explicitly.
+
+Tests cover CRLF/LF/mixed files, regex metacharacters treated literally, UTF-8/BOM,
+empty replacement, executable mode, duplicate and missing matches, invalid UTF-8
+and changed preflight contents. A scripted real Runtime Turn reads a small Python
+fixture, patches it, executes an assertion through run_shell and completes while
+preserving CRLF. This uses trusted local fixture code and no model API; it proves
+workflow integration, not autonomous coding quality. Verification bundle:
+`artifacts/verifications/mainline-code-patching-20260912/`.
+
+Final regression passed 165 tests in 9.39 seconds, including 16 new patch cases.
+Scoped Ruff and diff checks passed; all seven evidence payload hashes verified.
+This results paragraph postdates the bundle; runtime code is unchanged. No paid
+calls, public benchmark campaign, commit or push was performed.
+
+### TECH-124: Controlled Whitespace Fallback and Explicit Replace-All
+
+`patch_file` now exposes optional boolean `replace_all` (default false). Exact
+matching, with LF/CRLF equivalence, remains the first pass. Only when there are no
+exact matches does it compare complete consecutive lines after stripping each
+line's leading/trailing whitespace. It does not change internal whitespace or use
+similarity scores to choose edits. Whitespace-only fallback requests are rejected.
+Exact matches take priority even if additional whitespace-equivalent blocks exist.
+
+The prepared patch contains all original character spans, output bytes, match mode
+and replacement count. Multiple spans require explicit replace_all=true; overlapping
+fallback spans are rejected even with that flag. Each original span is replaced
+once, including differently indented variants; newly inserted text is never
+searched again. A requested terminal newline is consumed exactly once. Each
+replacement uses the local newline convention and preserves surrounding bytes.
+new_text must contain the intended indentation; automatic reindentation is not
+implemented. This extends the strict matching behavior documented in TECH-123.
+
+Both preflight and execution use the same prepared-patch function, with execution
+reading fresh bytes. Tool metadata records patch_match_mode and patch_replacements;
+the result text also reports them. Approval, capability checks and write scheduling
+remain unchanged. A non-boolean replace_all, ambiguous match, overlap or missing
+match fails without writes. This is not an atomic file transaction or an external
+editor lock, and does not include nearest-match suggestions.
+
+Tests cover varied indentation and line endings, exact-first priority, ambiguous
+and overlapping spans, literal characters/internal spaces, strict booleans,
+trailing newlines, and avoiding recursive replacement. Real ToolGateway tests
+verify approval denial and metadata; a scripted Runtime JSON call exercises
+replace_all. Verification bundle:
+`artifacts/verifications/mainline-patch-matching-20260912/`.
+
+Final regression passed 183 tests in 9.63 seconds, including 18 new matching
+cases. Scoped Ruff and diff checks passed; all seven payload hashes verified.
+This paragraph postdates the bundle; runtime code is unchanged. No paid model
+calls, platform expansion, commit or push was performed.
+
+### TECH-125: Bounded Live Coding Smoke, Incomplete End-to-End Result
+
+A single DeepSeek v4-flash task repaired a TTL cache in a temporary repository,
+using the native patch tool and isolated Docker execution. Independent original
+tests passed six methods, and the test file remained unchanged. The model consumed
+all eight allowed calls in approximately 15.85 seconds and stopped without normal
+completion; successful_turn_count is zero. Usage is recorded but unpriced.
+
+The temporary runner initially checked tests and exceptions only, incorrectly
+marking its summary pass. An append-only adjudication corrects the overall verdict
+to incomplete without altering the original evidence. Traces show repeated reads
+and test execution after a passing test run, old tool exchanges removed by the
+3,000-token input budget, and a shell Git command unavailable in the Python slim
+image. These are observations, not an isolated causal diagnosis or a coding-quality
+improvement result. No further paid rerun was performed.
+
+See [the smoke report](coding-smoke-20260912.md) for evidence paths, verdict
+limitations and follow-up checks. Platform expansion remains paused. Runtime code
+was not changed during this smoke acceptance turn.
+
+### TECH-126: Offline Smoke Verdict and Transcript Retention Inspection
+
+`classify_coding_smoke` requires both independent code/test-integrity checks and a
+consistent completed/final_answer_returned Runtime report/task state with a
+nonempty final answer. Passing tests plus a stopped Turn produce incomplete, not
+pass. Verifier exit-code/boolean facts are strictly typed. The classifier does not
+infer correctness from an answer or shell output. Upstream independent checks
+remain responsible for proving that the intended tests actually ran.
+
+`scripts/inspect_coding_smoke.py` verifies the frozen local receipt hashes, rejects
+unsafe receipt paths and writes a separate output without changing originals. It
+uses the persisted report and session to correct the smoke verdict and inspect
+tool-result retention before subsequent native calls at several budgets. The
+output contains IDs, tool names and retention status, not raw tool/thinking text.
+
+The saved smoke yields 21 transcript-only budget cases. In the final reconstructed
+prefix, the patch result is dropped at 3,000 tokens and unchanged at 5,000. At the
+preceding prefix, it is elided at 3,000. This confirms the reducer can remove the
+edit evidence; original system/request composition was not fully saved, so it is
+not an exact live-request replay or proof of why the model repeated work. The
+budget and pruning algorithm were not changed and no paid rerun was performed.
+
+### TECH-127: Observed Tool Changes Independent of Workspace Snapshots
+
+TaskState now records `observed_changed_files` from typed tool results whose
+workspace_changed flag is true, unioning their affected_paths. It is persisted
+after tool execution, included in reports and copied to task checkpoints. It
+continues working with workspace snapshot policy never. Denied/no-op tools do not
+contribute paths. An observed change can also describe a failed tool with partial
+filesystem effects; it is not a success flag or net end-of-Turn diff.
+
+The old edited_files field remains workspace-checkpoint evidence. It is not
+reinterpreted or overwritten with the new observations. Older states default the
+new field to empty. Checkpoint prompts show up to eight observed paths under an
+explicit not-a-snapshot label, independently of old full tool-result retention.
+This preserves the fact that a file was changed without retaining full patch
+payloads, replaying tools or asserting that tests passed. The existing transcript
+pruner is unchanged; a general task-progress or verified-test-outcome memory has
+not been implemented by this change.
+
+Focused tests reproduce the old missing-field failure with snapshots disabled,
+verify next-prompt/persisted observations, exclude denied/no-op writes and cover
+legacy serialization. Verification and a fresh frozen-receipt inspection are in
+`artifacts/verifications/mainline-coding-smoke-followup-20260912/`.
+
+Final regression passed 213 tests in 12.33 seconds. Scoped Ruff, diff check and
+fresh offline receipt inspection passed; all ten verification payload hashes
+were verified. The inspection separately verifies 24 original smoke hashes.
+This results paragraph postdates the bundle; runtime code is unchanged. No paid
+rerun, commit or push was performed.
+
+### TECH-128: Bounded Historical Shell Execution Observations
+
+TaskState retains the latest four run_shell observations, matched by tool name
+and call ID. Each stores a redacted command preview (160 characters maximum),
+tool status, process execution status, strictly integer exit code or null, and
+an optional workspace fingerprint. Unknown or missing metadata stays unknown;
+stdout text is never parsed into a success verdict. Rejected calls without
+process metadata are marked not_started.
+
+AgentLoop persists observations independently of workspace snapshots. Task
+checkpoints render them as quoted historical data, explicitly warning that later
+edits may invalidate earlier results. Intervening reads do not erase them. Old
+states default to an empty list, restored states retain only the latest four,
+and serialization/checkpoints defensively copy the records. Redaction precedes
+command truncation; output bodies are not copied into this summary.
+
+This does not certify that intended tests ran, classify test correctness, change
+the context budget, or relax normal completion requirements. A zero shell exit
+code alone is not proof of success. Full live-request composition inspection and
+a controlled convergence rerun remain open. No paid model calls were made.
+
+Tests cover completion/failure/timeout/cancellation metadata, denied and unknown
+outcomes, boolean exit-code rejection, redaction, command quoting, bounded legacy
+serialization, and a real local process exiting with code 3 whose record survives
+a later read into the next prompt, checkpoint and final report.
+
+Final regression: 267 tests passed in 13.66 seconds; scoped Ruff and diff check
+passed. The receipt is
+`artifacts/verifications/mainline-execution-observations-20260912-r2/`;
+all seven payload hashes were independently checked. The first bundle is retained
+with its lint failure (test-helper lambda); the corrected rerun passed. This
+results paragraph postdates the final bundle; runtime code is unchanged.
+
+### TECH-129: Refresh Current-Turn Context in Native Provider Requests
+
+Inspection found that AgentLoop rebuilt request.prompt on each iteration but
+initialized the native provider_messages user context only once. Native clients
+prefer request.messages, so a newly persisted checkpoint could be visible in
+prompt metadata and prompt-only tests while absent from the actual native
+request. This made TECH-127/128 insufficient for native calls within a Turn.
+
+AgentLoop now remembers the current Turn's context-message index after replayed
+history and replaces that message with the freshly assembled prompt before
+native admission. The step-limit synthesis path does the same after the last
+tool. Prior user messages, assistant replay blocks and tool-call/result pairs
+are not rewritten. The existing reducer and input/output admission remain in
+place; context is replaced rather than appended per iteration. Updating dynamic
+context can affect cache reuse after that point; no cost benefit is claimed.
+
+Two native regression cases first failed on stale message content at 3,000 and
+5,000 token budgets. Coverage now includes both budgets with/without prior user
+history, real local write/shell/read tools, large distinct reads that exercise
+budget reduction, bounded admitted messages, intact call/result pairing, and
+fresh checkpoint text in the Anthropic and OpenAI Responses message projections.
+Step-limit synthesis receives the last exit code but still ends as stopped.
+
+These are deterministic local provider-boundary and serialization tests, not
+network calls or a replay of the original live request (not fully captured).
+They establish a delivery fix, not improved model task success or test verdicts.
+
+Final regression passed 306 tests in 18.41 seconds. Scoped Ruff and diff check
+passed; all seven payload hashes in
+`artifacts/verifications/mainline-native-context-refresh-20260912/` were verified.
+This results paragraph postdates the bundle; runtime code is unchanged. No paid
+rerun, commit or push was performed.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
