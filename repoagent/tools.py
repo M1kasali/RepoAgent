@@ -20,6 +20,7 @@ from .tool_execution import (
     run_bounded_process,
 )
 from .workspace import IGNORED_PATH_NAMES
+from .test_verification import tool_run_tests
 
 
 def _object_schema(properties, required):
@@ -81,6 +82,18 @@ BASE_TOOL_DEFINITIONS = {
             },
             ["command"],
         ),
+        effect=ToolEffect.EXECUTE,
+        requires_approval=True,
+        timeout_seconds=120,
+    ),
+    "run_tests": ToolDefinition(
+        name="run_tests",
+        description="Run Python unittest discovery without a shell pipeline. Report framework counts and source freshness; stale or unknown evidence needs revalidation. Not an independent security oracle.",
+        parameters=_object_schema({
+            "start": {"type": "string", "minLength": 1, "default": "."},
+            "pattern": {"type": "string", "minLength": 1, "default": "test*.py"},
+            "timeout": {"type": "integer", "minimum": 1, "maximum": 120, "default": 60},
+        }, []),
         effect=ToolEffect.EXECUTE,
         requires_approval=True,
         timeout_seconds=120,
@@ -244,6 +257,13 @@ def tool_example(name):
 
 def validate_tool(context, name, args):
     args = normalize_tool_arguments(name, args)
+
+    if name == "run_tests":
+        if not context.path(args["start"]).is_dir():
+            raise ValueError("test start must be a workspace directory")
+        if "/" in args["pattern"] or "\\" in args["pattern"]:
+            raise ValueError("pattern must be a filename glob, not a path")
+        return args
 
     if name == "list_files":
         path = context.path(args.get("path", "."))
@@ -559,6 +579,7 @@ _TOOL_RUNNERS = {
     "read_file": tool_read_file,
     "search": tool_search,
     "run_shell": tool_run_shell,
+    "run_tests": tool_run_tests,
     "write_file": tool_write_file,
     "patch_file": tool_patch_file,
     "git_status": tool_git_status,

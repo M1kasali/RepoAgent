@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from .compaction import HISTORY_COMPACTION_STRATEGY
 from .execution_observations import render_execution_observations
+from .test_verification import refreshed_verifications, render_verifications
 from .features import memory as memorylib
 from .workspace import clip, now
 
@@ -200,6 +201,9 @@ def render_checkpoint_text(agent):
     execution_note = render_execution_observations(checkpoint.get("execution_observations", []))
     if execution_note:
         lines.append(execution_note)
+    verification_note = render_verifications(checkpoint.get("test_verifications", []), agent.root)
+    if verification_note:
+        lines.append(verification_note)
     workspace_checkpoint_id = str(
         checkpoint.get("workspace_checkpoint_id", "")
     ).strip()
@@ -231,6 +235,7 @@ def create_checkpoint(agent, task_state, user_message, trigger):
         file_freshness = memorylib.file_freshness(path, agent.root)
         freshness[path] = file_freshness
         key_files.append({"path": path, "freshness": file_freshness})
+    task_state.test_verifications = refreshed_verifications(task_state.test_verifications, agent.root)
     checkpoint = {
         "checkpoint_id": checkpoint_id,
         "parent_checkpoint_id": current.get("checkpoint_id", "") if current else "",
@@ -250,6 +255,7 @@ def create_checkpoint(agent, task_state, user_message, trigger):
         "edited_files": list(task_state.edited_files),
         "observed_changed_files": list(task_state.observed_changed_files),
         "execution_observations": deepcopy(task_state.execution_observations),
+        "test_verifications": deepcopy(task_state.test_verifications),
     }
     state["items"][checkpoint_id] = checkpoint
     state["current_id"] = checkpoint_id

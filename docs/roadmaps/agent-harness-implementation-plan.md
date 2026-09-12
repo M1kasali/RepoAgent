@@ -310,6 +310,10 @@ and further paid campaigns are paused; they do not block mainline delivery.
   with unchanged task/model/budget/image (TECH-130): original tests 6/6, tests
   unchanged, normal Runtime completion in five calls / 9.18 seconds. Preserve
   the prior eight-call incomplete result; no statistical or causal claim.
+- [x] `M6-07` Add source-bound unittest verification via a dedicated sandboxed
+  tool; retain framework verdicts and invalidate stale records after file changes
+  (TECH-131). Shell exit codes alone remain insufficient. This is local test
+  evidence, not independent validation against adversarial or weakened tests.
 
 ## 6. Dependency Order
 

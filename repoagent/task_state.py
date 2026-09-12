@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime
 from uuid import uuid4
 from .execution_observations import MAX_EXECUTION_OBSERVATIONS
+from .test_verification import MAX_VERIFICATIONS
 
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
@@ -44,6 +45,7 @@ class TaskState:
     edited_files: list[str] = field(default_factory=list)
     observed_changed_files: list[str] = field(default_factory=list)
     execution_observations: list[dict] = field(default_factory=list)
+    test_verifications: list[dict] = field(default_factory=list)
     workspace_checkpoint_status: str = "disabled"
 
     @classmethod
@@ -72,6 +74,7 @@ class TaskState:
             edited_files=[str(path) for path in data.get("edited_files", [])],
             observed_changed_files=[str(path) for path in data.get("observed_changed_files", [])],
             execution_observations=deepcopy(data.get("execution_observations", [])[-MAX_EXECUTION_OBSERVATIONS:]),
+            test_verifications=deepcopy(data.get("test_verifications", [])[-MAX_VERIFICATIONS:]),
             workspace_checkpoint_status=str(
                 data.get("workspace_checkpoint_status", "disabled")
             ),
@@ -131,5 +134,6 @@ class TaskState:
             "edited_files": list(self.edited_files),
             "observed_changed_files": list(self.observed_changed_files),
             "execution_observations": deepcopy(self.execution_observations),
+            "test_verifications": deepcopy(self.test_verifications),
             "workspace_checkpoint_status": self.workspace_checkpoint_status,
         }

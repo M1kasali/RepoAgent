@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
 from .execution_observations import MAX_EXECUTION_OBSERVATIONS, observe_execution
+from .test_verification import MAX_VERIFICATIONS
 from .checkpoint import (
     CHECKPOINT_NONE_STATUS,
     CHECKPOINT_PARTIAL_STALE_STATUS,
@@ -1093,6 +1094,11 @@ class AgentLoop:
                         name, args = details[id(tool_request)]
                         tool_call_id = tool_request.call_id
                         result = tool_result.content
+                        verification = tool_result.to_dict()["metadata"].get("test_verification") if tool_request.name == "run_tests" else None
+                        if isinstance(verification, dict):
+                            task_state.test_verifications = (task_state.test_verifications + [
+                                agent.redact_artifact({**verification, "call_id": tool_call_id})
+                            ])[-MAX_VERIFICATIONS:]
                         observation = observe_execution(tool_request, tool_result, redact=agent.redact_text)
                         if observation is not None:
                             task_state.execution_observations = (

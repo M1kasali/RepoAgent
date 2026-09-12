@@ -5433,6 +5433,59 @@ check. All 11 payload hashes in
 Runtime source remained unchanged; only documentation was updated after the
 clean-commit run. This results paragraph postdates the verification bundle.
 
+### TECH-131: Source-Bound Unittest Verification Records
+
+The run_tests tool runs Python unittest discovery through the configured sandbox
+and existing execute-effect Gateway approval, capability, timeout and cancellation
+controls. It accepts a workspace start directory, filename glob and timeout, not
+an arbitrary shell command. A quoted python3 -B invocation runs the packaged
+unittest guest runner. Test stdout/stderr are separated from the JSON report;
+framework counters, bounded test IDs and failure diagnostics supply evidence.
+Ordinary run_shell outputs never create test verification records.
+
+The tool distinguishes passed, failed, no_tests_passed and unknown. A pass needs
+a complete parseable framework report, exit zero, no failure/error/unexpected
+success, and at least one test not skipped or expected-failing. Missing/malformed
+or truncated reports, timeout and cancellation cannot establish a pass. Import
+errors become framework failures. The interpreter must be available as python3
+in the selected environment; missing interpreters yield unknown evidence.
+
+Each result binds before/after content digests over the workspace inventory.
+Freshness is current only when both inventories succeed and match; changes during
+tests are stale. Later checkpoints and prompt rendering recheck content. Once
+persisted as stale/unknown, a record is not promoted back to current by restoring
+old bytes: a new verification is needed. Rendering evaluates freshness without
+rewriting historical checkpoints; transient external edits between observations
+cannot be detected. Additions/deletions are included. Runtime
+keeps four records, with legacy empty defaults and defensive copies; reports and
+checkpoints preserve the same history. Prompt summaries show verdict/freshness
+and counts instead of full output. Task completion policy is unchanged.
+
+Inventory excludes the existing IGNORED_PATH_NAMES (including .git, .repoagent,
+virtual environments and caches). It fails closed for unreadable paths, symlinks,
+special files, more than 4,096 files, any file over 4 MiB or total over 32 MiB.
+An unavailable inventory yields unknown freshness, not a current pass. This is
+bounded content checking, not an atomic filesystem snapshot or a lock against
+concurrent external edits. Environment, excluded dependency directories and
+external services are not bound by this digest.
+
+This is first-party local test evidence, not an independent security oracle:
+arbitrary test code can tamper with its process, and model-edited tests may weaken
+the suite. Frozen external graders remain necessary for adversarial evaluation.
+Only unittest is supported in this slice, not pytest or other languages. Test IDs
+are bounded to 200 entries of 240 characters; result counts cover the full suite.
+Very large reports may hit existing output limits and remain unknown.
+
+Final regression passed 404 tests in 25.98 seconds, plus one opt-in real Docker
+acceptance in 1.97 seconds. The container test verifies framework success/failure
+after a source edit, required isolation and container removal. Runtime tests
+cover pass/edit/fail/fix/revalidate persistence, checkpoint prompt invalidation,
+legacy records, report consistency, zero/skipped tests, timeout, path rejection,
+and shell-argument quoting. Scoped Ruff and diff check passed. All ten payload
+hashes in `artifacts/verifications/mainline-test-verification-20260912-r2/` were
+verified. Earlier successful bundles are retained. This paragraph postdates the
+final bundle; runtime code is unchanged. No paid model calls, commit or push.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
