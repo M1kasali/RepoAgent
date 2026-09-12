@@ -90,6 +90,10 @@ class FallbackModelClient:
             bool(getattr(provider, "supports_structured_messages", False))
             for provider in self.providers
         )
+        self.supports_native_tools = all(
+            bool(getattr(provider, "supports_native_tools", False))
+            for provider in self.providers
+        )
 
     def _failure(
         self,

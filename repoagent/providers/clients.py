@@ -680,6 +680,7 @@ def _extract_usage_cache_details(data):
 
 class OpenAICompatibleModelClient(_TypedModelClient):
     supports_structured_messages = True
+    supports_native_tools = True
 
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model
@@ -1103,6 +1104,7 @@ def _extract_anthropic_tool_calls(data, *, provider):
 
 class AnthropicCompatibleModelClient(_TypedModelClient):
     supports_structured_messages = True
+    supports_native_tools = True
 
     def __init__(self, model, base_url, api_key, temperature, timeout):
         self.model = model

@@ -5843,6 +5843,38 @@ native tool usage, which is a budget-allocation lead, not yet a proven cause.
 Do not turn a passing test record or forced final summary into automatic task
 success, and do not widen the budget merely to close the TODO.
 
+### TECH-145: Native-Schema-Aware Prefix Construction
+
+Captured native requests still carried the legacy text tool catalog and XML
+tool examples even though tool definitions were already attached as native
+schemas. Added failing prefix-selection/cache regressions, then introduced an
+explicit `supports_native_tools` capability on the OpenAI-compatible and
+Anthropic-compatible clients. Fallback chains advertise it only if every
+provider does; undeclared and text-only clients keep their existing prefix.
+
+Native mode uses compact instructions for schema-based calls rather than
+duplicated text definitions/XML tool syntax. It retains execution environment,
+workspace context, approval/sandbox boundaries, evidence requirements and the
+supported final-answer envelope. Gateway schema validation, permissions and
+the actual request tools are unchanged. Cache identity includes the native
+schema signature; changing provider capability or registry definitions forces
+prefix refresh, preventing reuse of the wrong protocol instructions.
+
+Tests cover legacy mode, capability transitions, schema-sensitive cache hashes,
+mixed fallback chains and native tool call/result replay with schemas intact.
+65 prefix/provider tests passed in 8.55 seconds. The offline initial-prompt
+comparison in `artifacts/acceptance/native-prefix-offline-20260912/` retained
+identical tool signatures: rendered prefix estimate 900 -> 606 tokens, initial
+prompt estimate 958 -> 664. These are UTF-8 estimates for one synthetic prompt,
+not provider billing, total wire tokens or causal live-effectiveness evidence.
+No budget, test or completion criterion was widened.
+
+Full regression passed 1,299 tests, with 43 skips and six existing warnings,
+in 174.17 seconds. Ruff, diff check and evaluation CLI help passed; all nine
+payload hashes verified in `artifacts/verifications/native-prefix-20260912/`.
+Offline prefix receipt hashes also verified. This paragraph postdates the
+pre-commit bundle; runtime source did not change after verification.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

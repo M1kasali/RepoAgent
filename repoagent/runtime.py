@@ -453,6 +453,7 @@ class RepoAgent:
         return build_prompt_prefix(
             workspace=self.workspace,
             tools=self.tools,
+            native_tools=bool(getattr(self.model_client, "supports_native_tools", False)),
             execution_context=(
                 describe(cwd=self.root)
                 if "run_shell" in self.tools and callable(describe)
@@ -483,6 +484,8 @@ class RepoAgent:
         prefix_state = (
             self.build_prefix()
             if workspace_changed or force or previous_hash is None
+            or self.prefix_state.native_tools != bool(getattr(self.model_client, "supports_native_tools", False))
+            or self.prefix_state.tool_signature != self.tool_signature()
             else self.prefix_state
         )
         prefix_changed = force or previous_hash != prefix_state.hash
