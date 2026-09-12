@@ -5817,6 +5817,32 @@ diff check and evaluation CLI help passed. All nine payload hashes verified in
 This paragraph postdates that pre-commit bundle. TECH-142's 29 receipt payload
 hashes were also verified. Runtime source did not change after verification.
 
+### TECH-144: Completion Guidance Alone Did Not Resolve Repeated Inspection
+
+The last bounded run in this slice used clean `6e1500e` and the unchanged
+frozen protocol. It took 18.17 seconds, eight model calls and 12 tool calls.
+The Agent reproduced the failures, repaired cache.py and reran run_tests with
+six passing tests and current freshness; independent original tests also
+passed. It then read code/README, requested git_diff and searched test names
+instead of returning a final answer within the normal loop. Runtime stopped
+at the step limit; the forced closing summary does not count as normal
+completion. Overall acceptance remains failed/incomplete.
+
+Tests and README were unchanged, no extra files were added and source remained
+clean. All 29 payload hashes verified in
+`artifacts/acceptance/live-recovery-20260912-r4/`. The run demonstrates the
+failure -> repair -> revalidation chain, not successful overall completion or
+a general recovery rate. Both this and TECH-142 are retained, not discarded
+in favor of a later successful sample. Calls are unpriced.
+
+No further paid rerun was started. M6-09 remains open specifically on bounded
+normal completion. Next work should inspect native request budget allocation
+and repeated-read behavior offline; conditional completion wording alone did
+not solve it. The recorded prompt includes textual tool instructions alongside
+native tool usage, which is a budget-allocation lead, not yet a proven cause.
+Do not turn a passing test record or forced final summary into automatic task
+success, and do not widen the budget merely to close the TODO.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

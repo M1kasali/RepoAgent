@@ -343,6 +343,9 @@ and further paid campaigns are paused; they do not block mainline delivery.
   Selective reduction is implemented and regression-tested (TECH-139). Same-budget
   rerun on 52a3418 repaired code and passed independent tests (6/6), but the Agent
   did not retest or complete (TECH-140). M6-09 remains open.
+  Two later same-budget runs did complete failure/repair/retest (6/6), after
+  test-result semantics and next-step corrections, but still stopped at the
+  tool-step limit (TECH-142/144). Normal completion is the remaining gate.
 
 ## 6. Dependency Order
 
@@ -649,9 +652,10 @@ Current status and explicit deferrals are summarized in
 [Mainline Status](mainline-status.md). Original Myna and further platform
 adaptation are paused. SQLite and reconciled documents were committed as
 252c157 after full regression. Selective context reduction followed in 52a3418
-(TECH-139). The same-budget rerun repaired code but did not retest or complete
-(TECH-140). Next diagnose mutation-evidence retention and test-failure semantics
-offline before another live attempt. Do not start a full Polyglot campaign or
+(TECH-139). Test-result semantics and conditional guidance followed in 65972a4
+and 6e1500e. The latest two bounded runs repaired and retested successfully but
+did not complete normally (TECH-142/144). Next inspect native request budget
+allocation and repeated reads offline. Do not start a full Polyglot campaign or
 substitute unrelated memory integrations. Module-level paired effectiveness
 measurements remain separate work under M5-01.
 
