@@ -220,6 +220,13 @@ def infer_next_step(task_state):
         return "No next step recorded."
     if task_state.stop_reason == "step_limit_reached":
         return "Resume from the latest checkpoint and continue the task."
+    if task_state.status == "running" and task_state.test_verifications:
+        latest = task_state.test_verifications[-1]
+        if latest.get("process_status") == "completed" and latest.get("report") is not None:
+            if latest.get("freshness") != "current":
+                return "Rerun run_tests against the current source before claiming verification; earlier evidence is stale or unknown."
+            if latest.get("verdict") == "failed":
+                return "Use the reported test failures to guide repair, then rerun run_tests; the test runner completed."
     if task_state.last_tool:
         return f"Decide the next action after {task_state.last_tool}."
     return "Continue the task from the latest checkpoint."

@@ -61,6 +61,63 @@ def test_ordinary_stdout_cannot_be_used_as_report(tmp_path):
     )
 
 
+def test_completed_failing_tests_are_evidence_not_tool_execution_errors(tmp_path):
+    agent = fixture(tmp_path, PASSING.replace("VALUE, 1", "VALUE, 2"))
+    result = agent.execute_tool("run_tests", {})
+    assert result.status == "ok"
+    assert result.error_code == ""
+    assert result.metadata["exit_code"] == 1
+    assert result.metadata["test_verification"]["verdict"] == "failed"
+
+
+def test_checkpoint_requests_revalidation_after_edit_without_false_tool_error(tmp_path):
+    from repoagent import FakeModelClient
+
+    agent = fixture(tmp_path)
+    (tmp_path / "value.py").write_text("VALUE = 2\n")
+    agent.model_client = FakeModelClient([
+        '<tool>{"name":"run_tests","args":{}}</tool>',
+        '<tool>{"name":"write_file","args":{"path":"value.py","content":"VALUE = 1\\n"}}</tool>',
+        '<final>Still needs revalidation.</final>',
+    ])
+    agent.ask("Reproduce, fix and rerun the tests")
+    prompt = agent.model_client.prompts[2]
+    assert "Observed tool changes (not a snapshot): value.py" in prompt
+    assert "run_tests error on workspace" not in prompt
+    assert "Rerun run_tests" in prompt
+    assert '"freshness": "stale"' in prompt
+
+
+@pytest.mark.parametrize("status,freshness,verdict,expected", [
+    ("running", "current", "failed", "test runner completed"),
+    ("running", "unknown", "passed", "Rerun run_tests"),
+    ("running", "current", "passed", "Decide the next action"),
+    ("completed", "stale", "failed", "No next step"),
+])
+def test_next_step_distinguishes_verdict_freshness_and_terminal_state(status, freshness, verdict, expected):
+    from repoagent.checkpoint import infer_next_step
+
+    state = TaskState.create("task", "validate")
+    state.status = status
+    state.last_tool = "run_tests"
+    state.test_verifications = [{"process_status": "completed", "report": {"tests": 1},
+                                 "freshness": freshness, "verdict": verdict}]
+    assert expected in infer_next_step(state)
+
+
+def test_unparseable_nonzero_test_execution_remains_error(tmp_path, monkeypatch):
+    agent = fixture(tmp_path)
+    context = agent.tools["run_tests"]["run"].args[0]
+    from repoagent.tool_execution import ProcessOutcome
+
+    monkeypatch.setattr(context.sandbox_adapter, "execute", lambda *args, **kwargs:
+                        ProcessOutcome(status="completed", stdout="not a report", stderr="runner failed",
+                                       exit_code=1, stdout_chars=12, stderr_chars=13, output_truncated=False))
+    result = agent.execute_tool("run_tests", {})
+    assert result.status == "error"
+    assert result.metadata["test_verification"]["verdict"] == "unknown"
+
+
 def test_changes_during_tests_invalidate_result(tmp_path):
     agent = fixture(
         tmp_path,

@@ -155,7 +155,8 @@ def tool_run_tests(context, args, control=None):
         json.dumps(evidence, ensure_ascii=True),
         {
             **outcome.metadata(),
-            "exit_code_is_error": True,
+            # A parsed failing suite is a completed measurement, not a tool failure.
+            "exit_code_is_error": report is None,
             "test_verification": evidence,
         },
     )

@@ -5749,6 +5749,38 @@ distinguish a completed failing test from a test execution error. These are
 diagnostic leads, not verified fixes. M6-09 remains open. No second paid rerun
 was launched in this slice; calls remain unpriced and no cost claim is made.
 
+### TECH-141: Separate Failing Tests from Execution Errors and Guide Revalidation
+
+Inspection of the TECH-140 native request after patching disproved complete
+mutation-evidence loss: the checkpoint still named the observed cache.py edit
+and stale verification. It also contained a misleading retrieved memory note,
+`run_tests error on workspace; check the failure before retry`, despite a
+completed test process with a valid failing framework report.
+
+Added a failing gateway regression and a failing Runtime prompt regression.
+The first fixes a concrete semantic mismatch: a completed, parsed unittest
+report is a successful tool measurement even when the suite fails. Exit code,
+failed verdict, diagnostics and source freshness remain unchanged. Timeout,
+cancellation and unparseable nonzero execution still take the existing error
+paths. A failing suite is not relabeled as passed. This also prevents the
+generic execution-error memory note from being created for valid test failures;
+existing persisted notes are not silently rewritten.
+
+After that correction, the second regression still failed on missing next-step
+guidance. Checkpoints for running tasks now recommend rerunning run_tests when
+the latest parsed report is stale/unknown, or using current failures to guide
+repair before retesting. Completed and step-limited task behavior is unchanged.
+This is guidance, not forced execution, automatic success or a permission bypass.
+No new mutation-memory subsystem was added because retained mutation evidence
+was already present. These changes are scoped corrections grounded in the
+observed failure, not claims of full Pico parity or proven live effectiveness.
+
+Verification: 44 focused tests passed in 3.15 seconds. Full regression passed
+1,294 tests with 43 skips and six existing warnings in 174.82 seconds; Ruff,
+diff check and evaluation CLI help passed. All nine payload hashes verified in
+`artifacts/verifications/recovery-semantics-20260912/`. This paragraph postdates
+the pre-commit bundle; runtime source did not change after verification.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
