@@ -660,7 +660,9 @@ adaptation are paused. SQLite and reconciled documents were committed as
 (TECH-139). Test-result semantics and conditional guidance followed in 65972a4
 and 6e1500e. Native prefixes and live budget feedback followed in e5ac7db and
 dc432b3. M6-09 passed with unchanged limits and normal completion (TECH-148).
-Next consolidate release verification/evidence and scope M5-01 paired acceptance.
+Clean candidate 6cd7ade passed package installation and 12/12 scripted runtime
+contracts, with reverified evidence indexed locally (TECH-149). Next scope
+M5-01 paired acceptance and make a deliberate formal version/tag decision.
 Do not start a full Polyglot campaign or
 substitute unrelated memory integrations. Module-level paired effectiveness
 measurements remain separate work under M5-01.

@@ -57,3 +57,43 @@ python scripts/collect_resume_metrics.py \
 ```
 
 Scripted contract results must remain labeled as runtime-contract evidence. They are not a claim that RepoAgent outperforms production coding agents.
+
+## Current Local Candidate
+
+Candidate `6cd7ade05e19a8c760871a5205ac0e80149fa1ac` was verified on clean
+source. This is not a new release: version remains `0.1.1`, no tag was created
+and nothing was published. The existing `v0.1.1` release does not cover these
+later changes.
+
+| Check | Observed result |
+| --- | --- |
+| Source regression | 1,299 passed, 43 skipped; Ruff passed |
+| Package build | Offline wheel and source distribution built successfully |
+| Isolated wheel install | Installed outside the checkout with locked json-repair 0.63.4; dependency check passed |
+| Installed code identity | All 153 Python module hashes matched source; import location verified inside the new virtual environment |
+| CLI smoke | All five public command entry points accepted --help |
+| Installed runtime contracts | 12/12 scripted cases passed, using the checkout's benchmark assets |
+| Evidence integrity | 367 candidate payload hashes checked; self-contained contract bundle verified after relocation |
+| Release boundary | Default tagged-release verifier rejected the untagged candidate, as required |
+
+Local artifacts, intentionally untracked:
+
+- `artifacts/acceptance/candidate-6cd7ade/verification/manifest.json`: commands,
+  source/environment identity, outputs and hashes.
+- `artifacts/acceptance/candidate-6cd7ade/verification/dist/`: candidate wheel
+  and source distribution; do not confuse their 0.1.1 filenames with the old tag.
+- `artifacts/acceptance/candidate-6cd7ade/evidence-index.json`: candidate checks
+  and seven independently rechecked historical experiment receipts.
+- `artifacts/acceptance/candidate-6cd7ade/manifest.json`: outer receipt binding
+  the local scripts, summary, index and verification manifest.
+
+Only local Linux/WSL Python 3.12 was exercised. This does not certify the full
+CI matrix, optional integrations, external platforms or live-model quality.
+The recovery success on `dc432b3` remains a single debugged case; SQLite's live
+recall result remains historical dirty-tree development evidence, not current
+release effectiveness. Prior failures remain indexed. No resume-claim file was
+generated from this candidate.
+
+The next formal release requires a deliberate version/tag decision and the
+existing tagged workflow. Own module-level paired measurements remain separate
+work, not a prerequisite for claiming that this local installation smoke passed.

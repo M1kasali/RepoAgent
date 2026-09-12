@@ -23,8 +23,9 @@ Implemented behavior and measured effectiveness are separate claims.
 - M5-01: module-specific paired acceptance for the mainline, with own workloads,
   denominators, costs and immutable evidence. Infrastructure is not itself a
   measured improvement.
-- Release evidence: freeze the current source after commit. Existing v0.1.1
-  release evidence does not cover all subsequent development changes.
+- Formal release: local clean candidate 6cd7ade passed build, isolated wheel
+  install and 12/12 scripted contracts (TECH-149). A version/tag decision and
+  full release/CI workflow remain pending; the old v0.1.1 tag is unchanged.
 
 ## Deferred
 
@@ -52,9 +53,11 @@ Implemented behavior and measured effectiveness are separate claims.
 5. Done: native schema-aware prefixes and live budget feedback in e5ac7db and
    dc432b3. Full regression 1,299 passed, 43 skipped. M6-09 passed in four model
    calls / six tool executions / 12.45 seconds, with unchanged limits (TECH-148).
-6. Next: release verification/evidence consolidation and explicitly scoped
-   M5-01 paired campaigns. Do not generalize the debugged fixture into a
-   recovery rate, reopen deferred memory/platform work or launch full Polyglot.
+6. Done: clean candidate 6cd7ade, package install, 12/12 runtime contracts and
+   evidence consolidation (TECH-149); see [release notes](../release.md).
+7. Next: deliberately scope M5-01 module measurements and decide whether to
+   prepare a new formal release. Do not generalize the debugged fixture into
+   a recovery rate, reopen deferred integrations or launch full Polyglot.
 
 Details and historical evidence are in the
 [implementation ledger](../architecture/implementation-ledger.md) and

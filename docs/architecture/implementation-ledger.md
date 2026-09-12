@@ -5952,6 +5952,44 @@ No further paid trial was run after success. The captured final answer has a
 cosmetic leading `answer>` fragment; this does not affect the verified code or
 Runtime outcome, but output-envelope polish is not established by this test.
 
+### TECH-149: Clean Candidate Packaging, Installed Runtime and Evidence Index
+
+Verified clean commit `6cd7ade05e19a8c760871a5205ac0e80149fa1ac` without
+runtime edits, version changes, tag creation, publication or paid model calls.
+Source preflight passed before and after the run. Full regression passed
+1,299 tests with 43 skips and six existing warnings in 179.92 seconds; Ruff and
+diff check passed. Offline uv build produced both wheel and source distribution.
+
+Installed the wheel with json-repair 0.63.4 (from uv.lock) into a fresh virtual
+environment outside the source checkout. uv dependency check and all five CLI
+help commands passed. Isolated Python import location was inside that virtual
+environment and all 153 installed Python module hashes matched the source.
+The installed package, using checkout benchmark data, passed 12/12 scripted
+runtime contracts. Created and reverified the untagged self-contained contract
+evidence after relocation; the normal tagged verifier rejected it as expected.
+
+All 367 verification payload hashes checked. Wheel/sdist path inspection found
+no ignored runtime state, .env path or withdrawn CodeCairn adapter. This is a
+path audit, not exhaustive content-based secret scanning. Both packaging
+artifacts remain local under
+`artifacts/acceptance/candidate-6cd7ade/verification/dist/`.
+
+Rechecked seven historical receipts (six recovery attempts and the SQLite live
+case) and recorded their distinct commit/dirty identities, outcomes and limits
+in `artifacts/acceptance/candidate-6cd7ade/evidence-index.json`. Earlier failed
+attempts were not dropped. An outer manifest binds the local runners, summary,
+index and verification manifest. No historical case was promoted to paired
+current-release effectiveness, and no resume claims were generated.
+
+This is local Linux/WSL Python 3.12 candidate verification, not execution of the
+full supported CI matrix or acceptance of optional integrations/platforms.
+Package version remains 0.1.1 and the existing old release tag is unchanged.
+Updated release/status docs after verification; these documentation changes
+postdate the frozen candidate and do not alter its implementation.
+
+After documentation updates, five release-hardening tests passed in 3.74
+seconds, diff check passed and the outer candidate receipt was reverified.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
