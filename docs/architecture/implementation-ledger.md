@@ -5781,6 +5781,42 @@ diff check and evaluation CLI help passed. All nine payload hashes verified in
 `artifacts/verifications/recovery-semantics-20260912/`. This paragraph postdates
 the pre-commit bundle; runtime source did not change after verification.
 
+### TECH-142: Live Recovery Chain Passed but Runtime Still Stopped
+
+One unchanged-budget frozen-protocol run on clean `65972a4` took 18.57 seconds
+and eight model calls. The Agent reproduced failures, patched cache.py and ran
+run_tests again: six passed with current freshness. The independent unchanged
+suite also passed. The final answer correctly acknowledged the patch and both
+test outcomes, unlike TECH-140. However, repeated reads after passing consumed
+12 tool calls and Runtime stopped at the step limit. Overall acceptance remains
+failed/incomplete despite `failure_before_repair_then_pass=true`.
+
+Receipt: `artifacts/acceptance/live-recovery-20260912-r3/`. Tests and README were
+unchanged, no extra files were added and source remained clean. This is one
+controlled observation, not a recovery rate or causal improvement estimate.
+The next correction targets guidance after a current passing verification,
+without relaxing Runtime completion or changing test outcomes.
+
+### TECH-143: Conditional Completion Guidance after Current Passing Tests
+
+Added a red regression showing that current passing verification still yielded
+only a generic next-action hint. Running-task checkpoints now recommend checking
+remaining requirements and summarizing observed changes/verification if all
+requested work is satisfied, instead of repeating reads solely to reconstruct
+elided history. A Runtime regression checks the final post-revalidation prompt.
+
+This is conditional guidance only. No task state is automatically marked
+completed; current passing tests are not proof of every user requirement.
+Freshness revalidation, failing-report guidance, tool permissions, budgets and
+the independent acceptance criterion are unchanged.
+
+Verification: 44 focused tests passed in 3.46 seconds; full regression passed
+1,294 tests with 43 skips and six existing warnings in 174.38 seconds. Ruff,
+diff check and evaluation CLI help passed. All nine payload hashes verified in
+`artifacts/verifications/recovery-completion-guidance-20260912/`.
+This paragraph postdates that pre-commit bundle. TECH-142's 29 receipt payload
+hashes were also verified. Runtime source did not change after verification.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

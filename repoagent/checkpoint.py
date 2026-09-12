@@ -227,6 +227,8 @@ def infer_next_step(task_state):
                 return "Rerun run_tests against the current source before claiming verification; earlier evidence is stale or unknown."
             if latest.get("verdict") == "failed":
                 return "Use the reported test failures to guide repair, then rerun run_tests; the test runner completed."
+            if latest.get("verdict") == "passed":
+                return "Tests passed on the current source. Check remaining requirements; if all requested work is satisfied, summarize the observed changes and verification. Do not repeat reads solely to reconstruct elided history."
     if task_state.last_tool:
         return f"Decide the next action after {task_state.last_tool}."
     return "Continue the task from the latest checkpoint."

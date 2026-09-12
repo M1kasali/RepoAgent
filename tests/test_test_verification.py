@@ -91,7 +91,7 @@ def test_checkpoint_requests_revalidation_after_edit_without_false_tool_error(tm
 @pytest.mark.parametrize("status,freshness,verdict,expected", [
     ("running", "current", "failed", "test runner completed"),
     ("running", "unknown", "passed", "Rerun run_tests"),
-    ("running", "current", "passed", "Decide the next action"),
+    ("running", "current", "passed", "if all requested work is satisfied, summarize"),
     ("completed", "stale", "failed", "No next step"),
 ])
 def test_next_step_distinguishes_verdict_freshness_and_terminal_state(status, freshness, verdict, expected):
@@ -214,6 +214,7 @@ def test_runtime_pass_edit_revalidate_and_checkpoint(tmp_path):
     ]
     assert '"freshness": "stale"' in agent.model_client.prompts[2]
     assert agent.current_checkpoint()["test_verifications"] == rows
+    assert "if all requested work is satisfied, summarize" in agent.model_client.prompts[-1]
     report = json.loads(
         agent.run_store.report_path(agent.current_task_state).read_text()
     )
