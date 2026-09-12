@@ -221,7 +221,24 @@ def directory_channel_report(root):
         "inbox_pending": len(tuple((root / "inbox").glob("*.json"))),
         "outbox_messages": len(tuple((root / "outbox").glob("*.json"))),
         "processed_messages": len(tuple((root / "processed").glob("*.json"))),
+        "rejected_messages": len(tuple((root / "rejected").glob("*.json"))),
     }
+
+
+def channel_receipt_report(cwd=".", *, retry_turn_id=None):
+    from .channel_receipts import ChannelReceipts
+
+    workspace = _workspace(cwd)
+    path = workspace_state_root(workspace.repo_root) / "channel-receipts.sqlite3"
+    if not path.exists():
+        if retry_turn_id:
+            raise ValueError("no matching failed delivery receipt")
+        return {"schema": "repoagent.channel-receipts/v1", "counts": {}, "review": []}
+    receipts = ChannelReceipts(path)
+    if retry_turn_id and not receipts.retry_delivery(retry_turn_id):
+        raise ValueError("delivery is not retryable; uncertain execution is never automatically replayed")
+    return {"schema": "repoagent.channel-receipts/v1", **receipts.summary(),
+            "requeued": retry_turn_id}
 
 
 def cron_report(cwd="."):

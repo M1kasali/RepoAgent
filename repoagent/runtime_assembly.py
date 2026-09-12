@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from .config import load_project_env, load_user_env
 from .paths import workspace_state_root
 from .mcp_transport import load_mcp_servers
+from .memory_plugins import load_memory_backend
 from .run_store import RunStore
 from .runtime import RepoAgent
 from .sandbox import build_sandbox_adapter
@@ -50,7 +51,13 @@ class RuntimeAssembly:
         session_id = args.resume
         if session_id == "latest":
             session_id = self.session_store.latest()
+        memory_backend = load_memory_backend(
+            getattr(args, "memory_backend", "local"),
+            workspace=self.workspace.repo_root,
+            config_path=getattr(args, "memory_config", None),
+        )
         options = {
+            "memory_backend": memory_backend,
             "model_client": self.model_client,
             "workspace": self.workspace,
             "session_store": self.session_store,
@@ -83,6 +90,7 @@ class RuntimeAssembly:
             "secret_env_names": self.secret_env_names,
             "checkpoint_policy": getattr(args, "checkpoint_policy", "interactive"),
             "interactive": not bool(getattr(args, "prompt", [])),
+            "enable_questions": getattr(args, "enable_questions", False),
         }
         if getattr(args, "mcp_config", None):
             options["mcp_servers"] = load_mcp_servers(

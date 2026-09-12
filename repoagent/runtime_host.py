@@ -12,7 +12,7 @@ from .spine import Scheduler, TurnRuntime
 
 
 class RuntimeHost:
-    def __init__(self, agent, *, foreground_capacity=1, background_capacity=1):
+    def __init__(self, agent, *, foreground_capacity=1, background_capacity=1, stream_text=False):
         self.agent = agent
         self.foreground_capacity = foreground_capacity
         self.background_capacity = background_capacity
@@ -22,16 +22,27 @@ class RuntimeHost:
         self._watchers = set()
         self._subscribers = defaultdict(dict)
         self._next_subscriber = 0
+        self.subscriber_failure_count = 0
+        self.stream_text = stream_text
+        self._text_streams = {}
+        self._muted_streams = set()
 
     async def start(self):
         if self.scheduler is not None:
             return False
         if not self.agent._memory_backend_started:
-            await self.agent.memory_backend.start()
+            try:
+                await self.agent.memory_backend.start()
+            except BaseException:
+                try:
+                    await self.agent.memory_backend.stop()
+                except Exception:
+                    pass
+                raise
             self.agent._memory_backend_started = True
             self.agent.skill_watcher.start()
         runtime = TurnRuntime(
-            AgentTurnRunner(self.agent),
+            AgentTurnRunner(self.agent, text_observer=self._publish_text if self.stream_text else None),
             self.agent.run_store,
             redactor=self.agent.redact_artifact,
         )
@@ -50,26 +61,51 @@ class RuntimeHost:
         self._subscribers[str(session_id)][key] = callback
         return key
 
+    @property
+    def busy(self):
+        return any(not handle.done for handle in self._handles.values())
+
+    async def _publish_text(self, request, content):
+        turn_id = str(request.turn_id)
+        if turn_id in self._muted_streams:
+            return
+        if content:
+            sequence = self._text_streams.get(turn_id, 0) + 1
+            self._text_streams[turn_id] = sequence
+            await self._publish(str(request.session_id), {
+                "type": "turn.text.delta", "turn_id": turn_id,
+                "request_id": str(request.request_id), "sequence": sequence,
+                "text": content, "provisional": True,
+            })
+
     def unsubscribe(self, session_id, subscription_id):
         return self._subscribers[str(session_id)].pop(subscription_id, None) is not None
 
     async def _publish(self, session_id, event):
         for callback in tuple(self._subscribers[str(session_id)].values()):
-            result = callback(dict(event))
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = callback(dict(event))
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # Observers cannot interrupt accepted work or its delivery.
+                self.subscriber_failure_count += 1
+                continue
 
-    async def submit(self, message, *, deliver=None):
+    async def submit(self, message, *, deliver=None, request=None, dedup_key=None):
         if self.scheduler is None:
             await self.start()
-        existing = self._dedup.get(message.dedup_key)
+        key = message.dedup_key if dedup_key is None else dedup_key
+        existing = self._dedup.get(key)
         if existing is not None:
             return {"accepted": True, "duplicate": True, "turn_id": existing}
-        request = message.to_turn_request()
+        request = request or message.to_turn_request()
+        if str(request.session_id) != message.session_id or request.text != message.to_turn_request().text:
+            raise ValueError("persisted request does not match channel message")
         handle = self.scheduler.submit(request)
         turn_id = str(request.turn_id)
         self._handles[turn_id] = handle
-        self._dedup[message.dedup_key] = turn_id
+        self._dedup[key] = turn_id
         await self._publish(
             message.session_id,
             {"type": "turn.accepted", "turn_id": turn_id, "request_id": str(request.request_id)},
@@ -81,6 +117,9 @@ class RuntimeHost:
 
     async def _finish(self, message, handle, deliver):
         outcome = await handle.result()
+        turn_id = str(outcome.turn_id)
+        self._muted_streams.add(turn_id)
+        self._text_streams.pop(turn_id, None)
         delivery = None
         if deliver is not None and outcome.final_answer:
             try:
@@ -108,6 +147,7 @@ class RuntimeHost:
         handle = self._handles.get(str(turn_id))
         if handle is None:
             return False
+        self._muted_streams.add(str(turn_id))
         handle.cancel()
         return True
 

@@ -84,6 +84,103 @@ repoagent evolver status
 repoagent-eval --help
 ```
 
+目录渠道 Gateway 可在前台运行：
+
+```bash
+repoagent gateway run --directory /path/to/queue --allow-from local -- --cwd /path/to/repo
+```
+
+默认 `--approval never`，高风险工具会被拒绝；需要自动批准时，在 `--` 后显式添加
+`--approval auto`，并配合适当的 sandbox。服务不接受交互式 `ask` 审批。
+消息生产方应先写临时文件，再原子重命名为 `inbox/<unique-id>.json`：
+
+```json
+{"chat_id": "room", "sender_id": "local", "message_id": "request-1", "text": "检查当前仓库的测试入口"}
+```
+
+回复写入 `outbox/`，已接收消息移入 `processed/`，格式错误或发送者被拒绝的消息移入
+`rejected/`；暂时无法提交的消息保留在 `inbox/`。使用 Ctrl+C 退出并清理资源。
+发送者白名单不是身份认证，队列目录必须由操作系统权限保护。此适配器仅用于可信本地
+集成。目录渠道使用持久回执去重，已完成 Turn 重启后只补发回复；中断且执行结果
+不确定的任务进入人工检查，不自动重跑。投递失败按退避重试，最多 8 次，之后可检查并重试：
+
+```bash
+repoagent channel receipts --cwd /path/to/repo
+repoagent channel retry-delivery turn_id --cwd /path/to/repo
+```
+
+手动重试只重新投递已保存的回复，不重新执行任务。回复文件包含稳定的 `delivery_id`；
+下游消费者也应按此 ID 去重。此机制不承诺工具副作用或下游消费的恰好一次语义。
+
+QQ 渠道需要安装可选依赖 `uv sync --extra qq`，并在本地环境中配置
+`REPOAGENT_QQ_APP_ID` 和 `REPOAGENT_QQ_SECRET`，不要把凭证写入启动参数或仓库。
+
+```bash
+repoagent gateway run --channel qq --allow-from YOUR_PLATFORM_USER_ID -- --cwd /path/to/repo
+```
+
+支持 QQ 私聊、群聊 @ 消息及频道私信，白名单应填写对应平台事件中的发送者 ID。
+入站附件仅提供元数据提示，不下载文件；出站仅支持文本。每条回复绑定原始消息，
+平台权限或回复时限可能导致投递失败。QQ 去重仅在当前进程有效，不具备目录渠道的
+持久回执与重启补发能力。目前已通过离线 SDK／Runtime 集成测试，尚未进行真实 QQ 联调。
+
+本地终端前端可以通过标准输入输出接入 JSON-RPC：
+
+```bash
+repoagent tui --rpc -- --cwd /path/to/repo
+```
+
+每行一个 JSON 对象，先初始化获取当前会话，再订阅事件并提交请求：
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"system.initialize"}
+{"jsonrpc":"2.0","id":2,"method":"turn.subscribe"}
+{"jsonrpc":"2.0","id":3,"method":"turn.send","params":{"submission_id":"request-1","content":"检查测试入口"}}
+```
+
+`turn.event` 通知区分请求接收与最终完成；`confirm.request` 通过
+`confirm.respond` 回答，`approved` 必须是布尔值。关闭输入管道会取消连接拥有的任务，
+待确认操作默认拒绝。支持 `session.list`、`session.history`、`session.create` 和
+`session.resume`；只有当前任务结束后才能切换会话，切换成功后需要重新订阅事件。
+列表与历史支持 `offset`、`limit` 分页。这是单客户端、每次一个活动会话的本地 RPC
+入口。
+
+可选全屏终端界面：
+
+```bash
+uv sync --extra tui
+uv run --extra tui repoagent tui --native -- --cwd /path/to/repo
+```
+
+支持多行输入、Send 提交、流式预览、Cancel 取消、工具审批、新建及恢复会话。
+Ctrl+Enter 也可提交，Ctrl+Q 退出；审批默认拒绝，超时与退出不会批准操作。
+会话历史显示最近 100 条，完整历史仍保留在存储中。运行中禁止切换会话。
+`repoagent tui` 继续使用原有行输入入口，`--native` 和 `--rpc` 互斥。
+全屏界面是可选的 Python 前端。模型选择器在任务空闲时切换配置档，同步更新输出额度、
+上下文窗口和 Token 计数；本次连接内新建或恢复会话后继续使用所选模型。
+该选择不写入全局配置，也不代表远端模型或凭证已验证可用。
+
+RPC/全屏入口支持 `ask_user` 工具：每次最多 3 个问题，建议选项可点选，也可输入自己的
+回答；按 Send 才提交，Skip 或超时按未回答处理，不会授权写文件等操作。
+RPC 使用 `clarify.request` 通知和 `clarify.respond` 回答；`model.options` 列出配置档，
+`model.select` 接收 `{"profile":"deepseek"}`。普通 CLI 和 Gateway 不默认启用问答工具。
+Settings 可保存 API key/API base、删除本地凭证、添加或移除自定义模型，并用 Use 应用
+模型配置。密钥保存在用户配置目录的 `repoagent/providers.json`，不是仓库文件；POSIX
+新文件权限为 `0600`。文件未加密，仍需保护本机账号与备份。环境变量中的凭证优先于
+保存的凭证。保存或断开不会替换已经构建的客户端，需点击 Use 或重启后生效；断开也不
+撤销远端凭证或清除环境变量。配置接口不发起远端验证或模型请求。
+
+Manage 支持会话改名、导出和删除非当前会话。删除需二次确认且校验版本，旧进程不能
+重新保存已删除的会话；已有运行证据、导出文件和外部备份不会一起删除。导出包含脱敏
+历史与内容摘要校验，不代表任务结果已通过验收。会话管理支持清空、按轮撤销和分支；
+清空与撤销需要二次确认，并重建当前运行时。上述操作重置会话检查点与派生记忆，
+为外部记忆分配新会话轨道，但不回滚工作区文件、不删除共享长期记忆或远端旧记录。
+
+需要临时文本预览时，用 `{"stream":true}` 调用 `turn.subscribe`。
+`turn.text.delta` 携带 Turn ID、递增 `sequence` 和 `provisional:true`；客户端按序追加
+预览，收到 `turn.terminal` 后用最终回答替换预览，不要再追加一次最终回答。
+默认订阅仍只接收接收/终态事件，兼容已有客户端。
+
 架构、迁移、安全和发布证据分别见：
 
 - [当前架构](docs/architecture/current-architecture.md)

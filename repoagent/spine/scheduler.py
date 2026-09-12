@@ -215,6 +215,10 @@ class TurnHandle:
     def events(self) -> tuple[RunnerEvent, ...]:
         return tuple(self._item.events)
 
+    @property
+    def done(self) -> bool:
+        return self._item.future.done()
+
     async def result(self) -> TurnOutcome:
         return await asyncio.shield(self._item.future)
 

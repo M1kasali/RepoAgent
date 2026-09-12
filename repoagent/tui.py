@@ -9,19 +9,33 @@ from .channels import ChannelMessage
 
 
 class ConfirmationBroker:
-    def __init__(self):
+    def __init__(self, notify=None):
         self._pending = {}
+        self._notify = notify
+        self._closed = False
+        self._cancelled_turns = set()
 
-    async def request(self, prompt, *, timeout=60.0):
+    async def request(self, prompt, *, timeout=60.0, turn_id=""):
+        if self._closed or turn_id in self._cancelled_turns:
+            return "", False
         request_id = "confirm_" + uuid4().hex
         future = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = (str(prompt), future)
+        self._pending[request_id] = (str(prompt), future, turn_id)
+        async def wait():
+            if self._notify is not None:
+                await self._notify({"request_id": request_id, "prompt": str(prompt),
+                                    "turn_id": turn_id, "default": False})
+            return await future
         try:
-            return request_id, await asyncio.wait_for(future, timeout=float(timeout))
+            return request_id, await asyncio.wait_for(wait(), timeout=float(timeout))
+        except Exception:
+            return request_id, False
         finally:
             self._pending.pop(request_id, None)
 
     def answer(self, request_id, approved):
+        if type(approved) is not bool:
+            raise ValueError("confirmation answer must be boolean")
         pending = self._pending.get(str(request_id))
         if pending is None or pending[1].done():
             return False
@@ -30,6 +44,17 @@ class ConfirmationBroker:
 
     def pending(self):
         return {key: value[0] for key, value in self._pending.items()}
+
+    def cancel(self, turn_id=None):
+        if turn_id is not None:
+            self._cancelled_turns.add(turn_id)
+        for _, future, owner in self._pending.values():
+            if (turn_id is None or owner == turn_id) and not future.done():
+                future.set_result(False)
+
+    def close(self):
+        self._closed = True
+        self.cancel()
 
 
 class TUITransport:

@@ -4470,6 +4470,721 @@ Ruff and whitespace checks; all 14 payload hashes verified. No owned test contai
 remained. This paragraph postdates both bundles; no runtime code changed after the
 recovery run. No paid calls, full-repository suite, commit or push were performed.
 
+### TECH-109: Runtime Skill Retrieval and Admission (2026-09-11)
+
+The Runtime now uses a retrieval pipeline instead of calling the legacy
+keyword-activation helper. `SkillCatalog.activate()` stays compatible for direct
+callers; its overlap scores are not the Runtime ranking policy.
+
+```text
+SkillChangeWatcher -> manifest digest snapshot -> cached local BM25
+  -> SkillRouter: per-source over-fetch -> weighted reciprocal rank fusion
+  -> SkillResolver: dependency admission -> optional gate -> activation/references
+  -> budgeted skills context segment -> prompt metadata / normal Turn execution
+```
+
+- `skill_ranking.py` indexes doubled names, descriptions and the first 4,000 body
+  characters using dependency-free BM25 (k1=1.5, b=0.75) and English/Chinese
+  tokenization. A digest change rebuilds the index. Always-on skills bypass
+  retrieval and are injected separately, once. Local search filters missing
+  binaries/environment prerequisites.
+- `SkillRouter` accepts at most eight host-configured synchronous sources with
+  `name`, positive finite `weight`, and `search(query, history, k)`. Sources return
+  ranked `ActivatedSkill` candidates. Multiple sources run concurrently; one
+  source executes directly. Failures retain exception types, not raw messages.
+  Weighted RRF uses weight/(60+rank), deduplicates names case-insensitively and
+  selects representatives by rank contribution, not incomparable raw scores.
+- `SkillResolver` keeps five candidates and activates at most two retrieved
+  bodies, in addition to always-on skills. Explicit name/ID matches activate;
+  merely relevant file-based candidates become references. Host-supplied content
+  without a backing file can activate directly, while missing catalog-owned
+  files are rejected. This is not a remote marketplace implementation.
+- `requires_tools: read_file, shell` is a comma-separated manifest prerequisite,
+  checked against the actual registered tool surface after Runtime allowlisting.
+  Missing tool/bin/env prerequisites cannot be bypassed by gate fallback. Tool
+  presence is not approval to execute it: normal tool policy still applies.
+- Optional `ModelSkillGate` makes one typed, output-bounded Provider request with
+  a configured timeout. Valid empty output rejects candidates; unknown IDs are
+  ignored and duplicate IDs collapse. Provider/JSON failures fall back to ranked
+  admitted candidates; explicit Provider cancellation propagates. Rejected
+  candidates do not reappear as references after a successful gate decision.
+- `skill_refs.py` resolves existing bundled links and `{baseDir}` paths at render
+  time. It preserves fenced examples, leaves missing references literal, rejects
+  traversal/symlink escapes, and does not eagerly read referenced file contents.
+- Prompt metadata gains `skill_selection` with candidate, activated/reference,
+  rejected, contributing-source and gate/fallback diagnostics. The existing
+  `skills` metadata shape remains stable. These are pre-budget planning results;
+  the skills segment's rendered token count records actual prompt truncation.
+  Activation is not evidence that a workflow executed successfully.
+
+Runtime configuration is opt-in through the Python constructor:
+
+```python
+from repoagent.skill_selection import ModelSkillGate
+
+# Existing RepoAgent(...): local retrieval only, zero gate Provider calls.
+# RepoAgent(..., skill_sources=[source_a, source_b]) replaces the local sources.
+# RepoAgent(..., skill_gate=ModelSkillGate(accounted_client, timeout_seconds=10))
+```
+
+Sources own their I/O deadlines; a thread executor is not a hard timeout or
+security boundary. The optional gate client must be explicitly configured with
+the host's accounting/cancellation policy; no automatic main-Turn billing or
+budget integration is claimed. Custom sources/gates do not automatically carry
+into isolated child tasks. References outside readable tool roots remain subject
+to ordinary filesystem policy. CLI/TUI default behavior uses only the local
+resolver; no new configuration UI or paid model dependency is introduced.
+
+Verification covers the prior Skill contract, body-only references, always-on
+deduplication, tool requirements, index refresh/removal, weighted fusion,
+concurrent fan-out, source failure, malformed/empty gate output, cancellation,
+safe resource hydration and actual Runtime prompts. Results are retained under
+`artifacts/verifications/mainline-skill-retrieval-20260911/`: 119 affected tests
+passed in 9.67 seconds, with scoped Ruff and diff checks passing. Seven retained
+payload hashes were verified. This results paragraph was added after the bundle;
+no implementation code changed afterward. No paid calls or full-repository test
+campaign was run, and the changes have not been committed or pushed.
+This closes M3-01's implementation loop, not M3-02 external Memory integration
+or M5 live paired acceptance. No upstream resume metrics are reproduced here.
+
+### TECH-110: Explicit External Memory Integration Boundary (2026-09-11)
+
+`memory_plugins.py` connects installed backend selection to `RuntimeAssembly`.
+The CLI supports `--memory-backend NAME` and `--memory-config FILE`; default
+`local` preserves existing memory without discovering/importing external code.
+Config is a JSON object, and relative paths resolve against the workspace.
+Missing or duplicate entry points, invalid configuration, or incomplete/non-async
+contracts abort construction instead of silently using local memory. An
+explicitly injected falsey backend is also preserved, not replaced by defaults.
+
+Plugin packages declare an entry point in `repoagent.memory_backends`:
+
+```toml
+[project.entry-points."repoagent.memory_backends"]
+company_memory = "company_memory.repoagent:make_backend"
+```
+
+The synchronous factory signature is `make_backend(*, config, services)`.
+`services.workspace` is the resolved repository path. It must return an unstarted
+backend with async `start`, `stop`, `recall`, `store`, `feedback` methods, matching
+`MemoryBackend`. Import/factory execution is trusted host code, not sandboxed
+Agent execution; install and select only reviewed packages. No packages are
+downloaded automatically. The factory must not allocate resources requiring
+async cleanup; allocation belongs in `start()`.
+
+```bash
+repoagent --memory-backend company_memory --memory-config memory.json "inspect"
+repoagent --memory-backend local "inspect"
+```
+
+`company_memory` is an illustrative integration name, not an available product.
+Existing Pico entry points are not automatically loaded or treated as compatible
+artifacts. An actual plugin must implement this package's contract explicitly.
+
+Runtime recall now uses `user_id=session_id`, not `agent_id`, matching the active
+user-track contract. Store retains the same session identifier. This does not
+invent a global user ID or provide cross-session sharing: the backend owns its
+workspace binding, namespace and recall policy. Native local memory accepts both
+tracks, preserving its behavior; agent-only external adapters must migrate.
+Failed startup invokes `stop()` to release partial state; a cleanup exception
+does not replace the original startup error. Normal teardown remains host-owned.
+
+Tests exercise installed-entry-point fixtures, explicit selection through real
+Runtime assembly, configuration/workspace propagation, fail-closed discovery,
+async contract checks, user-only recall over two Turns, store/injection and
+startup cleanup. Fixtures use deterministic in-memory storage; they are not an
+external deployment or a durable cross-session acceptance test. Verification
+output is retained at `artifacts/verifications/mainline-memory-plugin-boundary-20260911/`.
+The final bundle passed 110 affected tests in 10.52 seconds, scoped Ruff and diff
+checks; all seven payload hashes verified. This results paragraph was added
+after recording, with no subsequent runtime code changes. No paid calls or
+full-repository campaign was run; changes remain uncommitted and unpushed.
+
+M3-02a is implemented; M3-02 is not complete. The reference release's Memory
+onboarding documentation excludes the external implementation, installation URL
+and artifacts. No Myna/memory distribution is installed in the current project
+environment. Completion requires a trusted compatible artifact, explicit setup,
+then separate startup, workspace binding, durable store, recall and actual Turn
+injection evidence. No Myna/LoCoMo metrics or substitute benchmark claims are made.
+
+### TECH-111: Runnable Directory Gateway and Lifecycle Hardening (2026-09-11)
+
+`gateway run` now assembles the existing model/tools/Memory Runtime, wraps it in
+`RuntimeHost`, and serves an explicitly selected directory channel. Runtime
+arguments follow `--`; the gateway requires a sender allowlist and defaults to
+`approval=never`. Explicit `auto` remains possible, while interactive `ask` and
+one-shot prompts are rejected before Agent construction. This is a foreground
+local service, not an authenticated public HTTP endpoint or platform bot.
+
+```text
+atomic inbox publication -> DirectoryChannel -> ChannelIntake allowlist
+  -> RuntimeHost -> Scheduler -> AgentTurnRunner -> channel.send -> outbox
+```
+
+The CLI emits readiness after successful startup. Ctrl+C cancellation and POSIX
+SIGTERM converge through teardown; injected stop events support deterministic
+service tests. No daemon installation or automatic boot registration is added.
+Gateway startup tracks partially started channels and host resources; failure
+unwinds them in reverse order without replacing the startup error. Shutdown
+continues cleaning remaining resources after ordinary stop errors and releases
+its lease. Lease acquire/release transitions use the existing cross-platform
+file lock to prevent competing startups from reclaiming a not-yet-written owner.
+
+Directory polling now quarantines malformed, oversized (over 1 MiB), symlinked
+or unauthorized messages. Payload identity fields must be strings. Exceptions
+from temporary submission failures retain the inbox item for retry, and unwired
+or sealed intake does not discard work. Successful submissions move to processed.
+Reopening a stopped channel restores intake; repeated starts do not spawn extra
+pollers. Media iterators are materialized once, and outbound fingerprints include
+actual media values rather than only their count.
+
+Ordinary subscription callback exceptions are isolated from accepted work and
+delivery, with a failure counter for inspection. RuntimeHost also cleans up a
+partially initialized Memory backend on startup failure, matching direct Runtime.
+These changes reuse the existing scheduler/Turn pipeline rather than introducing
+a second Agent loop.
+
+Operational limits remain explicit: the directory must be OS-permission protected;
+sender IDs are asserted by the local producer, not cryptographically authenticated.
+Producers must use unique filenames and atomic rename, or an incomplete JSON file
+can be quarantined. Host deduplication is in-memory; crash-after-acceptance can
+re-execute work after restart. Outbox content deduplication is not per-Turn
+delivery identity, and failed outbound sends are not durably retried. Subscriptions
+remain accepted/terminal notifications, not full streaming TUI parity. Native
+TUI/RPC and external platform adapters remain M4-01c; durable recovery is M4-01b.
+
+Tests cover CLI forwarding and approval defaults, a complete directory/Runtime
+round trip, invalid and denied intake, transient retry, restart, media serialization,
+single-instance contention, subscriber failure, partial startup unwind and service
+cancellation. Evidence is retained under
+`artifacts/verifications/mainline-gateway-service-20260911/`. No paid Provider
+calls or real platform credentials are needed for these functional tests.
+Final verification passed 92 affected tests in 3.42 seconds, scoped Ruff and
+diff checks, with all seven payload hashes verified. This results paragraph
+postdates the bundle; implementation code did not change afterward. No full-suite
+campaign, commit or push was performed.
+
+### TECH-112: Durable Directory Intake and Reply Recovery (2026-09-11)
+
+`gateway run` enables `DurableDirectoryDelivery` under the existing Gateway lease.
+`ChannelReceipts` uses stdlib SQLite transactions in the workspace state root
+(`channel-receipts.sqlite3`). This is scoped to the shipped directory adapter;
+generic `RuntimeHost.submit()` retains its in-process behavior unless supplied
+with a persisted request and deduplication identity.
+
+```text
+reserve receipt/Turn IDs -> scheduler acceptance -> terminal Turn event
+  -> persist pending reply -> publish stable delivery file -> mark delivered
+```
+
+Identity hashes include the resolved channel directory, channel name, chat,
+sender and message ID. A fingerprint binds session, request text and work class.
+Reusing an identity with different request content is rejected and quarantined.
+The receipt stores routing information, hashes and IDs, not a second raw prompt.
+Reserved IDs are passed to RuntimeHost before Scheduler acceptance; a reservation
+without any Turn events can safely use the still-pending inbox message to submit.
+Once acceptance evidence exists, duplicate intake returns the original Turn ID
+without executing another task. This relies on the existing durable accept-before-
+execution contract and a single Gateway lease owner, not a distributed lock.
+
+The recovery worker reads validated RunStore terminal events, which already pass
+through artifact redaction. Completed replies are copied into the durable queue;
+failed/cancelled Turns without a reply get a short state notice. Nonterminal
+events found at startup, missing evidence for a running receipt, or the RunStore
+process-interruption outcome require manual review. None automatically replay
+model/tool execution. Corrupt Turn histories also move to review instead of
+blocking recovery for every other receipt. Do not delete Turn evidence for
+unsettled receipts; independent retention is not automatically coordinated.
+
+Reply attempts and deadlines persist before sending. Transient send errors retain
+only their exception type, with exponential backoff capped at 60 seconds, and
+at most eight attempts before review. `channel retry-delivery TURN_ID` resets
+only a review-state reply with saved content; execution-uncertain receipts cannot
+be retried through that command. `channel receipts` exposes counts and review
+IDs without dumping reply text. Restart does not reset the automatic retry budget.
+
+`DirectoryChannel.send_once()` names the atomic JSON file by a hash of the stable
+Turn delivery ID, rather than reply content. Two Turns producing identical text
+remain distinct, and crash-after-publication/before-ack can republish the same
+file. The consumer must independently deduplicate `delivery_id`: moving/deleting
+an outbox file before replay can expose it again. No exactly-once external
+consumption, tool side effects, human-read acknowledgement, or arbitrary platform
+idempotence is claimed. Repeated explicit operator retries are intentional.
+
+Gateway startup reconstructs recovery state before intake opens. Shutdown stops
+intake, drains the host, then closes the retry worker and performs a final scan.
+Unsent work remains in SQLite when shutdown finishes. Recovery is local polling,
+not an unbounded network queue or a general multi-platform DeliveryHub.
+
+Tests cover receipt reservation, payload conflict, directory scoping, completion
+recovery, identical replies for distinct Turns, publication-before-ack replay,
+bounded retry and manual requeue, persisted deadlines, uncertain execution, and
+CLI rejection of unsafe retries. A real child process calls `os._exit(0)` after
+Turn completion; the next process recovers the reply from disk with no model
+calls. Evidence is retained under
+`artifacts/verifications/mainline-channel-recovery-20260911/`. M4-01b is closed
+for the directory service; M4-01c native TUI/RPC and platform adapters remain open.
+Final verification passed 71 affected tests in 3.45 seconds, including the forced
+child-process exit case; scoped Ruff and diff checks passed and all seven payload
+hashes verified. This paragraph postdates recording; runtime code is unchanged.
+No paid calls, full-suite campaign, commit or push was performed.
+
+### TECH-113: Runnable TUI RPC and Real Tool Confirmation (2026-09-11)
+
+`repoagent tui --rpc -- <runtime arguments>` starts a single-client JSON-RPC 2.0
+subset over newline-delimited standard input/output. Plain `tui` remains the
+existing line-input interface. The RPC process owns one assembled Agent, its
+RuntimeHost and current session; arbitrary session IDs are rejected rather than
+pretending to load separate session state. Remote networking/authentication and
+a full-screen terminal UI are not included.
+
+Implemented methods:
+
+- `system.initialize`: protocol identity, current session ID and capabilities.
+- `turn.subscribe` / `turn.unsubscribe`: session-scoped accepted/terminal event
+  notifications with subscription IDs; at most 16 subscriptions per connection.
+- `turn.send`: nonempty content and caller-supplied submission ID; returns
+  acceptance, not completion. Duplicate IDs with identical text reuse the Turn;
+  changed content is rejected. At most 1,000 submissions per connection.
+- `turn.cancel`: only connection-owned Turn IDs, denies pending confirmations,
+  requests scheduler cancellation and waits for the terminal outcome. Already
+  completed work reports `cancelled=false`; cancellation does not undo side effects.
+- `confirm.respond`: strict boolean answers with request IDs; unknown, stale or
+  already answered requests cannot approve another action.
+
+Every frame declares `jsonrpc: 2.0`. Request IDs are strings or integers, params
+are objects, and batch requests are unsupported. Valid notifications receive no
+response. Parse/request/params/unknown-method failures use standard JSON-RPC
+error codes; unexpected internal exceptions do not expose raw error messages.
+Inbound frames are capped at 1 MiB, and oversized input closes the connection.
+Writes are serialized and pass through artifact redaction. Notifications can
+precede the corresponding RPC response; clients must route by IDs rather than
+assume response order. Accepted/terminal events are not token streaming.
+
+`EffectApprovalPolicy.set_prompt()` connects the RPC broker to actual tool
+approval without changing effect checks, read-only policy, auto/never behavior
+or the default non-RPC prompt. The synchronous tool worker schedules confirmation
+on the event loop with a bounded wait. Confirmations include a Turn ID, redacted
+tool/effect/arguments and `default=false`. Timeout (default 35 seconds), output
+failure, EOF and close deny pending confirmations; task cancellation propagates.
+Cancelled Turn IDs also reject late confirmation requests. Close cancels owned
+Turns, drains the host, removes subscriptions and restores the original prompt.
+The event-loop thread never waits synchronously for its own confirmation future.
+
+The caller must own and protect the local pipes and consume stdout continuously;
+this is not a public RPC listener. The current stdio adapter uses worker-thread
+reads/writes, so a peer that leaves a pipe open without draining/closing it can
+block I/O; no hard transport deadline is claimed. EOF is the tested shutdown
+boundary. Stable cross-process submission receipts from the directory Gateway
+are not automatically reused by this transient RPC connection.
+
+Tests cover JSON errors, session scoping, subscription/deduplication, actual
+write_file approval/denial, cancellation while waiting for approval, close/EOF,
+timeout, boolean validation, output failure, CLI forwarding and a separate
+process exchanging real stdin/stdout frames. These are synthetic-model functional
+tests, not external-service acceptance. Verification is retained under
+`artifacts/verifications/mainline-tui-rpc-20260911/`. M4-01c1 is complete;
+native terminal views, streamed events, session/model operations, questions,
+and external platform adapters remain open.
+Final verification passed 88 affected tests in 5.37 seconds, scoped Ruff and
+diff checks, and all seven retained payload hashes. This results paragraph
+postdates the bundle; runtime code did not change afterward. No paid Provider
+calls, full-repository campaign, commit or push was performed.
+
+### TECH-114: RPC Session Browsing and Safe Runtime Switching (2026-09-11)
+
+RPC adds `session.list` and `session.history` for persisted workspace-local
+snapshots. Both support nonnegative offsets and limits from 1 to 100. Lists omit
+corrupt or foreign-workspace entries; explicit inaccessible history requests
+return a structured error. History content is redacted before its 16,000-character
+per-message truncation, avoiding disclosure of a truncated credential prefix.
+These are persisted snapshots, not a live in-progress conversation stream.
+
+`session.create` and `session.resume` are available only when a host-supplied
+synchronous `session_factory(session_id_or_none)` exists. The CLI supplies one
+through normal Runtime assembly, retaining launch arguments and using `resume`
+for the selected ID. Programmatic hosts without a factory advertise only browsing.
+`session.new` and `session.select` are accepted aliases; create/resume are the
+advertised names. Session deletion, branching, undo and model switching are not
+silently approximated by these operations.
+
+```text
+validate session and workspace -> reject if queued/running/awaiting confirmation
+  -> stop old host -> remove subscriptions and confirmation state
+  -> rebuild Agent/session/capabilities/tools/Memory -> start replacement host
+  -> return new session ID and resubscribe=true
+```
+
+`TurnHandle.done` and `RuntimeHost.busy` expose completion state for this guard.
+Old callbacks, submission deduplication and owned Turn IDs do not survive a
+switch. Selecting the already active valid session is a no-op. A failed rebuild
+returns `-32004` and closes the connection; it does not pretend the disposed
+Agent is still usable. Reconnect with a persisted session to recover. The factory
+is trusted host code and must preserve launch permissions and return the requested
+workspace/identity, which the server checks. This is not hot mutation of Agent
+history or automatic rollback of filesystem effects.
+
+Session-local history, memory and capabilities are reconstructed from the selected
+session. Workspace-level memory and any external backend retain their own scope
+contracts; a new session is not a promise to erase shared repository knowledge.
+The CLI uses its existing assembly/environment resolution behavior; it does not
+introduce immutable Provider-configuration snapshots for session changes.
+
+Exposing stored sessions required hardening `SessionStore.path()` to accept only
+1-128 ASCII identifier characters (alphanumeric first, then alphanumeric, dot,
+underscore or hyphen), reject symlink files, and constrain resolved paths to the
+store root. Reads and overwrites reject file/payload identity mismatch. Existing
+generated IDs remain valid. Legacy custom IDs outside this range require explicit
+migration, not path interpretation. `inspect()` validates schema and identity
+without advancing the object's optimistic-write revision; browsing cannot bypass
+`StaleSessionWriteError` by updating a writer's expected revision behind its back.
+OS permissions still protect the underlying storage; this is not adversarial
+filesystem race isolation.
+
+Tests cover create/resume round trips, distinct persisted histories and Memory
+objects, cleared old subscriptions, active-confirmation rejection, canonical and
+alias methods, no-op selection, foreign/corrupt/path-traversal cases, symlinks,
+identity mismatch, read-only revision behavior, credential truncation and failed
+factory cleanup. Evidence is retained at
+`artifacts/verifications/mainline-rpc-sessions-20260911/`. Native terminal views,
+streaming, question/model operations and external platform adapters remain open.
+Final verification passed 110 affected tests in 5.57 seconds, scoped Ruff and
+diff checks, with all seven payload hashes verified. This results paragraph
+postdates recording; runtime code is unchanged. No paid calls, full-suite
+campaign, commit or push was performed.
+
+### TECH-115: Opt-in RPC Text Previews and Incremental Redaction (2026-09-11)
+
+`turn.subscribe` accepts a strict boolean `stream` option, default false. An
+opted-in subscription receives `turn.text.delta` with Turn/request identity,
+monotonically increasing per-Turn sequence, text and `provisional=true`.
+`system.initialize` reports streaming support. Legacy subscriptions and ordinary
+RuntimeHost callers keep accepted/terminal-only notifications.
+
+`AgentTurnRunner` has an optional async text observer. The existing model stream
+and final-text extraction feed the normal Spine event path first, then the
+observer routes a preview to the owning RuntimeHost/session. RPC hosts enable
+this path, including hosts reconstructed after session switching. No fake timer
+splitting of completed answers is introduced; non-streaming clients may naturally
+produce just one chunk. Provider-side reasoning/tool-call events are not forwarded
+as previews; final-text extraction retains its existing model-protocol semantics.
+
+Previews are not authoritative outcomes. Retries, cancellation or later validation
+can change the final result; clients must replace preview text with the terminal
+answer rather than append that answer. Completion marks the stream closed and
+clears its sequence state. Cancellation mutes new previews immediately, and late
+worker callbacks cannot reopen a completed or cancelled stream. This is not a
+native terminal renderer, full tool-progress stream or durable subscription replay.
+
+`SecretTextStream` filters known literal secret values across arbitrary chunk
+boundaries, retaining a suffix that could still become a configured secret and
+preferring longer overlapping values. It uses the existing `<redacted>` marker.
+Crucially, filtering runs before `runner.text` event persistence, not only before
+RPC serialization, so retained delivery chunks do not reconstruct a split secret.
+The filter snapshots detected environment secrets at Turn start. Unfinished
+ambiguous suffixes are not flushed on cancellation/completion; the separately
+redacted terminal outcome remains authoritative. Unknown secrets and credentials
+introduced into the environment mid-Turn are not newly inferred by this filter.
+
+Writes retain the existing RPC serialization/backpressure behavior; no background
+unbounded notification queue or hard pipe-write deadline is added. The SDK
+observer is optional; the Gateway delivery receipt path remains final-only.
+
+Tests cover secret splits across multiple boundaries, overlapping values,
+discarded pending suffixes, an actual Provider fixture paused after its first
+delta (the client receives it while the Turn is still busy), sequence order,
+terminal authority, opt-in compatibility, rejected nonboolean options, late-event
+suppression, and equality of filtered RPC text with persisted runner.text chunks.
+Evidence is retained under
+`artifacts/verifications/mainline-rpc-streaming-20260911/`. No paid calls or
+latency-improvement benchmark claim is involved. Native terminal views and richer
+question/model RPC surfaces remain open.
+Final verification passed 170 affected tests in 12.92 seconds, scoped Ruff and
+diff checks, with all seven payload hashes verified. This results paragraph
+postdates the bundle; runtime code is unchanged. No paid Provider calls,
+full-repository campaign, commit or push was performed.
+
+### TECH-116: Optional Native Terminal Interaction (2026-09-11)
+
+`repoagent tui --native` launches an optional Textual frontend, installed through
+the `tui` extra; the existing line-input and stdio RPC modes are unchanged and
+the two explicit modes are mutually exclusive. The dependency is locked, with
+no mandatory UI dependency for ordinary CLI/Gateway users.
+
+The frontend calls the existing TUIRPCServer dispatch surface in-process instead
+of duplicating Agent execution, approval policy, session reconstruction or
+streaming rules. RPC notifications are posted to the UI message queue without
+waiting for UI handlers under the server writer lock. Direct dispatch results
+are redacted before rendering, as are normal notification frames. Rich markup is
+disabled for untrusted transcripts, previews and approval arguments.
+
+The interface includes multi-line composition, explicit submission/cancellation,
+a session selector, idle-only new/resume, an incremental provisional display and
+an authoritative terminal transcript. Session lists are paginated internally;
+the view loads the latest 100 history entries and retains up to 5,000 rendered
+transcript lines. Preview text is capped at 16,000 characters. Storage history
+is not deleted by these view limits. Session changes rebuild the runtime and
+subscribe once to the replacement host. Failed switching disables further work.
+
+Tool approval uses the existing broker and policy. Deny receives focus, no
+keystroke implicitly approves, expired prompts disappear, and cancellation or
+exit denies pending requests and closes the RuntimeHost. Existing broker timeout
+and worker cancellation limits still apply; this is not a stronger process
+isolation mechanism. UI preview delivery currently uses the toolkit message queue,
+not a newly bounded streaming transport.
+
+Headless UI tests drive actual FakeModelClient Turns and write_file approvals,
+including approve, deny, cancel, timeout and quit. They cover 100-column and
+60-column layouts, session round trips, literal rendering, preview-before-terminal,
+secret redaction, busy guards and CLI option forwarding. No paid calls are used.
+Verification receipts and generated terminal snapshots are retained under
+`artifacts/verifications/mainline-native-tui-20260911/`.
+
+This closes the native interaction slice only. Model management, structured
+questions, extended session operations and external platform adapters remain
+open; the full M4 milestone is not marked complete.
+
+Final verification passed 184 affected tests in 22.52 seconds, scoped Ruff and
+diff checks, and headless terminal snapshot generation at 100x32 and 60x24.
+All 11 payload hashes were verified. This results paragraph postdates the bundle;
+runtime code is unchanged. No paid calls, commit or push was performed.
+
+### TECH-117: Tool-backed Human Questions (2026-09-11)
+
+RPC and native CLI assembly explicitly enable `ask_user` before the tool allowlist
+and capability token are constructed. Ordinary runtimes do not gain the tool by
+default. The question tool is READ but not concurrency-safe; it does not grant
+write, execute or external-effect approval. Its handler is bound/restored with
+the RPC lifecycle, including reconstructed sessions and failed transport output.
+
+One call accepts one to three questions, each with up to twelve suggested options.
+Nested strings and schema fields are validated before execution; questions are
+asked serially. `QuestionBroker` sends `clarify.request`, accepts string answers
+via `clarify.respond` using request or conversation identity, rejects malformed
+answers, and ignores stale/duplicate replies. Replacing an overlapping question
+unblocks the old waiter without erasing the new registration. No-answer is empty,
+not a fabricated suggested choice, and becomes an explicit no-answer Tool Result.
+Actual answers re-enter subsequent model context through the existing Tool Gateway
+history and trace paths. They are not stored as a separate user Turn.
+
+The synchronous tool worker waits through a bounded sync-to-async bridge. A
+question waits at most 600 seconds by default; the batch shares the normal
+1,800-second execution deadline. Cancellation is polled at most every 100 ms and
+cancels the pending future. Cancelling a queued Turn does not answer the currently
+running question. Timeout, skip and closed transport return no answer; shutdown
+also cancels owned Turns. No indefinite human-wait exemption is introduced.
+
+The native frontend displays the question and suggestions, allows custom text,
+and requires explicit Send. Skip sends an empty answer; Cancel cancels the Turn.
+Expired prompts clear, pending question state disables session/model switching,
+and exit closes the broker. Multi-select and disallow-custom modes are not
+advertised; options are suggestions only. Channel ingress routing is not included.
+
+### TECH-118: Connection-local Model Profiles (2026-09-11)
+
+The CLI builds model choices with the existing profile resolution and client
+construction paths, including provider-specific environment configuration and
+the initial explicit profile overrides. `model.options` exposes only profile,
+provider/model names and local credential-presence booleans. It performs no model
+request and reports `remote_verified: false`.
+
+`model.select` is available only when a trusted ModelSelection service is supplied.
+The RPC host rejects changes while any Turn or human interaction is pending.
+Profile validation, client construction, context budget calculation and token
+counter/compactor preparation finish before runtime fields change. Failures leave
+the previous model and budget intact. Successful changes update max output tokens,
+context window/source, effective input budget and default model-specific token
+counter together. Explicitly injected custom counters are preserved; existing
+section budgets, tool permissions and session history are not replaced.
+
+The selected profile survives new/resumed sessions within this RPC connection by
+being reapplied during runtime reconstruction. Selection is not global or durable
+configuration; reconnecting uses CLI/environment settings again. Session rebuild
+failure closes the failed candidate rather than leaking its resources. The native
+picker uses the same RPC methods and remains disabled while work is active.
+
+This does not implement credential persistence, credential revocation, remote
+probing, curated model list editing or OAuth. Those remain explicit TODOs rather
+than being presented as completed model management. Normal model requests retain
+the existing Provider usage/pricing trace path; there is no paid acceptance claim.
+
+Tests cover real tool questions and next-model Turns, multiple questions, timeout,
+skip, stale replies, transport failure, cancellation isolation, no authorization
+bypass, capability allowlists, model failure atomicity and context counter identity,
+session reconstruction, and native interactions at 100x36/60x24. Verification
+receipts and terminal snapshots are retained under
+`artifacts/verifications/mainline-tui-questions-models-20260911/`.
+
+Final verification passed 314 affected tests in 36.93 seconds, scoped Ruff and
+diff checks, plus question/model terminal snapshots at 100x36 and 60x24. All 13
+payload hashes were verified. This result paragraph postdates the bundle; runtime
+code is unchanged. No paid Provider calls, commit or push was performed.
+
+### TECH-119: Provider Configuration and Stored-secret Redaction (2026-09-11)
+
+`ProviderSettings` is the single JSON write path for the current supported
+Providers. The document lives beside the user's RepoAgent `.env`, not in the
+workspace. It validates fields and model names, rejects corrupt documents and
+symlink paths, serializes read-modify-write under a file lock and uses atomic
+replacement. New directories use mode 0700 and POSIX files use 0600; this is
+plaintext credential storage, not encryption or a cross-platform ACL guarantee.
+The RPC endpoint refuses a settings path inside the active workspace.
+
+`model.save_key`, `model.disconnect`, `model.add_model` and `model.remove_model`
+operate through this store. RPC writes are offloaded from the event loop, fence
+new Turns/configuration/session mutations until completion, and drain an already
+started write even when its caller is cancelled. Configuration operations do not
+invoke a Provider. List entries report saved/environment credential presence but
+never return key values. Removing an active custom model is rejected until the
+user selects another model; removing a builtin default does not hide it.
+
+The existing CLI client factory now resolves saved keys after environment keys,
+and saved API bases after explicit CLI/environment values. Environment loading
+finishes before the terminal profile catalog is constructed. Selecting a model
+through the configuration-aware picker rebuilds its client, including selection
+of the same profile, so saved credentials become effective. Saved changes alone
+leave the active client unchanged, as the RPC result explicitly reports. Disconnect
+removes the stored key/base only; it neither clears shell credentials nor revokes
+remote tokens. Curated model lists remain. OAuth and additional Provider registries
+are not added by this slice.
+
+The terminal Settings dialog separates credential input from chat, masks input,
+clears key fields before the RPC write, and exposes add/remove/use and disconnect.
+It supports scrollable narrow-terminal layouts. Closing management refreshes
+metadata without subscribing twice to the runtime.
+
+Runtime now registers non-environment secrets from configured clients and saved
+settings. Registered values join artifact, text and cross-chunk stream redaction
+without being inserted into process or child-shell environment variables. Rotated
+keys remain redacted for the lifetime of the connection. Session history is also
+redacted before persistence, closing the model-echo gap found by the new regression.
+This does not retroactively sanitize old run artifacts or erase external backups.
+
+Tests verify atomic concurrent updates, corrupt-file preservation, permissions,
+symlink rejection, saved/env precedence, actual client credential/model selection,
+active-client retention until reselection, configuration-write cancellation fences,
+and secret-free RPC/history/stream output. Native tests additionally caught the
+Send button's 200 ms visual debounce suppressing a valid rapid question response;
+that button now relies on the existing Turn/question state guards instead.
+
+### TECH-120: Session Metadata, Export and Deletion (2026-09-11)
+
+`session.title` reads/writes bounded single-line titles and `session.list` includes
+them. Current-session edits commit a copied payload through the existing optimistic
+revision guard before changing in-memory metadata. Inactive edits use an isolated
+store reader and reject changed snapshots rather than advancing the active writer's
+revision. All targets remain scoped to the active workspace.
+
+`session.export` writes a redacted history/title envelope to the managed exports
+directory, includes a deterministic content SHA-256 and rereads/verifies the file
+before returning success. This is a portable history artifact, not an implemented
+import workflow or proof of task correctness. Export does not delete source state.
+
+`session.delete` rejects the currently bound session and active-Turn mutations.
+An initial request returns the revision for confirmation; an explicit boolean
+confirmation must carry that same revision. The store rechecks it under the write
+lock, writes a small deletion marker, then unlinks the history JSON. Save rechecks
+the marker while holding the same lock, so a stale writer cannot resurrect the
+deleted identifier. A crash between marking and unlinking leaves the ID logically
+deleted; this is a fail-closed fence, not an automatic physical cleanup service.
+Existing run evidence, exports and backups remain intentionally untouched.
+
+The native Manage dialog supports title edits, export and a two-step delete for
+inactive sessions. Version changes require confirmation again. Current-session
+deletion is disabled; users switch sessions first. This does not complete
+clear/undo/branch: those require coordinated checkpoint/memory semantics and remain
+explicit TODOs, rather than simply trimming stored messages.
+
+Verification receipts and terminal snapshots for both slices are retained under
+`artifacts/verifications/mainline-provider-session-management-20260911/`.
+
+Final verification passed 357 affected tests in 37.68 seconds, scoped Ruff and
+diff checks, and Provider/session terminal snapshots at 100x36 and 60x24. All 13
+payload hashes were verified. This results paragraph postdates the bundle;
+runtime code is unchanged. No real credentials were configured, no paid Provider
+calls were made, and no commit or push was performed.
+
+### TECH-121: Consistent Session History Rewrites
+
+RPC and native session management now provide clear, undo and branch. Undo removes
+complete conversation Turns using user-message boundaries; clear keeps the session
+identity with empty history. Both require explicit revision-bound confirmation and
+an idle runtime. The store rechecks revisions under its write lock, atomically
+replaces the payload and advances its revision to fence stale writers. Branch
+creates a new identity from redacted history without changing the parent; the
+native dialog then resumes the child. Empty history produces no branch.
+
+Rewrites deliberately retain only history and identity metadata. Derived local
+memory, checkpoints and resume state are reset together. The active session is
+reconstructed through the existing factory, including selected model restoration,
+broker rebinding and subscription renewal. A failed reconstruction blocks further
+requests until reconnect; it does not pretend that committed history was rolled
+back. An uncertain persistence failure also fails closed when disk state changed
+or cannot be inspected.
+
+External recall and store use a persistent memory track identifier, defaulting to
+the original session ID for untouched sessions. Each rewrite/branch receives a
+fresh identifier, so compatible backends cannot recall the discarded track into
+the new conversation. This is isolation, not remote deletion. Retained messages
+are still available directly as history; shared durable workspace memory, files,
+run evidence and exports remain untouched. No Git rollback or global forget is
+claimed. Current-session editing requires a runtime factory.
+
+Focused regression covers Turn boundaries, stale confirmations/writers, fresh
+external memory ownership, parent preservation, unchanged workspace files,
+persistence/reload failures and native branch/undo/clear at 100x36 and 60x24.
+Verification receipts are retained under
+`artifacts/verifications/mainline-session-history-20260912/`.
+
+Final affected-module regression passed 365 tests in 41.69 seconds, including the
+two terminal viewport sizes. Scoped Ruff and diff checks passed; all seven bundle
+payload hashes were verified. This result paragraph and roadmap completion marker
+postdate the bundle; runtime code is unchanged. No paid calls, commit or push.
+
+### TECH-122: Optional QQ Gateway and SDK Lifecycle Isolation
+
+The Gateway CLI now selects `directory` (unchanged default) or `qq`. QQ credentials
+come from `REPOAGENT_QQ_APP_ID` and `REPOAGENT_QQ_SECRET`; the secret is registered
+with runtime redaction and never appears in readiness reports. Missing credentials
+or sender allowlist fail before connection. Non-interactive approval remains
+mandatory and defaults to `never`. The optional `qq` extra pins qq-botpy 1.2.1,
+the official [Tencent SDK](https://github.com/tencent-connect/botpy).
+
+`QQChannel` maps SDK C2C, group-at-message and guild-direct callbacks into the
+existing ChannelIntake/RuntimeHost path. Session identities include route type and
+destination; reply targets also retain the original message ID. Consecutive
+messages cannot overwrite each other's reply reference, and different QQ route
+types cannot collide. The host suppresses duplicate accepted messages within the
+process. Sender authorization is enforced before Runtime submission. Attachment
+metadata is labeled explicitly as not downloaded; outbound attachments fail
+explicitly. Text replies use the corresponding endpoint with the inbound msg_id.
+Platform errors propagate as sanitized unconfirmed delivery, not success.
+
+`QQSDKBridge` owns a dedicated thread and asyncio loop. SDK callbacks cross to the
+Runtime loop through thread-safe futures; outbound calls cross back. This isolates
+botpy's loop exception-handler changes and untracked heartbeat tasks. Cancellation
+closes the SDK, then asyncio.run drains remaining worker tasks. Shutdown joins the
+thread with a deadline; timeout is surfaced, not described as successful cleanup.
+The adapter waits for SDK readiness, detects failed/early/timeout startup and
+closes its intake on exit. The foreground service supervises the connection task
+and releases Gateway/Runtime resources if it ends unexpectedly.
+
+Offline tests cover all three routes through the actual Runtime, duplicates,
+sender denial, metadata-only attachments, delivery failure, startup failure and
+timeout, CLI selection, service cleanup and the worker heartbeat lifecycle. The
+installed official SDK is also instantiated without network calls to validate
+callback wiring. These are not live QQ authentication or delivery acceptance.
+No cross-process QQ inbox/outbox recovery, media upload/download, automatic
+application-level delivery retry, Feishu or WeCom support is implied. Passive reply
+expiry and account permissions can still prevent live delivery. Directory-channel
+durability remains separate. Verification bundle:
+`artifacts/verifications/mainline-qq-gateway-20260912/`.
+
+Final regression passed 132 tests in 11.38 seconds, with scoped Ruff, diff check
+and CLI help checks passing. All nine bundle payload hashes were verified. This
+results paragraph postdates the bundle; runtime code is unchanged. No real QQ
+credentials, remote platform/model calls, commit or push were used.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

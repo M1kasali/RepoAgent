@@ -45,6 +45,13 @@ class EffectApprovalPolicy:
         self.read_only = bool(read_only)
         self._prompt = prompt
 
+    def set_prompt(self, prompt):
+        """Swap the host-owned confirmation transport, preserving policy rules."""
+        if prompt is not None and not callable(prompt):
+            raise TypeError("approval prompt must be callable")
+        previous, self._prompt = self._prompt, prompt
+        return previous
+
     def decide(
         self,
         definition: ToolDefinition,

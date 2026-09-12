@@ -43,6 +43,9 @@ from .subagents import (
     persist_subagent_evidence,
 )
 from .skills import LocalSkillPool, SkillCatalog, SkillChangeWatcher
+from .skill_ranking import LocalSkillSource, SkillRouter
+from .skill_selection import SkillResolver
+from .skill_refs import resolve_skill_refs
 from .tool_context import ToolContext
 from .tool_contracts import ToolEffect, ToolRequest, validate_tool_arguments
 from .tool_executor import ToolExecutor
@@ -124,10 +127,13 @@ class RepoAgent:
         context_window_source=None,
         memory_backend=None,
         skill_roots=None,
+        skill_sources=None,
+        skill_gate=None,
         plugin_manager=None,
         empty_recovery=None,
         checkpoint_policy="interactive",
         interactive=False,
+        enable_questions=False,
     ):
         self.model_client = model_client
         self.workspace = workspace
@@ -173,6 +179,8 @@ class RepoAgent:
             shell_env_allowlist or DEFAULT_SHELL_ENV_ALLOWLIST
         )
         self.secret_env_names = {str(name).upper() for name in (secret_env_names or ())}
+        self._registered_secrets = set()
+        self.register_secret(getattr(model_client, "api_key", ""))
         self.memory_consolidator = MemoryConsolidator(self.redact_text)
         self.feature_flags = dict(DEFAULT_FEATURE_FLAGS)
         if feature_flags:
@@ -207,7 +215,7 @@ class RepoAgent:
             workspace_root=self.root,
         )
         self.session["memory"] = self.memory.to_dict()
-        self.memory_backend = memory_backend or self.memory
+        self.memory_backend = self.memory if memory_backend is None else memory_backend
         if not isinstance(self.memory_backend, MemoryBackend):
             raise TypeError("memory_backend must implement MemoryBackend")
         self._memory_backend_started = False
@@ -231,13 +239,28 @@ class RepoAgent:
         self.skill_pool = LocalSkillPool(self.skill_catalog)
         self.skill_watcher = SkillChangeWatcher(self.skill_catalog)
         self.active_skills = ()
+        self.skill_references = ()
+        self.skill_diagnostics = {}
+        self.skill_resolver = SkillResolver(
+            self.skill_catalog,
+            SkillRouter(
+                (LocalSkillSource(self.skill_pool),)
+                if skill_sources is None else skill_sources
+            ),
+            gate=skill_gate,
+        )
         self.plugin_manager = plugin_manager
         self.network_policy = network_policy or securitylib.NetworkPolicy()
         self.mcp_manager = MCPManager(
             mcp_servers, network_policy=network_policy,
             sandbox_adapter=self.sandbox_adapter, require_isolation=self.require_isolation,
         )
+        from .questions import QUESTION_DEFINITION, QuestionTool
+
+        self.question_tool = QuestionTool() if enable_questions else None
         self.tools = self.build_tools()
+        if self.question_tool is not None:
+            self.tools["ask_user"] = {"definition": QUESTION_DEFINITION, "run": self.question_tool.run}
         try:
             discovered_mcp_tools = self.mcp_manager.discover(self.tools)
         except BaseException:
@@ -363,6 +386,10 @@ class RepoAgent:
     def current_runtime_identity(self):
         return checkpointlib.current_runtime_identity(self)
 
+    @property
+    def memory_track_id(self):
+        return str(self.session.get("memory_track_id") or self.session["id"])
+
     def checkpoint_state(self):
         return checkpointlib.checkpoint_state(self)
 
@@ -464,16 +491,23 @@ class RepoAgent:
         return self.memory.render_memory_text()
 
     def skill_text(self):
-        if not self.active_skills:
+        if not self.active_skills and not self.skill_references:
             return ""
         lines = ["Skills:"]
         for skill in self.active_skills:
             lines.extend(
                 [
                     f"## {skill.manifest.name} [{skill.qualified_id}]",
-                    skill.content,
+                    resolve_skill_refs(skill.content, skill.manifest.path.parent),
                 ]
             )
+        if self.skill_references:
+            lines.append("Skill references (read only when needed):")
+            for skill in self.skill_references:
+                lines.append(
+                    f"- {skill.qualified_id}: {skill.manifest.description} "
+                    f"(file: {skill.manifest.path})"
+                )
         return "\n".join(lines)
 
     def history_text(self):
@@ -512,7 +546,7 @@ class RepoAgent:
         return prompt
 
     def record(self, item):
-        self.session["history"].append(item)
+        self.session["history"].append(self.redact_artifact(item))
         self.session_path = self.session_store.save(self.session)
 
     @staticmethod
@@ -531,8 +565,15 @@ class RepoAgent:
 
     def detected_secret_env_items(self):
         return securitylib.detected_secret_env_items(
-            secret_env_names=self.secret_env_names
+            env=self._redaction_env(), secret_env_names=self.secret_env_names
         )
+
+    def register_secret(self, value):
+        if isinstance(value, str) and value:
+            self._registered_secrets.add(value)
+
+    def _redaction_env(self):
+        return {**os.environ, **{f"REGISTERED_{index}_API_KEY": value for index, value in enumerate(sorted(self._registered_secrets))}}
 
     def secret_env_summary(self):
         return securitylib.secret_env_summary(secret_env_names=self.secret_env_names)
@@ -543,11 +584,11 @@ class RepoAgent:
         )
 
     def redact_text(self, text):
-        return securitylib.redact_text(text, secret_env_names=self.secret_env_names)
+        return securitylib.redact_text(text, env=self._redaction_env(), secret_env_names=self.secret_env_names)
 
     def redact_artifact(self, value, key=None):
         return securitylib.redact_artifact(
-            value, key=key, secret_env_names=self.secret_env_names
+            value, key=key, env=self._redaction_env(), secret_env_names=self.secret_env_names
         )
 
     def shell_env(self):
@@ -581,11 +622,20 @@ class RepoAgent:
     ):
         refresh = self.refresh_prefix()
         self.skill_watcher.poll()
-        self.active_skills = (
-            self.skill_pool.search(user_message, top_k=3)
-            if self.feature_enabled("skills")
-            else ()
-        )
+        self.active_skills, self.skill_references, self.skill_diagnostics = (), (), {}
+        if self.feature_enabled("skills"):
+            resolution = self.skill_resolver.resolve(
+                user_message,
+                available_tools=self.tools,
+                history=(
+                    history_override
+                    if history_override is not None else self.session["history"]
+                )
+                if include_history else (),
+            )
+            self.active_skills = resolution.activated
+            self.skill_references = resolution.references
+            self.skill_diagnostics = resolution.diagnostics
         self.resume_state = self.evaluate_resume_state()
         prompt, metadata = self.context_manager.build(
             user_message,
@@ -594,6 +644,7 @@ class RepoAgent:
             segment_budget_overrides=segment_budget_overrides,
         )
         admission = self.context_window_budget.admit(metadata["prompt_tokens"])
+        metadata["skill_selection"] = self.skill_diagnostics
         # 这里把“这轮 prompt 是怎么拼出来的”连同缓存相关状态一起记下来，
         # 后面 trace/report 才能解释清楚：为什么这一轮 prefix 变了、缓存有没有命中。
         metadata.update(
@@ -853,7 +904,15 @@ class RepoAgent:
         from .spine import Scheduler, Text, TurnRequest, TurnRuntime, TurnState
 
         if not self._memory_backend_started:
-            await self.memory_backend.start()
+            try:
+                await self.memory_backend.start()
+            except BaseException:
+                # Failed startup may still own partially initialized resources.
+                try:
+                    await self.memory_backend.stop()
+                except Exception:
+                    pass
+                raise
             self._memory_backend_started = True
             self.skill_watcher.start()
         if self._turn_runtime is None:

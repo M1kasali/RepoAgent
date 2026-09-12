@@ -181,10 +181,14 @@ DELEGATE_TOOL_DEFINITION = ToolDefinition(
 
 
 def legal_tool_names():
-    return set(BASE_TOOL_DEFINITIONS) | {"delegate"}
+    return set(BASE_TOOL_DEFINITIONS) | {"delegate", "ask_user"}
 
 
 def tool_definition(name):
+    if name == "ask_user":
+        from .questions import QUESTION_DEFINITION
+
+        return QUESTION_DEFINITION
     if name == "delegate":
         return DELEGATE_TOOL_DEFINITION
     return BASE_TOOL_DEFINITIONS.get(name)

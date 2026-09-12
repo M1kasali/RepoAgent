@@ -36,6 +36,7 @@ from .product_commands import (
     skill_report,
 )
 from .evolver import LedgerIntegrityError
+from .gateway import GatewayAlreadyRunningError
 from .runtime_assembly import assemble_runtime
 from .trace_inspection import main as trace_main
 from .tui import run_tui
@@ -146,8 +147,11 @@ def _effective_model(args, provider):
 
 
 def _profile_base_url(args, provider):
+    from .provider_settings import ProviderSettings
+
+    saved_base = ProviderSettings().entry(provider).get("api_base")
     if provider == "ollama":
-        return getattr(args, "host", None) or DEFAULT_OLLAMA_HOST
+        return getattr(args, "host", None) or saved_base or DEFAULT_OLLAMA_HOST
     explicit = getattr(args, "base_url", None)
     if explicit:
         return explicit
@@ -155,18 +159,18 @@ def _profile_base_url(args, provider):
         return provider_env(
             "REPOAGENT_OPENAI_API_BASE",
             ("OPENAI_API_BASE",),
-            DEFAULT_OPENAI_BASE_URL,
+            saved_base or DEFAULT_OPENAI_BASE_URL,
         )
     if provider == "anthropic":
         return provider_env(
             "REPOAGENT_ANTHROPIC_API_BASE",
             ("ANTHROPIC_API_BASE",),
-            DEFAULT_ANTHROPIC_BASE_URL,
+            saved_base or DEFAULT_ANTHROPIC_BASE_URL,
         )
     return provider_env(
         "REPOAGENT_DEEPSEEK_API_BASE",
         ("DEEPSEEK_API_BASE",),
-        DEFAULT_DEEPSEEK_BASE_URL,
+        saved_base or DEFAULT_DEEPSEEK_BASE_URL,
     )
 
 
@@ -211,7 +215,9 @@ def _profile_api_key(profile):
         value = provider_env(name)
         if value:
             return value
-    return ""
+    from .provider_settings import ProviderSettings
+
+    return ProviderSettings().entry(profile.provider).get("api_key", "")
 
 
 def _resolve_model_pricing(args, provider):
@@ -277,6 +283,10 @@ def _configured_secret_names(args):
 
 def _build_model_client(args):
     profile = _resolve_model_profile(args)
+    return _client_from_profile(profile)
+
+
+def _client_from_profile(profile):
     if profile.protocol == "ollama":
         client = OllamaModelClient(
             model=profile.model,
@@ -369,6 +379,14 @@ def build_arg_parser():
     )
     parser.add_argument("prompt", nargs="*", help="Optional one-shot prompt.")
     parser.add_argument("--cwd", default=".", help="Workspace directory.")
+    parser.add_argument(
+        "--memory-backend", default="local",
+        help="Use local memory or an explicitly trusted installed memory plugin name.",
+    )
+    parser.add_argument(
+        "--memory-config", default=None,
+        help="External memory plugin JSON configuration path, relative to the workspace.",
+    )
     parser.add_argument(
         "--profile",
         choices=PROVIDER_CHOICES,
@@ -619,6 +637,11 @@ def build_product_parser():
     gateway_commands = gateway.add_subparsers(dest="gateway_command", required=True)
     gateway_status = gateway_commands.add_parser("status", help="Show gateway health.")
     gateway_status.add_argument("--cwd", default=".")
+    gateway_run = gateway_commands.add_parser("run", help="Run a channel gateway in the foreground.")
+    gateway_run.add_argument("--channel", choices=("directory", "qq"), default="directory")
+    gateway_run.add_argument("--directory")
+    gateway_run.add_argument("--allow-from", action="append", required=True)
+    gateway_run.add_argument("agent_args", nargs=argparse.REMAINDER)
 
     channel = commands.add_parser("channel", help="Inspect channel adapters.")
     channel_commands = channel.add_subparsers(dest="channel_command", required=True)
@@ -626,6 +649,11 @@ def build_product_parser():
         "directory-status", help="Show directory-channel queue counts."
     )
     directory_status.add_argument("--root", required=True)
+    receipt_status = channel_commands.add_parser("receipts", help="Inspect durable directory delivery receipts.")
+    receipt_status.add_argument("--cwd", default=".")
+    receipt_retry = channel_commands.add_parser("retry-delivery", help="Requeue a failed reply without rerunning its Turn.")
+    receipt_retry.add_argument("turn_id")
+    receipt_retry.add_argument("--cwd", default=".")
 
     cron = commands.add_parser("cron", help="Inspect scheduled work.")
     cron_commands = cron.add_subparsers(dest="cron_command", required=True)
@@ -646,6 +674,9 @@ def build_product_parser():
     evolver_status.add_argument("--cwd", default=".")
 
     tui = commands.add_parser("tui", help="Run the scheduler-backed terminal UI.")
+    tui_mode = tui.add_mutually_exclusive_group()
+    tui_mode.add_argument("--rpc", action="store_true", help="Serve newline-delimited JSON-RPC over stdin/stdout.")
+    tui_mode.add_argument("--native", action="store_true", help="Open the optional full-screen terminal UI.")
     tui.add_argument("agent_args", nargs=argparse.REMAINDER)
 
     skill = commands.add_parser("skill", help="Inspect local Skills.")
@@ -689,9 +720,38 @@ def run_product_command(argv):
                     require_isolation=args.require_isolation,
                 )
         elif args.command == "gateway":
+            if args.gateway_command == "run":
+                from .gateway_service import run_gateway
+
+                forwarded = args.agent_args
+                if forwarded[:1] == ["--"]:
+                    forwarded = forwarded[1:]
+                agent_parser = build_arg_parser()
+                agent_parser.set_defaults(approval="never")
+                agent_args = agent_parser.parse_args(forwarded)
+                if agent_args.prompt or agent_args.approval == "ask":
+                    raise ValueError("gateway run requires no one-shot prompt and non-interactive approval")
+                try:
+                    return asyncio.run(run_gateway(
+                        build_agent(agent_args), directory=args.directory,
+                        channel_kind=args.channel,
+                        allow_from=args.allow_from, on_ready=print_json,
+                    ))
+                except KeyboardInterrupt:
+                    return 130
+                except RuntimeError:
+                    print("Gateway connection failed; check platform configuration and restart.", file=sys.stderr)
+                    return 2
             payload = gateway_report(args.cwd)
         elif args.command == "channel":
-            payload = directory_channel_report(args.root)
+            if args.channel_command == "directory-status":
+                payload = directory_channel_report(args.root)
+            else:
+                from .product_commands import channel_receipt_report
+
+                payload = channel_receipt_report(
+                    args.cwd, retry_turn_id=args.turn_id if args.channel_command == "retry-delivery" else None,
+                )
         elif args.command == "cron":
             payload = cron_report(args.cwd)
         elif args.command == "trace":
@@ -701,16 +761,53 @@ def run_product_command(argv):
         elif args.command == "evolver":
             payload = evolver_report(args.cwd)
         elif args.command == "tui":
-            agent_args = build_arg_parser().parse_args(args.agent_args)
+            forwarded = args.agent_args[1:] if args.agent_args[:1] == ["--"] else args.agent_args
+            agent_args = build_arg_parser().parse_args(forwarded)
             if agent_args.prompt:
                 raise ValueError("tui does not accept a one-shot prompt")
+            if args.rpc or args.native:
+                from copy import copy
+
+                agent_args.enable_questions = True
+
+                if args.native:
+                    try:
+                        from .native_tui import run_native_tui as launch
+                    except ModuleNotFoundError as exc:
+                        if exc.name != "textual":
+                            raise
+                        raise ValueError("Native TUI requires: pip install 'repoagent[tui]'") from exc
+                else:
+                    from .tui_rpc import run_tui_rpc as launch
+
+                def session_factory(session_id):
+                    options = copy(agent_args)
+                    options.resume = session_id
+                    return build_agent(options)
+
+                from .model_selection import ModelSelection
+                from .provider_settings import ProviderSettings
+
+                initial_agent = build_agent(agent_args)
+                try:
+                    profiles = {
+                        name: _resolve_model_profile(build_arg_parser().parse_args(["--profile", name]))
+                        for name in BUILTIN_MODEL_PROFILES
+                    }
+                    current_profile = _resolve_model_profile(agent_args)
+                    profiles[current_profile.name] = current_profile
+                    selection = ModelSelection(profiles, _client_from_profile, settings=ProviderSettings())
+                except BaseException:
+                    asyncio.run(initial_agent.aclose())
+                    raise
+                return asyncio.run(launch(initial_agent, session_factory=session_factory, model_selection=selection))
             return asyncio.run(run_tui(build_agent(agent_args)))
         else:
             payload = skill_report(
                 args.cwd,
                 args.skill_id if args.skill_command == "show" else None,
             )
-    except (OSError, ValueError, LedgerIntegrityError) as exc:
+    except (OSError, ValueError, LedgerIntegrityError, GatewayAlreadyRunningError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     print_json(payload)

@@ -202,6 +202,7 @@ class SkillCatalog:
         requires = {
             "bins": _split_values(values.get("requires_bins", "")),
             "env": _split_values(values.get("requires_env", "")),
+            "tools": _split_values(values.get("requires_tools", "")),
         }
         always_value = str(values.get("always", "false")).strip().lower()
         if always_value not in {"true", "false"}:
@@ -246,9 +247,47 @@ class LocalSkillPool:
         if not isinstance(catalog, SkillCatalog):
             raise TypeError("local skill pool requires a SkillCatalog")
         self.catalog = catalog
+        self._signature = None
+        self._index = None
+        self._entries = ()
+        self._lock = threading.Lock()
 
     def search(self, query, top_k=3):
-        return self.catalog.activate(query, limit=top_k)
+        from .skill_ranking import BM25, tokenize
+
+        if type(top_k) is not int or top_k < 0:
+            raise ValueError("skill result limit must be nonnegative")
+        manifests = self.catalog.list()
+        signature = tuple((m.qualified_id, m.digest) for m in manifests)
+        with self._lock:
+            if signature != self._signature:
+                entries, documents = [], []
+                for manifest in manifests:
+                    if manifest.always:
+                        continue
+                    try:
+                        body = self.catalog.load_body(manifest)
+                    except (OSError, SkillManifestError):
+                        continue
+                    entries.append(ActivatedSkill(manifest, body, 0))
+                    documents.append(tokenize(
+                        f"{manifest.name} {manifest.name} "
+                        f"{manifest.description} {body[:4000]}"
+                    ))
+                self._entries = tuple(entries)
+                self._index = BM25(documents)
+                self._signature = signature
+            entries, index = self._entries, self._index
+        scores = index.scores(tokenize(query))
+        ranked = sorted(
+            ((score, hit) for score, hit in zip(scores, entries)
+             if score > 0 and self.catalog.availability(hit.manifest)["available"]),
+            key=lambda row: (-row[0], row[1].qualified_id),
+        )
+        return tuple(
+            ActivatedSkill(hit.manifest, hit.content, score)
+            for score, hit in ranked[:top_k]
+        )
 
     def invalidate(self):
         return self.catalog.refresh()
@@ -268,8 +307,8 @@ class SkillChangeWatcher:
         current = self._scan()
         if current == self._snapshot:
             return False
-        self._snapshot = current
         self.catalog.refresh()
+        self._snapshot = current
         return True
 
     def start(self):

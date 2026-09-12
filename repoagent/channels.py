@@ -150,6 +150,9 @@ class ChannelIntake:
     def seal(self):
         self._sealed = True
 
+    def reopen(self):
+        self._sealed = False
+
     async def publish(self, message):
         if self._sealed:
             return {"accepted": False, "reason": "sealed"}
@@ -174,27 +177,36 @@ class DirectoryChannel:
         self.inbox = self.root / "inbox"
         self.outbox = self.root / "outbox"
         self.processed = self.root / "processed"
+        self.rejected = self.root / "rejected"
         self.intake = ChannelIntake(self.name, allow_from=allow_from)
         self.poll_interval = max(0.02, float(poll_interval))
         self._task = None
         self._stopping = False
+        self.last_error = ""
 
     async def start(self):
-        for path in (self.inbox, self.outbox, self.processed):
+        if self._task is not None and not self._task.done():
+            return False
+        for path in (self.inbox, self.outbox, self.processed, self.rejected):
             path.mkdir(parents=True, exist_ok=True)
+        self.intake.reopen()
         self._stopping = False
         self._task = asyncio.create_task(self._poll())
+        return True
 
     async def stop(self):
         self._stopping = True
         self.intake.seal()
         if self._task is not None:
-            await self._task
-            self._task = None
+            try:
+                await self._task
+            finally:
+                self._task = None
 
     async def send(self, chat_id, content, media=()):
+        media = tuple(media)
         digest = hashlib.sha256(
-            f"{chat_id}\0{content}\0{len(tuple(media))}".encode("utf-8")
+            json.dumps([str(chat_id), str(content), list(media)], sort_keys=True).encode("utf-8")
         ).hexdigest()[:20]
         path = self.outbox / f"{digest}.json"
         atomic_replace(
@@ -207,28 +219,62 @@ class DirectoryChannel:
             + "\n",
         )
 
+    async def send_once(self, delivery_id, chat_id, content):
+        digest = hashlib.sha256(str(delivery_id).encode("utf-8")).hexdigest()
+        path = self.outbox / f"delivery_{digest}.json"
+        atomic_replace(path, json.dumps({
+            "delivery_id": str(delivery_id), "chat_id": str(chat_id),
+            "content": str(content), "media": [],
+        }, sort_keys=True) + "\n")
+
     async def poll_once(self):
         accepted = 0
         for path in sorted(self.inbox.glob("*.json")):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            message = ChannelMessage(
-                channel=self.name,
-                chat_id=str(payload["chat_id"]),
-                sender_id=str(payload["sender_id"]),
-                text=str(payload.get("text", "")),
-                message_id=str(payload.get("message_id", path.stem)),
-                conversation=str(payload.get("conversation", "")),
-                metadata=payload.get("metadata", {}),
-            )
-            result = await self.intake.publish(message)
+            if self._stopping:
+                break
+            try:
+                if path.is_symlink() or path.stat().st_size > 1024 * 1024:
+                    raise ValueError("invalid inbox file")
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("message must be an object")
+                for key in ("chat_id", "sender_id", "message_id", "text", "conversation"):
+                    if key in payload and not isinstance(payload[key], str):
+                        raise ValueError("message fields must be strings")
+                message = ChannelMessage(
+                    channel=self.name,
+                    chat_id=payload["chat_id"],
+                    sender_id=payload["sender_id"],
+                    text=payload.get("text", ""),
+                    message_id=payload.get("message_id", path.stem),
+                    conversation=payload.get("conversation", ""),
+                    metadata=payload.get("metadata", {}),
+                )
+            except (ValueError, TypeError, KeyError, UnicodeError) as exc:
+                self.last_error = type(exc).__name__
+                path.replace(self.rejected / path.name)
+                continue
+            except OSError as exc:
+                self.last_error = type(exc).__name__
+                continue
+            try:
+                result = await self.intake.publish(message)
+            except Exception as exc:
+                self.last_error = type(exc).__name__
+                continue
             if result.get("accepted"):
                 accepted += 1
-            path.replace(self.processed / path.name)
+                path.replace(self.processed / path.name)
+            elif result.get("reason") in {"sender_denied", "channel_mismatch", "identity_conflict"}:
+                path.replace(self.rejected / path.name)
         return accepted
 
     async def _poll(self):
         while not self._stopping:
-            await self.poll_once()
+            try:
+                await self.poll_once()
+            except OSError as exc:
+                self.last_error = type(exc).__name__
             await asyncio.sleep(self.poll_interval)
 
 

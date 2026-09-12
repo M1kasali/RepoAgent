@@ -214,12 +214,71 @@ and further paid campaigns are paused; they do not block mainline delivery.
   that the approved immutable strategy is the one actually executed.
   SnapshotDeployment resolves a complete approved commit per isolated task,
   including explicitly enabled skills. Normal CLI/TUI defaults are unchanged.
-- [ ] `M3-01` Align Skill retrieval/ranking/gating rather than equating keyword
+- [x] `M3-01` Align Skill retrieval/ranking/gating rather than equating keyword
   activation with the complete retrieval pipeline.
+  TECH-109 connects cached BM25, weighted rank fusion, explicit activation vs
+  lazy references, availability/tool admission, optional model gate and resource
+  hydration to Runtime. Default local retrieval has no Provider call; injected
+  multi-source/gate paths have offline coverage, not live effectiveness claims.
 - [ ] `M3-02` Integrate an explicitly available external Memory backend and
   verify recall/store/Turn injection; do not claim Myna or LoCoMo results from
   local memory tests or unavailable external artifacts.
+- [x] `M3-02a` Connect explicit installed-plugin selection to Runtime assembly,
+  fail closed for unavailable/ambiguous plugins, align recall with user track,
+  and clean up partially started backends (TECH-110). Fixture-tested only.
+  M3-02 remains open: the reference release excludes the Myna implementation
+  and installation artifacts, and this environment has no installed backend.
 - [ ] `M4-01` Complete product surfaces and channel adapters after core loops.
+- [x] `M4-01a` Ship a runnable directory Gateway CLI with explicit sender policy,
+  safe non-interactive approval, lifecycle cleanup, malformed-message isolation
+  and real Runtime round-trip tests (TECH-111).
+- [x] `M4-01b` Complete durable intake/delivery recovery across process restarts
+  for the shipped directory Gateway (TECH-112): SQLite receipts, stable Turn
+  identity, terminal-evidence recovery, bounded reply retries and explicit review
+  of interrupted execution. Generic host/platform transport parity is not implied.
+- [ ] `M4-01c` Complete native TUI/RPC interaction and externally configured
+  platform adapters; a line-input terminal and directory queue are not parity.
+- [x] `M4-01c1` Connect runnable stdio RPC to Runtime submission, subscription,
+  cancellation and actual tool confirmation; fail closed on timeout/EOF and
+  retain protocol/real-tool/child-process tests (TECH-113).
+- [x] `M4-01c2` Build native terminal views and richer RPC surfaces
+  (model management, questions); text preview streaming is opt-in.
+  Platform adapters remain separate.
+- [x] `M4-01c2a` Add workspace-scoped session listing/history and idle-only
+  create/resume through full Runtime reconstruction, with storage identity
+  checks and isolation regressions (TECH-114). One active session per connection.
+- [x] `M4-01c2b` Wire Provider-derived text previews to opt-in RPC subscribers,
+  with sequence/terminal boundaries and cross-chunk secret filtering before
+  event persistence (TECH-115).
+- [x] `M4-01c2c` Add an optional native terminal frontend for multi-line input,
+  provisional text, terminal results, cancellation, fail-closed approval and
+  session create/resume (TECH-116). Preserve the line/RPC entry points and test
+  desktop/narrow terminal layouts. This is not full frontend parity.
+- [x] `M4-01c2d` Connect bounded ask_user batches through capability-authorized
+  tools, clarify RPC, suggested/free-form answers, timeout and cancellation
+  cleanup, and native terminal controls (TECH-117).
+- [x] `M4-01c2e` Add secret-free model options and idle-only connection-local
+  profile selection; update budgets/token counting atomically, retain selection
+  through session reconstruction, and cover real next-Turn behavior (TECH-118).
+- [x] `M4-01c2f` Complete Provider configuration management (credential save,
+  disconnect, curated model editing) and extended session interactions.
+- [x] `M4-01c2f1` Add atomic user-level settings for supported API-key Providers,
+  saved-key resolution, secret registration, model list editing and native settings
+  controls (TECH-119). Configuration writes do not prove remote availability.
+- [x] `M4-01c2f2` Add session titles, verified redacted history exports and
+  version-fenced deletion of inactive sessions, with native management controls
+  and stale-writer tombstones (TECH-120).
+- [x] `M4-01c2f3` Complete clear/undo/branch workflows with consistent history,
+  checkpoint and memory state, revision-fenced confirmation and terminal controls
+  (TECH-121). These operations neither roll back files nor erase shared memory.
+- [x] `M4-01c3a` Add optional QQ SDK gateway for C2C, group mentions and guild
+  direct messages, with sender gating, source-bound replies, isolated SDK loop
+  and offline Runtime tests (TECH-122). Real platform validation is still pending.
+- [ ] `M4-01c3b` Complete Feishu and WeCom adapters, including their distinct
+  addressing/media contracts; QQ does not imply parity for these platforms.
+  Paused by user decision on 2026-09-12; resume only on explicit request.
+- [ ] `M4-01c3c` Validate enabled external platforms with explicit credentials
+  and retain live startup/intake/reply/shutdown receipts.
 - [ ] `M5-01` Run own module-specific paired acceptance for the seven mainline
   areas, with frozen workload, baseline and retained receipts; do not borrow
   upstream resume numbers or substitute Polyglot scores.

@@ -38,14 +38,18 @@ def _usage_from_metadata(metadata) -> Usage:
 
 
 class AgentTurnRunner:
-    def __init__(self, agent) -> None:
+    def __init__(self, agent, *, text_observer=None) -> None:
         self._agent = agent
         self._loop = AgentLoop(agent)
+        self._text_observer = text_observer
 
     async def run(self, request, emit, drain) -> TurnOutcome:
         event_loop = asyncio.get_running_loop()
         cancellation_token = CancellationToken()
         streamed_text = []
+        from .stream_redaction import SecretTextStream
+
+        text_filter = SecretTextStream(value for _, value in self._agent.detected_secret_env_items())
         backend = self._agent.memory_backend
         backend_metadata = {
             "backend": type(backend).__name__,
@@ -58,7 +62,7 @@ class AgentTurnRunner:
         try:
             hits = await backend.recall(
                 self._agent.redact_text(request.text),
-                agent_id=str(request.session_id),
+                user_id=self._agent.memory_track_id,
                 top_k=3,
             )
             safe_hits = []
@@ -101,10 +105,18 @@ class AgentTurnRunner:
             )
         self._agent.last_memory_backend_metadata = backend_metadata
 
+        async def publish_text(content):
+            safe_text = text_filter.feed(content)
+            if not safe_text:
+                return
+            await emit(Text(content=safe_text))
+            if self._text_observer is not None:
+                await self._text_observer(request, safe_text)
+
         def emit_model_text(content):
             streamed_text.append(content)
             future = asyncio.run_coroutine_threadsafe(
-                emit(Text(content=content)), event_loop
+                publish_text(content), event_loop
             )
             future.result()
 
@@ -180,7 +192,7 @@ class AgentTurnRunner:
                 error=error,
             )
         if not streamed_text:
-            await emit(Text(content=final_answer))
+            await publish_text(final_answer)
         task_state = self._agent.current_task_state
         messages = self._agent.redact_artifact(
             [
@@ -189,7 +201,7 @@ class AgentTurnRunner:
             ]
         )
         try:
-            await backend.store(str(request.session_id), messages)
+            await backend.store(self._agent.memory_track_id, messages)
             backend_metadata.update(
                 {
                     "store_status": "completed",

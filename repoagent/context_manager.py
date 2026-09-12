@@ -156,6 +156,7 @@ class ContextManager:
         segment_token_floors=None,
     ):
         self.agent = agent
+        self.explicit_token_counter = token_counter
         self.token_counter = token_counter or resolve_token_counter(agent.model_client)
         if not isinstance(self.token_counter, TokenCounter):
             raise TypeError("token_counter must implement TokenCounter")

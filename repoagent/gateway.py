@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from .atomic_io import atomic_replace
+from .atomic_io import atomic_replace, file_lock
 
 
 class GatewayAlreadyRunningError(RuntimeError):
@@ -68,6 +68,10 @@ class GatewayLease:
         }
 
     def acquire(self):
+        with file_lock(self.directory.parent / "gateway-transition.lock"):
+            return self._acquire_locked()
+
+    def _acquire_locked(self):
         for _attempt in range(2):
             try:
                 self.directory.mkdir(parents=True)
@@ -101,6 +105,10 @@ class GatewayLease:
         raise GatewayAlreadyRunningError("gateway lease could not be acquired")
 
     def release(self):
+        with file_lock(self.directory.parent / "gateway-transition.lock"):
+            return self._release_locked()
+
+    def _release_locked(self):
         if not self.held:
             return False
         status = self.status()
@@ -117,7 +125,7 @@ class GatewayLease:
 
 
 class LocalGateway:
-    def __init__(self, host, *, state_root, channels=()):
+    def __init__(self, host, *, state_root, channels=(), durable_directory=False):
         self.host = host
         channels = tuple(channels)
         self.channels = {channel.name: channel for channel in channels}
@@ -125,31 +133,75 @@ class LocalGateway:
             raise ValueError("gateway channel names must be unique")
         self.lease = GatewayLease(state_root)
         self.running = False
+        self._started_channels = []
+        self._host_started = False
+        self.durable_directory = durable_directory
+        self._delivery_workers = []
 
     async def start(self):
+        if self.running:
+            return False
         self.lease.acquire()
         try:
+            self._host_started = True
             await self.host.start()
             for channel in self.channels.values():
-                channel.intake.wire(
-                    lambda message, current=channel: self.host.submit(
-                        message, deliver=current.send
+                if self.durable_directory and channel.name == "directory":
+                    from .channel_receipts import ChannelReceipts, DurableDirectoryDelivery
+
+                    worker = DurableDirectoryDelivery(
+                        self.host, channel,
+                        ChannelReceipts(self.lease.directory.parent / "channel-receipts.sqlite3"),
                     )
-                )
+                    self._delivery_workers.append(worker)
+                    channel.intake.wire(worker.submit)
+                    await worker.start()
+                else:
+                    channel.intake.wire(
+                        lambda message, current=channel: self.host.submit(
+                            message, deliver=current.send
+                        )
+                    )
+                self._started_channels.append(channel)
                 await channel.start()
         except BaseException:
-            self.lease.release()
+            try:
+                await self.stop()
+            except Exception:
+                pass
             raise
         self.running = True
+        return True
 
     async def stop(self, grace=5.0):
-        for channel in self.channels.values():
+        for channel in self._started_channels:
             channel.intake.seal()
-        for channel in reversed(tuple(self.channels.values())):
-            await channel.stop()
-        await self.host.stop(grace=grace)
-        self.running = False
-        self.lease.release()
+        errors = []
+        try:
+            for channel in reversed(self._started_channels):
+                try:
+                    await channel.stop()
+                except Exception as exc:
+                    errors.append(exc)
+            if self._host_started:
+                try:
+                    await self.host.stop(grace=grace)
+                except Exception as exc:
+                    errors.append(exc)
+            for worker in self._delivery_workers:
+                try:
+                    await worker.stop()
+                    await worker.reconcile()
+                except Exception as exc:
+                    errors.append(exc)
+        finally:
+            self._delivery_workers.clear()
+            self._started_channels.clear()
+            self._host_started = False
+            self.running = False
+            self.lease.release()
+        if errors:
+            raise errors[0]
 
     def health(self):
         lease = self.lease.status()
