@@ -333,7 +333,7 @@ and further paid campaigns are paused; they do not block mainline delivery.
   current verification reached the final native request, and Runtime completed
   in five calls / 8.76 seconds. Failure recovery was not exercised in this run;
   its existing coverage remains offline, not a live effectiveness claim.
-- [ ] `M6-09` Run one bounded, clean-source real-model failure-recovery case:
+- [x] `M6-09` Run one bounded, clean-source real-model failure-recovery case:
   observe an in-Turn failing run_tests result before editing, repair the source,
   rerun unchanged tests, independently verify the result, and require normal
   Runtime completion. A final passing suite alone is insufficient evidence.
@@ -346,6 +346,11 @@ and further paid campaigns are paused; they do not block mainline delivery.
   Two later same-budget runs did complete failure/repair/retest (6/6), after
   test-result semantics and next-step corrections, but still stopped at the
   tool-step limit (TECH-142/144). Normal completion is the remaining gate.
+  That gate passed on clean dc432b3 (TECH-148): four model calls, six tool
+  executions, 12.45 seconds, original failing verification followed by current
+  6/6 pass, unchanged independent tests, and normal Runtime completion. Same
+  model and limits; earlier failures retained. This closes one controlled
+  case, not a held-out benchmark or general reliability claim.
 
 ## 6. Dependency Order
 
@@ -653,9 +658,10 @@ Current status and explicit deferrals are summarized in
 adaptation are paused. SQLite and reconciled documents were committed as
 252c157 after full regression. Selective context reduction followed in 52a3418
 (TECH-139). Test-result semantics and conditional guidance followed in 65972a4
-and 6e1500e. The latest two bounded runs repaired and retested successfully but
-did not complete normally (TECH-142/144). Next inspect native request budget
-allocation and repeated reads offline. Do not start a full Polyglot campaign or
+and 6e1500e. Native prefixes and live budget feedback followed in e5ac7db and
+dc432b3. M6-09 passed with unchanged limits and normal completion (TECH-148).
+Next consolidate release verification/evidence and scope M5-01 paired acceptance.
+Do not start a full Polyglot campaign or
 substitute unrelated memory integrations. Module-level paired effectiveness
 measurements remain separate work under M5-01.
 

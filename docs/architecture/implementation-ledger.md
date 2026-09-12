@@ -5926,6 +5926,32 @@ payload hashes verified in
 This paragraph postdates the pre-commit bundle; runtime source has not changed
 since that verification.
 
+### TECH-148: Bounded Live Failure Recovery Completed Normally
+
+The frozen recovery protocol passed on clean commit `dc432b3`: four model
+calls, six tool executions and 12.45 seconds. The Agent ran failing tests on
+the original source, read the fixture, wrote the repaired cache.py, reran
+run_tests (six passed, current freshness), and returned a normal final answer.
+Runtime reported `completed` / `final_answer_returned`, not an exhaustion
+summary. The independent immutable suite passed, tests/README stayed unchanged,
+no extra files were added and RepoAgent source remained clean.
+
+Limits remained 3,000 input tokens, eight logical calls and 12 tool executions,
+with the same model, request, fixture and independent grading protocol. Trace
+budget snapshots showed remaining provider/tool counts (8,12), (7,8), (6,7)
+and (5,6). The failed verification binds to the original digest and precedes
+the current passing record. All 25 payload hashes verified in
+`artifacts/acceptance/live-recovery-20260912-r6/`.
+
+M6-09 is complete at its stated scope: one bounded real-model failure-recovery
+case with normal Runtime completion. Earlier failed/incomplete attempts remain
+retained. This is an iteratively debugged synthetic case, not an independent
+held-out benchmark, general success rate, production reliability claim or
+causal speedup estimate. Calls were unpriced; no dollar-cost saving is claimed.
+No further paid trial was run after success. The captured final answer has a
+cosmetic leading `answer>` fragment; this does not affect the verified code or
+Runtime outcome, but output-envelope polish is not established by this test.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
