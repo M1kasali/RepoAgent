@@ -337,6 +337,9 @@ and further paid campaigns are paused; they do not block mainline delivery.
   observe an in-Turn failing run_tests result before editing, repair the source,
   rerun unchanged tests, independently verify the result, and require normal
   Runtime completion. A final passing suite alone is insufficient evidence.
+  First bounded attempt on clean 252c157 failed (TECH-138): earlier context was
+  elided, repeated reads/tests consumed 12 tool calls, and no repair occurred.
+  Retain this failure; next reproduce context eviction offline before retrying.
 
 ## 6. Dependency Order
 
@@ -641,9 +644,10 @@ For each TODO:
 
 Current status and explicit deferrals are summarized in
 [Mainline Status](mainline-status.md). Original Myna and further platform
-adaptation are paused. First commit the independent SQLite work and reconciled
-documents after local verification, then perform the bounded M6-09 recovery
-acceptance on that clean source. Do not start a full Polyglot campaign or
+adaptation are paused. SQLite and reconciled documents were committed as
+252c157 after full regression. The bounded M6-09 acceptance failed (TECH-138).
+Next reproduce its context eviction/repeated-read pattern offline and test a
+scoped correction before another live attempt. Do not start a full Polyglot campaign or
 substitute unrelated memory integrations. Module-level paired effectiveness
 measurements remain separate work under M5-01.
 

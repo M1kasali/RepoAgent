@@ -16,11 +16,13 @@ Implemented behavior and measured effectiveness are separate claims.
 | Tracing and evaluation | Correlation, retained receipts, replay and paired evaluation infrastructure | Own mainline metric campaigns remain pending; no borrowed resume numbers |
 | Subagents and Evolver | Budgets, messaging, isolated candidate execution, multi-round search, sealed checks, human approval and activation | Real-model effectiveness remains unverified; TECH-102 through TECH-108 |
 | Product surfaces | CLI, native terminal, RPC, session/model management, durable directory Gateway | Optional QQ is fixture-tested, not live-platform accepted |
-| Coding verification | Source-bound unittest records, freshness checks, native prompt propagation | Success/adoption smoke passed; live failure-to-repair case is still needed |
+| Coding verification | Source-bound unittest records, freshness checks, native prompt propagation | Success/adoption smoke passed; bounded live failure recovery failed on 252c157, TECH-138 |
 
 ## Remaining Work
 
-- M6-09: one real-model failed-test, repair, retest and normal-completion case.
+- M6-09: repair the observed context eviction/repeated-read failure and obtain
+  a real failed-test, repair, retest and normal-completion case. The first
+  bounded run failed; it is not a completed acceptance.
 - M5-01: module-specific paired acceptance for the mainline, with own workloads,
   denominators, costs and immutable evidence. Infrastructure is not itself a
   measured improvement.
@@ -39,11 +41,14 @@ Implemented behavior and measured effectiveness are separate claims.
 
 ## Current Sequence
 
-1. Verify and commit the retained SQLite implementation and status corrections.
-2. Execute M6-09 on clean source with synthetic data, isolated tools, bounded
-   real-model calls and independent unchanged-test verification.
-3. Record the actual outcome, including failure or incomplete execution. Do not
-   generalize a single controlled case into a recovery success rate.
+1. Done: retained SQLite and status corrections committed as 252c157; full
+   regression passed 1,284 tests with 43 skips.
+2. Done: one bounded M6-09 run on clean source, with unchanged independent
+   tests, was recorded as failed. Eight model calls / 16.57 seconds, 12 tool
+   calls, no source repair and Runtime stopped at the step limit.
+3. Next: reproduce the observed context eviction offline, test a scoped fix,
+   then rerun bounded live acceptance. Do not increase budgets merely to claim
+   success, or generalize a single case into a recovery success rate.
 
 Details and historical evidence are in the
 [implementation ledger](../architecture/implementation-ledger.md) and

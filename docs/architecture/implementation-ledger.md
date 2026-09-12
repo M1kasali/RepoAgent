@@ -5659,6 +5659,36 @@ The first failed bundle is retained beside it. This is pre-commit development
 verification, not clean-tag release evidence. This ledger entry postdates
 the bundle; no runtime source changed after verification.
 
+### TECH-138: Bounded Live Failure Recovery Did Not Pass
+
+Ran one explicitly prompted failed-test -> repair -> retest case on clean
+commit `252c157`, using DeepSeek, Docker isolation, the frozen TTLCache fixture,
+eight logical model calls maximum, 12 tool calls and a 3,000-token input budget.
+The independent grader used a fixed image ID and immutable original tests.
+The fixture failed before the run and still failed afterward. Tests and README
+were unchanged, no extra files were added, and RepoAgent source remained clean.
+
+Observed outcome: eight model calls, 12 tool calls, 16.57 seconds; two in-Turn
+failed unittest records bound to the initial source digest, no source edit and
+no passing verification. Runtime stopped with `step_limit_reached`. The final
+answer acknowledged that repair and post-fix verification were unfinished.
+This is a failed acceptance, not a recovered task or a successful completion.
+Calls were unpriced; no dollar-cost claim is available.
+
+Captured native requests show earlier file outputs elided to fit the context
+budget (request 04), followed by explicit re-reading (request 05), and older
+read history absent after the second failure result (request 07). Repeated
+reads and tests exhausted the step budget. Context eviction is an observed
+contributor; a deterministic replay and a causal fix remain to be established.
+Do not attribute the entire failure to the model or merely raise the cap.
+
+All 30 payload hashes verified in the local receipt:
+`artifacts/acceptance/live-recovery-20260912/`. No additional paid attempt or
+runtime modification followed. M6-09 stays open. Next work is offline
+reproduction of this failure path, regression coverage and a scoped context
+fix before another bounded live attempt. SQLite and status work is committed;
+this result documentation postdates that commit and the captured clean run.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |
