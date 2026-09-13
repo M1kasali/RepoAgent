@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -156,9 +158,18 @@ def test_evidence_bundle_is_self_contained_checksummed_and_requires_terminal(tmp
 
 def test_tracing_overhead_experiment_and_inspection_cli(tmp_path, capsys):
     result = measure_tracing_overhead(event_count=20, payload_chars=16)
-    assert result["schema"] == "repoagent.tracing-overhead/v1"
+    assert result["schema"] == "repoagent.tracing-overhead/v2"
     assert result["tracing"]["storage_bytes"] > 0
     assert result["tracing"]["bytes_per_event"] > 16
+    assert result["passed"] is True
+    assert result["positive_claim_eligible"] is False
+    assert result["pairs"][1]["arm_order"] == ["tracing", "baseline"]
+    for pair in result["pairs"]:
+        encoded = pair["trace_jsonl"].encode("utf-8")
+        assert len(encoded) == pair["storage_bytes"]
+        assert hashlib.sha256(encoded).hexdigest() == pair["trace_sha256"]
+        assert len(pair["samples"]) == 20
+        assert [json.loads(line)["sequence"] for line in pair["trace_jsonl"].splitlines()] == list(range(20))
 
     store = RunStore(tmp_path / "runs")
     request = _completed_turn(store)
@@ -167,6 +178,26 @@ def test_tracing_overhead_experiment_and_inspection_cli(tmp_path, capsys):
     output = capsys.readouterr().out
     assert f"run: {request.turn_id}" in output
     assert "runtime events: 1" in output
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"event_count": True}, {"event_count": 9}, {"payload_chars": -1},
+    {"payload_chars": 1.5}, {"repetitions": 0}, {"repetitions": True},
+])
+def test_tracing_experiment_rejects_invalid_config(kwargs):
+    with pytest.raises(ValueError):
+        measure_tracing_overhead(**kwargs)
+
+
+def test_tracing_experiment_detects_corrupt_content(monkeypatch):
+    original = RunStore.append_trace
+
+    def corrupt(self, task_state, event):
+        return original(self, task_state, {**event, "content": "changed"})
+
+    monkeypatch.setattr(RunStore, "append_trace", corrupt)
+    result = measure_tracing_overhead(event_count=10, repetitions=1)
+    assert result["passed"] is False
 
 
 def test_agent_trace_correlates_memory_provider_delivery_ledger_and_report(tmp_path):

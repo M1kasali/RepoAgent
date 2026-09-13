@@ -293,6 +293,29 @@ and further paid campaigns are paused; they do not block mainline delivery.
 - [ ] `M5-01` Run own module-specific paired acceptance for the seven mainline
   areas, with frozen workload, baseline and retained receipts; do not borrow
   upstream resume numbers or substitute Polyglot scores.
+- [x] `M5-01a` Measure safe read batching with alternating serial/parallel
+  arms on both synthetic delay and real warm local files (TECH-150). Preserve
+  slower treatment results; this is mechanism evidence, not agent efficacy.
+- [ ] `M5-01b` Complete the remaining module-specific paired protocols and
+  acceptance; M5-01a does not close the seven-area acceptance requirement.
+- [x] `M5-01c` Add capacity-one versus capacity-four paired Scheduler
+  measurements, per-request timestamps and conservation/FIFO/cleanup checks
+  (TECH-151). Synthetic executor results are not live Agent latency results.
+- [x] `M5-01d` Measure RunStore trace append versus JSONL serialization with
+  repeated alternating arms, raw samples and persisted-content verification
+  (TECH-152). Per-event microbenchmarks do not establish per-request overhead.
+- [x] `M5-01e` Verify seven scripted-provider Runtime accounting cases with
+  persisted ledger/report/terminal agreement and fixed arithmetic expectations
+  (TECH-153). This is not live cache efficiency or actual cost reduction.
+- [x] `M5-01f` Retain wide/tight context safety outcomes and three new-session
+  SQLite track-visibility comparisons (TECH-154). One tight-context rejection
+  is retained, not counted as compression success; answer/read savings unmeasured.
+- [x] `M5-01g` Resolve inferred optional-section floor conflicts after normal
+  reduction, without changing explicit floors, prefix protection or global caps
+  (TECH-155). Replay the unchanged context workloads at 3,000 tokens.
+- [x] `M5-01h` Finalize literal-secret stream filtering on confirmed normal
+  completion, retaining exact-match redaction and discarding abnormal tails
+  (TECH-156). Verify ordinary suffix integrity under inherited secret variables.
 - [x] `M6-01` Harden coding-file edits for LF/CRLF equivalence without rewriting
   untouched mixed endings; retain exact unique-match checks and verify the full
   read/edit/check tool workflow (TECH-123). No fuzzy patching or coding-quality

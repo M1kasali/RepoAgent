@@ -22,6 +22,10 @@ def build_arg_parser():
     parser.add_argument("--tool-calls", type=int, default=8)
     parser.add_argument("--delay-ms", type=float, default=20.0)
     parser.add_argument("--max-parallel", type=int, default=4)
+    parser.add_argument(
+        "--workload", choices=("synthetic_delay", "local_read"),
+        default="synthetic_delay",
+    )
     parser.add_argument("--output-json", default=None)
     return parser
 
@@ -34,6 +38,7 @@ def main(argv=None):
             tool_calls=args.tool_calls,
             delay_ms=args.delay_ms,
             max_parallel=args.max_parallel,
+            workload=args.workload,
         )
     )
     text = json.dumps(payload, indent=2, sort_keys=True) + "\n"

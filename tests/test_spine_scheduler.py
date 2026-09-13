@@ -79,10 +79,38 @@ class ClassIsolationExecutor(RecordingExecutor):
         self.release_background = asyncio.Event()
 
     async def run(self, request, emit, drain):
+        self.order.append(request.text)
         if request.work_class is WorkClass.BACKGROUND:
             self.background_started.set()
             await self.release_background.wait()
         return _outcome(request)
+
+
+def test_same_session_foreground_does_not_bypass_background_fifo():
+    async def scenario():
+        executor = ClassIsolationExecutor()
+        scheduler = Scheduler(executor, foreground_capacity=1, background_capacity=1)
+        background = scheduler.submit(TurnRequest.create(
+            session_id="same", text="background", work_class=WorkClass.BACKGROUND,
+        ))
+        try:
+            await asyncio.wait_for(executor.background_started.wait(), timeout=1)
+            foreground = scheduler.submit(TurnRequest.create(
+                session_id="same", text="foreground",
+            ))
+            # A different lane can finish while this foreground request stays queued.
+            other = scheduler.submit(TurnRequest.create(session_id="other", text="other"))
+            await asyncio.wait_for(other.result(), timeout=1)
+            assert not foreground.done
+            assert executor.order == ["background", "other"]
+            executor.release_background.set()
+            await asyncio.wait_for(asyncio.gather(background.result(), foreground.result()), 1)
+            assert executor.order == ["background", "other", "foreground"]
+        finally:
+            executor.release_background.set()
+            await scheduler.shutdown(grace=0)
+
+    asyncio.run(scenario())
 
 
 class HangingRunner:

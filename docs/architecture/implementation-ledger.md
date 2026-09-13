@@ -5990,6 +5990,307 @@ postdate the frozen candidate and do not alter its implementation.
 After documentation updates, five release-hardening tests passed in 3.74
 seconds, diff check passed and the outer candidate receipt was reverified.
 
+### TECH-150: Paired Tool Measurements With Negative Results Retained
+
+Extended the existing Tool Gateway experiment rather than adding a new harness.
+Schema v2 adds a real `read_file` workload alongside the original synthetic
+delay. Both arms traverse the actual gateway; the real workload delegates to
+the existing read implementation and validates exact formatted file contents.
+Correctness requires output order/content and bounded concurrency, not a speed
+gain or saturation of every worker. Performance is reported separately.
+
+Protocol: 20 paired repetitions per workload, eight one-line files, concurrency
+limit four, alternating arm order, synthetic delay 20 ms per call. Preparation
+is outside timing; timing covers gateway execution. Files are freshly written
+and likely cached; this is not cold-disk performance or real-agent efficacy.
+
+Local receipt: `artifacts/acceptance/tool-paired-mainline-20260912-r2/`.
+Both workloads passed content/order checks across 40 arms each. Serial versus
+parallel medians were 166.06 versus 44.92 ms for synthetic delay (72.95% lower),
+but 2.89 versus 6.58 ms for warm local reads (127.48% higher). These descriptive
+microbenchmark results do not justify a general speedup or a new dispatch
+heuristic. No model calls were made; positive resume-claim eligibility stays
+false. Source is the dirty development tree based on e2aa22f, not a release.
+
+The first receipt without the r2 suffix failed because the invocation resolved
+the virtualenv interpreter symlink into system Python, which lacks project
+dependencies. It is preserved; the retry uses the virtualenv path directly.
+Added real-content and slower-treatment regression tests and rejected nonfinite
+synthetic delays. Full regression: 1,304 passed, 43 skipped, six existing
+deprecation warnings in 180.58 seconds. Ruff and diff check passed. All 12
+receipt payload hashes were independently rechecked. Documentation completion
+was recorded after verification; no version/tag/push or paid calls occurred.
+
+### TECH-151: Session Scheduler Paired Acceptance
+
+Added `repoagent.evaluation.scheduling` and a local script using the existing
+production Scheduler with an instrumented synthetic executor. The sole arm
+variable is foreground capacity (one versus four). No runtime dispatch policy
+was changed. Each pair has eight sessions, four turns per session, round-robin
+submission and 5 ms async sleep per turn. Ten repetitions alternate arm order.
+Each arm has a 30-second completion timeout and always shuts down the scheduler.
+
+Recorded acceptance requires exact accepted/executed/outcome identity counts,
+completed outcomes, per-session FIFO and no overlap, bounded global concurrency,
+and no active executor or scheduler work after shutdown. Every request retains
+submission, start, finish, queue and completion latency timestamps. P95 is
+nearest rank within each 32-request arm; summary is the median of ten P95s,
+not a pooled percentile or a real-model end-to-end measurement.
+
+All 640 synthetic executions passed these invariants. Median per-arm P95 was
+165.80 ms at capacity one and 44.05 ms at capacity four. This demonstrates
+concurrency for waiting synthetic tasks, not general coding-task speedup.
+No model calls, tools, persistence, network or shared-pool isolation baseline
+are represented in these numbers. The existing isolated-pool test remains
+separate. Added a deterministic boundary test: a different foreground session
+can finish while foreground work in the background task's own session stays
+queued until that background turn completes. Capacity isolation does not
+override same-session FIFO.
+
+Local receipt: `artifacts/acceptance/scheduler-paired-mainline-20260912/`.
+This records the dirty development tree based on e2aa22f, not tagged-release
+evidence. M5-01 remains open for other module-specific paired acceptance.
+
+Full regression passed 1,313 tests with 43 skips and six existing deprecation
+warnings in 176.82 seconds. Ruff and diff check passed; all nine receipt payload
+hashes were independently verified. This includes the existing 10,000-request
+scheduler unit test, which is separate from the 640-execution paired workload.
+Final documentation was updated after verification; no commit, push or model
+spend was performed in this slice.
+
+### TECH-152: Auditable Trace Append Overhead
+
+Upgraded the existing tracing microbenchmark to schema v2. The baseline now
+serializes the same JSONL bytes (including newline and UTF-8 encoding) without
+persistence. The treatment calls production RunStore.append_trace, including
+redaction entry point, lock acquisition, existing-prefix validation and fsync.
+No production storage or durability policy changed.
+
+Repeated arms alternate execution order with a fresh trace per repetition.
+The report retains every sequence-matched baseline/tracing/delta sample, the
+exact persisted JSONL text, its SHA256 and byte count. Re-parsed records must
+equal the expected payloads in order. Corrupt content is a failed measurement,
+even when timing succeeds. Added corruption and invalid-configuration tests.
+Percentiles now use nearest rank over pooled event samples. Legacy-named
+overhead.p95_ms_per_event remains explicitly a difference of arm quantiles;
+paired_delta_p95_ms separately reports the percentile of paired differences.
+Schema versioning makes the changed repetition/storage/percentile semantics
+explicit. The standalone script works directly from the source checkout.
+
+Frozen local workloads: 100 and 500 events per log, six repetitions each,
+128 payload characters, alternating arm order. All 3,600 persisted records
+passed equality checks. Baseline is serialization only, not a trace-disabled
+Agent; setup and post-run verification are outside per-event timing.
+
+| Events per log | Paired delta median | Paired delta P95 | JSONL bytes/event |
+| --- | --- | --- | --- |
+| 100 | 4.529 ms | 6.918 ms | 187.90 |
+| 500 | 4.749 ms | 7.254 ms | 188.78 |
+
+Receipt: `artifacts/acceptance/tracing-paired-mainline-20260912/`, dirty tree
+based on e2aa22f. These are local WSL filesystem observations, not whole-request
+overhead, full trace propagation cost or a durability-after-power-loss test.
+Storage excludes lock files, other run artifacts and filesystem allocation.
+Current append validates existing JSONL on every write; the observed timings
+do not isolate that cost from fsync/locking. Do not claim negligible overhead
+or change durability policy based only on this microbenchmark. M5-01 remains
+open for remaining modules and real-agent effectiveness where applicable.
+
+Full regression: 1,320 passed, 43 skipped, six existing deprecation warnings
+in 166.95 seconds. Ruff and diff check passed. Independently verified all 12
+receipt payload hashes and the bytes/hash of all 12 embedded trace logs.
+Final documentation was recorded after verification. No commit, push, paid
+model call or production persistence change was made in this slice.
+
+### TECH-153: Runtime Cost Accounting Acceptance
+
+Added an offline accounting acceptance runner using real RepoAgent execution,
+persisted call ledgers, run reports and terminal events with scripted providers.
+Seven cases cover uncached usage, equivalent TOTAL/FRESH cache semantics,
+missing usage, ambiguous cache usage, missing pricing and successful fallback
+after a failed call with unknown usage. Fixed arithmetic expectations are
+independent of price_usage: synthetic rates are 2/10 USD per million input/output
+tokens and 0.2 for cache reads. No vendor rates or actual cache hit performance
+are asserted. ACTUAL labels simulate provider-reported usage only.
+
+The runner checks answer completion, invocation/ledger count conservation,
+unique call IDs, execution/cost statuses, completeness, partial and unit costs,
+and report/terminal agreement. A mutation regression replacing all costs with
+zero must fail acceptance. Output directories cannot be reused. Runtime stores
+are explicitly injected under the acceptance directory to isolate the user's
+ordinary runs and retain all evidence.
+
+Initial standalone receipt `artifacts/acceptance/accounting-mainline-20260913/`
+failed because the default RunStore used the working directory's .pico/runs
+rather than the evaluation output. The pytest environment had hidden this
+difference. Added explicit RunStore injection and an exact per-case runs-path
+assertion. The failed receipt and original run were not deleted. This is an
+evaluation-runner isolation fix, not a production accounting policy change.
+
+The comparison exercises fallback, not HTTP transport retry. No model API,
+billed-dollar saving, success-rate improvement or pricing recommendation is
+represented. The seven-area M5-01 remains open.
+
+Corrected standalone receipt:
+`artifacts/acceptance/accounting-mainline-20260913-r2/`. Seven cases / eight
+scripted invocations passed. Fixed uncached cost is 0.0004 USD and both cache
+semantics yield 0.000328 USD. Four incomplete-evidence cases correctly retain
+null unit cost. The fallback case retains 0.0004 USD known partial cost but
+cannot claim complete cost. These numbers validate the prescribed arithmetic,
+not observed vendor savings. Source is a dirty tree based on e2aa22f.
+
+Corrected-run full regression: 1,322 passed, 43 skipped, six existing warnings
+in 175.65 seconds. Ruff and diff check passed. All 100 receipt payload hashes
+were independently verified, and all seven relative run directories remained
+resolvable after the verification bundle was moved to its final location.
+Final documentation followed verification. No commit, push or paid API call
+was performed.
+
+### TECH-154: Context Safety and New-Session Memory Visibility
+
+Added an offline acceptance entry using real ContextManager assembly and fresh
+RepoAgent/SQLite backend instances. Explicit session/run stores isolate all
+outputs. Context fixtures contain 8 or 24 historical user/assistant exchanges;
+arms use total budgets 12,000 and 3,000 with identical fixed segment budgets
+(history 10,000, prefix 3,000, memory/retrieval/skills 1,000 each). Current
+request and injected checkpoint must remain exact in successfully assembled
+prompts; source history must remain unchanged. A one-token budget must raise
+ContextBudgetExceededError. Both assembled prompts and rejection observations
+are retained, and tight_context_success_count is separate from safety passed.
+
+Fixture development initially used 1,800 then 3,000 for the tight arm, exposing
+explicit budget rejection. Kept the 3,000 protocol and did not keep increasing
+it until all cases passed. In the standalone receipt, the 8-exchange wide prompt
+uses 3,406 estimated tokens and tight assembly succeeds. The 24-exchange wide
+prompt uses 4,511; tight assembly rejects with 3,111 observed versus 3,000
+allowed. History's configured 10,000-token allowance implies a 2,500-token
+floor under the existing quarter-budget policy. Thus this configuration can
+conflict with the total cap. One of two tight contexts succeeds: no universal
+compression-success claim and no production policy change.
+
+Memory fixtures seed three distinct staging facts, each in its own database
+and workspace. Fresh sessions use shared versus isolated tracks, alternating
+probe order. All three comparisons retain the seeded fact in the shared
+track's actual model prompt, with positive recall count, while the isolated
+track has no fact or hits. All seed/probe sessions differ. A broken-recall
+mutation must fail acceptance. Fixed FakeModelClient answers are not graded
+as evidence of recall quality. These are same-process fresh-instance tests,
+not new cross-process claims, authentication, file-read savings or Myna results.
+
+Receipt: `artifacts/acceptance/context-memory-mainline-20260913/`, dirty tree
+based on e2aa22f. The overall passed flag denotes safety/visibility invariants,
+not all tight workloads completing. Full prompts, metadata, SQLite databases
+and Runtime artifacts remain local. No paid API calls were made.
+
+Full regression: 1,324 passed, 43 skipped, six existing warnings in 172.96
+seconds. Ruff and diff check passed; all 133 receipt payload hashes were
+independently verified. Final documentation was updated after verification;
+no commit or push was performed. The short-history tight prompt uses exactly
+3,000 estimated tokens. Production context and memory implementations were
+not modified by this acceptance slice.
+
+### TECH-155: Global Budget Takes Precedence Over Inferred Optional Floors
+
+Strengthened the original context-memory regression to require both frozen
+tight workloads to assemble: before the fix it failed with 1 != 2. The
+24-exchange case had ample removable history but stopped at the automatically
+derived quarter-budget floor. This was not oversized mandatory input or a
+token-counter mismatch. Changing only the floor fallback resolves the same
+fixture without increasing its 3,000-token total or changing segment budgets.
+
+ContextManager still first uses the existing reduction order and floors. Only
+if those cannot satisfy the total cap does a second pass permit zero floors
+for reducible non-prefix sections without explicit overrides. Explicit caller
+floors and the system-prefix floor are never relaxed. Current request and
+checkpoint remain non-reducible; impossible mandatory input still raises
+ContextBudgetExceededError. Metadata records each fallback with the reason
+relax_default_floor_for_total_budget. Floors are recomputed on every build so
+a low-budget request cannot leak relaxed settings into a later request.
+
+This intentionally changes default retention preferences, not caller-defined
+hard floors or mandatory-content guarantees. It may discard more old optional
+context under pressure; it does not establish unchanged answer quality. The
+change is justified by the retained reproducible rejection rather than a new
+budget heuristic or a larger model context window.
+
+Added fixed-character-counter tests for inferred versus explicit history
+floors, exact request/checkpoint retention and floor reset on a subsequent
+wide-budget build. Fifteen focused context tests passed. Original acceptance
+receipt remains immutable; corrected run is recorded separately at
+`artifacts/acceptance/context-floor-fix-20260913/`.
+
+That first full-suite receipt failed: 13 failures, 1,313 passes, 43 skips.
+Several complete answers were returned as `don` instead of `done`. A separate
+probe loaded the original HEAD ContextManager.build in memory and reproduced
+the same failure, excluding the floor change as its cause. SecretTextStream
+with inherited environment secrets reproduced the withheld suffix without
+printing secret values. Removing inherited detected-secret variables only in
+the test process made the three targeted accounting tests pass. The existing
+stream privacy policy intentionally retains ambiguous secret prefixes; no
+production redaction behavior or developer environment was changed.
+
+An isolated-secret full-suite rerun is recorded separately under
+`artifacts/acceptance/context-floor-fix-20260913-r2/`; its exact environment
+filter is in the verification command. Tests may still explicitly configure
+their own secret fixtures. Do not present this as an unfiltered-environment
+pass or erase the initial failure. Runtime context acceptance itself passed
+both times. Original budget/history parameters were retained; prompt paths
+differ between evidence directories, so exact token-saving percentages are
+not inferred across those receipts.
+
+Final isolated-secret regression: 1,326 passed, 43 skipped, six existing
+warnings in 174.97 seconds. Ruff and diff check passed; all 133 receipt hashes
+verified. Tight contexts use 3,000 and 2,994 estimated tokens; both preserve
+request/checkpoint and history, and all three memory visibility probes pass.
+Original developer-environment suffix behavior remains a separately recorded
+limitation, not fixed by this patch. Documentation was completed afterward;
+no commit, push or paid API call was made.
+
+### TECH-156: Finalize Secret Filtering at Normal Text Completion
+
+The prior environment-dependent truncation was reproduced with an explicit
+synthetic secret beginning with `e`: a complete `done` answer emitted `don`.
+Three regression tests failed before implementation (missing finalization API
+and wrong complete answer). The filter correctly delayed an ambiguous suffix
+while streaming, but the runner never resolved it after normal completion.
+
+SecretTextStream now has an idempotent finish(complete=False). Abnormal finish
+discards pending text and closes the filter against late chunks. Confirmed
+normal finish drains the pending text using longest complete literal-secret
+matching, without waiting for nonexistent future chunks. Overlapping secrets
+such as abc/abcdef remain masked when the stream ends at abc. Existing discard
+continues to clear the buffer without closing for compatibility.
+
+AgentTurnRunner separates publishing already-filtered text from feeding raw
+chunks. After successful backend persistence/reporting, it finalizes normally
+only when task state is completed and model finish_reason is stop or end_turn.
+Length/unknown endings do not release ambiguous tails. Worker failure, worker
+cancellation and memory-store failure close and discard the filter. The final
+safe chunk goes through the same event sink and text observer, before the
+terminal outcome, so ordinary completion agrees with accumulated text events.
+
+This deliberately distinguishes literal-secret protection from speculative
+prefix retention: an incomplete secret prefix in a confirmed complete answer
+is ordinary unmatched text, consistent with whole-text literal redaction.
+It does not promise to detect intentionally disclosed partial credentials.
+Abnormal streams still discard pending prefixes, and complete known secrets
+remain masked across chunk boundaries. No minimum-secret-length heuristic or
+environment-variable removal is used in production.
+
+Forty-eight focused streaming/accounting tests passed, including 19 split
+positions, overlapping-secret completion, repeated finish, ignored late chunks,
+normal/end_turn versus length/unknown outcomes and persisted text agreement.
+Full original-environment verification and standalone accounting/context
+receipts are retained at `artifacts/acceptance/stream-finalization-20260913/`.
+The earlier failed and isolated-environment receipts remain unchanged.
+
+Original-environment full regression passed 1,352 tests with 43 skips and six
+existing warnings in 180.97 seconds. No inherited secret variables were removed
+by the verification command. Both standalone acceptances passed (accounting
+7/7; tight contexts 2/2 and all three memory visibility probes). Ruff and diff
+check passed; all 227 receipt hashes were independently verified. Final docs
+were updated afterward. No commit, push or paid provider call was performed.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

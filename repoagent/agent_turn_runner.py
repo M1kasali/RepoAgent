@@ -105,13 +105,15 @@ class AgentTurnRunner:
             )
         self._agent.last_memory_backend_metadata = backend_metadata
 
-        async def publish_text(content):
-            safe_text = text_filter.feed(content)
+        async def publish_safe_text(safe_text):
             if not safe_text:
                 return
             await emit(Text(content=safe_text))
             if self._text_observer is not None:
                 await self._text_observer(request, safe_text)
+
+        async def publish_text(content):
+            await publish_safe_text(text_filter.feed(content))
 
         def emit_model_text(content):
             streamed_text.append(content)
@@ -132,6 +134,7 @@ class AgentTurnRunner:
         try:
             final_answer = await asyncio.shield(worker)
         except asyncio.CancelledError:
+            text_filter.finish()
             cancellation_token.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(worker), timeout=2.0)
@@ -153,6 +156,7 @@ class AgentTurnRunner:
             self._agent.backend_memory_hits = []
             raise
         except Exception as exc:
+            text_filter.finish()
             self._agent.backend_memory_hits = []
             task_state = self._agent.current_task_state
             error = f"{type(exc).__name__}: {exc}"
@@ -216,6 +220,7 @@ class AgentTurnRunner:
                     self._agent.session
                 )
         except Exception as exc:
+            text_filter.finish()
             backend_metadata.update(
                 {
                     "store_status": "failed",
@@ -253,6 +258,13 @@ class AgentTurnRunner:
             self._agent.redact_artifact(self._agent.build_report(task_state)),
         )
         self._agent.backend_memory_hits = []
+        # An abnormal or truncated model end must not release a secret prefix.
+        normal_end = (
+            task_state.status == "completed"
+            and self._agent.last_completion_metadata.get("finish_reason")
+            in {"stop", "end_turn"}
+        )
+        await publish_safe_text(text_filter.finish(complete=normal_end))
         return TurnOutcome(
             turn_id=request.turn_id,
             request_id=request.request_id,

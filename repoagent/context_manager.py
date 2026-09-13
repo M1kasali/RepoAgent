@@ -360,6 +360,7 @@ class ContextManager:
         )
         prompt = self._assemble_prompt(rendered)
         reduction_log = []
+        relaxed_default_floors = False
 
         # 如果 prompt 超预算，就按固定顺序不断压缩。
         # 这里的顺序体现了平台偏好：
@@ -395,6 +396,26 @@ class ContextManager:
                 reduced = True
                 break
             if not reduced:
+                # Derived retention preferences must not defeat the global cap.
+                # Explicit floors and the system prefix remain protected.
+                if not relaxed_default_floors:
+                    relaxed_default_floors = True
+                    for section in self.reduction_order:
+                        if (
+                            section != "prefix"
+                            and section not in self._section_floor_overrides
+                            and SEGMENT_DEFINITION_BY_NAME[section].reducible
+                        ):
+                            previous = self.section_floors.get(section, 0)
+                            self.section_floors[section] = 0
+                            if previous:
+                                reduction_log.append({
+                                    "section": section,
+                                    "reason": "relax_default_floor_for_total_budget",
+                                    "before_floor_tokens": previous,
+                                    "after_floor_tokens": 0,
+                                })
+                    continue
                 break
 
         prompt_tokens = self._count_tokens(prompt)

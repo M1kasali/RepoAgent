@@ -266,6 +266,39 @@ def test_context_manager_fails_closed_when_mandatory_segments_exceed_budget(
     assert raised.value.token_counter["source"] == "provider"
 
 
+@pytest.mark.parametrize("explicit_floor", [False, True])
+def test_total_cap_relaxes_only_derived_history_floor(tmp_path, explicit_floor):
+    agent = build_agent(tmp_path, [])
+    agent.prefix = "system"
+    agent.render_checkpoint_text = lambda: "Task checkpoint:\nkeep-checkpoint"
+    counter = CallableTokenCounter(len, counter_identity="test-character-counter")
+    for i in range(12):
+        agent.record({"role": "user", "content": f"old-{i} " + "data " * 100})
+        agent.record({"role": "assistant", "content": "noted"})
+    manager = ContextManager(
+        agent, total_token_budget=600, token_counter=counter,
+        segment_token_budgets={"history": 4000},
+        segment_token_floors={"history": 1000} if explicit_floor else None,
+    )
+    if explicit_floor:
+        with pytest.raises(ContextBudgetExceededError):
+            manager.build("keep-request")
+        assert manager.section_floors["history"] == 1000
+        return
+    prompt, metadata = manager.build("keep-request")
+    assert len(prompt) <= 600
+    assert "keep-checkpoint" in prompt
+    assert prompt.endswith("Current user request:\nkeep-request")
+    assert any(row.get("reason") == "relax_default_floor_for_total_budget"
+               for row in metadata["budget_reductions"])
+    assert manager.section_floors["history"] == 0
+    original_prefix_floor = manager.section_floors["prefix"]
+    manager.total_token_budget = 12000
+    manager.build("keep-request")
+    assert manager.section_floors["history"] == 1000
+    assert manager.section_floors["prefix"] == original_prefix_floor
+
+
 def test_context_manager_renders_top_three_episodic_notes_per_note_under_budget(tmp_path):
     agent = build_agent(tmp_path, [])
     agent.memory.append_note("alpha episodic note " + ("A" * 120), tags=("recall",), created_at="2026-04-07T10:00:00+00:00")

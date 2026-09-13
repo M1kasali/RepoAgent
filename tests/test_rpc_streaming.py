@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from dataclasses import replace
 
 import pytest
 
@@ -27,6 +28,57 @@ def test_overlapping_secrets_and_cancelled_suffix():
     assert stream.feed("ab") == ""
     stream.discard()
     assert stream.feed("safe!") == "safe!"
+
+
+def test_successful_end_flushes_nonsecret_suffix_but_redacts_complete_match():
+    stream = SecretTextStream(["example-private-key"])
+    assert stream.feed("done") == "don"
+    assert stream.finish(complete=True) == "e"
+    assert stream.finish(complete=True) == ""
+    assert stream.feed("late") == ""
+    overlap = SecretTextStream(["abc", "abcdef"])
+    assert overlap.feed("abc") == ""
+    assert overlap.finish(complete=True) == "<redacted>"
+
+
+def test_abnormal_end_discards_possible_secret_prefix():
+    stream = SecretTextStream(["example-private-key"])
+    assert stream.feed("example-pri") == ""
+    assert stream.finish(complete=False) == ""
+    assert stream.feed("vate-key") == ""
+
+
+def test_complete_runtime_answer_keeps_ordinary_secret_prefix_suffix(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_API_KEY", "example-private-key")
+    agent = build_agent(tmp_path, ["<final>done</final>"])
+    assert agent.ask("finish") == "done"
+    events = agent.run_store.load_turn_events(agent.current_task_state.run_id)
+    assert "".join(event["payload"]["content"] for event in events
+                   if event["kind"] == "runner.text") == "done"
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("stop", "done"), ("end_turn", "done"), ("length", "don"), ("unknown", "don"),
+])
+def test_runtime_tail_requires_confirmed_normal_end(tmp_path, monkeypatch, reason, expected):
+    monkeypatch.setenv("TEST_API_KEY", "example-private-key")
+
+    class Client(FakeModelClient):
+        def generate(self, request):
+            return replace(super().generate(request), finish_reason=reason)
+
+    agent = build_agent(tmp_path, [])
+    agent.model_client = Client(["<final>done</final>"])
+    assert agent.ask("finish") == expected
+
+
+@pytest.mark.parametrize("split", range(1, 20))
+def test_finalized_stream_matches_full_literal_redaction(split):
+    text = "abc abcdef done"
+    stream = SecretTextStream(["abc", "abcdef", "example-private-key"])
+    output = stream.feed(text[:split]) + stream.feed(text[split:])
+    output += stream.finish(complete=True)
+    assert output == "<redacted> <redacted> done"
 
 
 def test_rpc_delivers_increment_before_model_finishes(tmp_path):

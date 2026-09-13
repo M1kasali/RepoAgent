@@ -55,7 +55,36 @@ Implemented behavior and measured effectiveness are separate claims.
    calls / six tool executions / 12.45 seconds, with unchanged limits (TECH-148).
 6. Done: clean candidate 6cd7ade, package install, 12/12 runtime contracts and
    evidence consolidation (TECH-149); see [release notes](../release.md).
-7. Next: deliberately scope M5-01 module measurements and decide whether to
+7. In progress: M5-01 tool microbenchmarks now cover simulated delays and real
+   warm local reads (TECH-150). Both preserve results, but the local-file
+   treatment is slower; no general coding speedup is claimed.
+   Scheduler capacity comparison also passes 640 synthetic executions with
+   per-request timing, conservation and FIFO checks (TECH-151). Same-session
+   foreground requests intentionally cannot bypass earlier background turns.
+   Trace append measurements now retain 3,600 verified events and paired timing
+   samples (TECH-152); local per-event delta P95 is 6.92-7.25 ms, not a claim
+   about whole-request overhead or negligible instrumentation cost.
+   Seven Runtime accounting cases also pass with eight scripted provider
+   invocations (TECH-153). Missing usage/pricing suppresses complete unit cost;
+   real provider cost reduction has not been established by these fixtures.
+   Context/SQLite visibility acceptance is recorded (TECH-154): one of two
+   tight contexts assembles, one is rejected at section floors; all three
+   shared-versus-isolated track probes pass. No reread or answer-quality claim.
+   Follow-up fix (TECH-155) relaxes only inferred optional-content floors when
+   necessary. Both original tight workloads now assemble within 3,000 tokens;
+   explicit floors and system-prefix protection remain unchanged. The earlier
+   rejected receipt is retained, not rescored.
+   Full regression passes 1,326 tests / 43 skips with inherited secret variables
+   removed only in the test child process. An unfiltered run had 13 failures
+   from existing streamed secret-prefix retention; that environment-sensitive
+   output behavior is documented separately and is not fixed by TECH-155.
+   Follow-up TECH-156 adds confirmed-completion stream finalization: ordinary
+   unmatched suffixes are released; full secrets remain masked, and abnormal
+   endings discard pending text. This addresses the prior `done` to `don`
+   defect without removing inherited secrets from production or test commands.
+   Original-environment regression now passes 1,352 tests / 43 skips, alongside
+   accounting 7/7 and tight-context 2/2 rechecks; 227 receipt hashes verified.
+8. Next: continue remaining M5-01 module measurements and decide whether to
    prepare a new formal release. Do not generalize the debugged fixture into
    a recovery rate, reopen deferred integrations or launch full Polyglot.
 
