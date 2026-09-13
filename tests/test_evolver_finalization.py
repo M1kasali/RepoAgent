@@ -136,3 +136,127 @@ def test_cannot_finalize_other_candidate_after_seeing_sealed_result(
             max_estimated_cost_usd=0,
         )
     assert backend.calls == 1
+
+
+class PairedBackend(Backend):
+    def __init__(self, root, baseline, baseline_passed, candidate_passed, defect=None):
+        super().__init__()
+        from repoagent.evolver.workspace import _git
+
+        self.root = root
+        self.baseline = {
+            "commit_sha": baseline,
+            "tree_sha": _git(root, "rev-parse", baseline + "^{tree}"),
+        }
+        self.baseline_passed = baseline_passed
+        self.candidate_passed = candidate_passed
+        self.defect = defect
+
+    def descriptor(self, root):
+        return {"kind": "snapshot-sealed-paired/v1", "baseline": self.baseline}
+
+    def evaluate(self, *, candidate_ref, task_ids, **kwargs):
+        from repoagent.evolver.workspace import _git
+
+        self.calls += 1
+        row = {
+            "task_id": task_ids[0],
+            "passed": self.candidate_passed,
+            "estimated_cost_usd": 0.5,
+            "execution_order": ["baseline", "candidate"],
+            "arms": {
+                "baseline": {
+                    "source": self.baseline,
+                    "passed": self.baseline_passed,
+                    "estimated_cost_usd": 0.2,
+                },
+                "candidate": {
+                    "source": {
+                        "commit_sha": candidate_ref,
+                        "tree_sha": _git(
+                            self.root, "rev-parse", candidate_ref + "^{tree}"
+                        ),
+                    },
+                    "passed": self.candidate_passed,
+                    "estimated_cost_usd": 0.3,
+                },
+            },
+        }
+        if self.defect == "cost":
+            row["arms"]["baseline"]["estimated_cost_usd"] = None
+        elif self.defect == "summary":
+            row["estimated_cost_usd"] = 0
+        elif self.defect == "identity":
+            row["arms"]["candidate"]["source"] = self.baseline
+        elif self.defect == "missing":
+            del row["arms"]["baseline"]
+        return [row]
+
+
+@pytest.mark.parametrize(
+    "control,treatment,passed,comparison",
+    [
+        (False, True, True, {"wins": 1, "ties": 0, "losses": 0}),
+        (True, True, False, {"wins": 0, "ties": 1, "losses": 0}),
+        (True, False, False, {"wins": 0, "ties": 0, "losses": 1}),
+        (False, False, False, {"wins": 0, "ties": 1, "losses": 0}),
+    ],
+)
+def test_sealed_comparison_recomputes_gate(
+    repository, tmp_path, control, treatment, passed, comparison
+):
+    root, _, evolver = repository
+    candidate, vault = prepare(repository, tmp_path)
+    state = next(
+        e["payload"]["state"]
+        for e in evolver.ledger.events()
+        if e["event_type"] == "search.finished"
+    )
+    backend = PairedBackend(root, state["base_commit"], control, treatment)
+    options = dict(
+        run_id="search-one",
+        candidate_id=candidate,
+        vault=vault,
+        backend=backend,
+        max_estimated_cost_usd=0.5,
+    )
+    result = evolver.finalize_search(root, **options)
+    assert result["passed"] is passed
+    assert result["comparison"] == comparison
+    assert result["estimated_cost_usd"] == 0.5
+    if not passed:
+        with pytest.raises(CandidateEvaluationError, match="passing sealed"):
+            evolver.request_finalist_approval(
+                run_id="search-one", candidate_id=candidate
+            )
+    with pytest.raises(CandidateEvaluationError, match="already frozen"):
+        evolver.finalize_search(root, **options)
+    assert backend.calls == 1
+
+
+@pytest.mark.parametrize(
+    "defect", ["cost", "summary", "identity", "missing", "baseline"]
+)
+def test_sealed_pair_rejects_invalid_evidence(repository, tmp_path, defect):
+    root, _, evolver = repository
+    candidate, vault = prepare(repository, tmp_path)
+    state = next(
+        e["payload"]["state"]
+        for e in evolver.ledger.events()
+        if e["event_type"] == "search.finished"
+    )
+    backend = PairedBackend(root, state["base_commit"], False, True, defect)
+    if defect == "baseline":
+        backend.baseline = {"commit_sha": "wrong", "tree_sha": "wrong"}
+    options = dict(
+        run_id="search-one",
+        candidate_id=candidate,
+        vault=vault,
+        backend=backend,
+        max_estimated_cost_usd=0.5,
+    )
+    with pytest.raises(CandidateEvaluationError):
+        evolver.finalize_search(root, **options)
+    assert backend.calls == (0 if defect == "baseline" else 1)
+    with pytest.raises(CandidateEvaluationError):
+        evolver.request_finalist_approval(run_id="search-one", candidate_id=candidate)

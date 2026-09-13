@@ -1,5 +1,25 @@
 # Release and Evidence
 
+## Implementation Closeout - 2026-09-13
+
+The current agreed implementation scope is closed for this iteration (TECH-165).
+This does not create a release, bump version 0.1.1, move the existing v0.1.1 tag
+or establish full upstream parity. Changes after the clean bc18a86 candidate
+include host behavioral probes, sealed baseline pairing, offline pilot preflight,
+snapshot unittest execution and the one-shot hosted pilot runner.
+
+Latest source regression: 1,423 passed, 52 conditional skips and six existing
+warnings; separate Docker integration and retained evidence are recorded in
+TECH-163/164. These are local functional results, not a claim of live model
+improvement or acceptance of a newly built distribution. Reuse these results
+for this documentation-only closeout; no new paid or full benchmark campaign.
+
+Installation/startup is documented in [README](../README.md), feature boundaries
+in [Mainline Status](roadmaps/mainline-status.md), and experiment mechanics in
+[Evolver Workflow](architecture/evolver-workflow.md). Future real-effect campaigns
+are paused, not delivery blockers. Private corpus/oracle files and local logs
+remain outside product Git history and require separate retention.
+
 ## Supported Matrix
 
 - Python: 3.10, 3.11, 3.12
@@ -59,6 +79,35 @@ python scripts/collect_resume_metrics.py \
 Scripted contract results must remain labeled as runtime-contract evidence. They are not a claim that RepoAgent outperforms production coding agents.
 
 ## Current Local Candidate
+
+Candidate `bc18a863b2f4ee8bad001113b1061b9fe64e17a2` passed clean-source
+verification after the budget-floor and stream-finalization fixes. Version is
+still `0.1.1`; no new tag, publication or push was performed during acceptance.
+
+- Full regression: 1,352 passed, 43 skipped, six existing warnings in 178.70
+  seconds. Repository-wide Ruff and diff check passed.
+- Offline wheel and source distribution built; the wheel installed in a fresh
+  environment outside the checkout, with locked json-repair 0.63.4.
+- Dependency check and all five CLI help checks passed. All 156 installed
+  Python module hashes matched source; isolated import location was verified.
+- Installed CLI passed 12/12 scripted runtime contracts using checkout assets.
+  The relocated contract bundle verified; the default tagged-release verifier
+  rejected this untagged candidate as required.
+- All 367 verification payload hashes passed. Archive filenames were checked
+  for ignored runtime/config paths, not exhaustively scanned for secret content.
+
+Evidence is local under `artifacts/acceptance/candidate-bc18a86/`: verification
+manifest, distribution files, installed-package report, summary and outer hash
+index. The initial postprocessing script mistakenly treated uv's `.gitignore`
+as an archive; all verification commands had passed. A separate retained review
+script filtered the two actual distributions and completed archive verification.
+
+This exercised Linux/WSL Python 3.12 only, not the full supported matrix,
+optional integrations or real-model effectiveness. Documentation was updated
+after the frozen clean-commit acceptance. The old `v0.1.1` tag remains unchanged
+and does not identify this candidate despite matching package filenames.
+
+## Previous Local Candidate
 
 Candidate `6cd7ade05e19a8c760871a5205ac0e80149fa1ac` was verified on clean
 source. This is not a new release: version remains `0.1.1`, no tag was created

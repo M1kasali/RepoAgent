@@ -23,6 +23,7 @@ from .evaluation import (
     payload_digest,
 )
 from .workspace import _git, _git_bytes
+from .behavior_grading import BehaviorCheck, grade_behavior
 
 
 def _files(values):
@@ -66,10 +67,15 @@ class AgentSnapshotTask:
     timeout_seconds: float = 60
     model_mode: str = "scripted"
     enable_skills: bool = False
+    enable_tests: bool = False
+    behavior_checks: tuple[BehaviorCheck, ...] = ()
+    behavior_files: tuple[str, ...] = ()
 
     def __post_init__(self):
         if type(self.enable_skills) is not bool:
             raise ValueError("enable_skills must be boolean")
+        if type(self.enable_tests) is not bool:
+            raise ValueError("enable_tests must be boolean")
         CandidateCheck(self.task_id, "snapshot", timeout_seconds=self.timeout_seconds)
         if (
             not isinstance(self.prompt, str)
@@ -103,7 +109,18 @@ class AgentSnapshotTask:
             raise ValueError("snapshot response script is too large")
         object.__setattr__(self, "files", _files(self.files))
         object.__setattr__(self, "expected_files", _files(self.expected_files))
-        if not self.expected_files:
+        checks = tuple(self.behavior_checks)
+        paths = tuple(self.behavior_files)
+        if len(checks) > 20 or any(not isinstance(check, BehaviorCheck) for check in checks):
+            raise ValueError("behavior checks must be bounded registered checks")
+        if len({check.check_id for check in checks}) != len(checks):
+            raise ValueError("behavior check identities must be unique")
+        if len(set(paths)) != len(paths) or bool(paths) != bool(checks):
+            raise ValueError("behavior checks require unique declared artifact paths")
+        _files({name: "" for name in paths})
+        object.__setattr__(self, "behavior_checks", checks)
+        object.__setattr__(self, "behavior_files", paths)
+        if not self.expected_files and not checks:
             raise ValueError("snapshot requires explicit host-side grading")
         object.__setattr__(self, "responses", responses)
 
@@ -114,6 +131,7 @@ class AgentSnapshotTask:
             "max_calls": self.max_calls,
             "max_output_tokens": self.max_output_tokens,
             "enable_skills": self.enable_skills,
+            **({"enable_tests": True} if self.enable_tests else {}),
         }
 
     def descriptor(self):
@@ -121,7 +139,11 @@ class AgentSnapshotTask:
             "task_id": self.task_id,
             "input_digest": payload_digest(self.worker_input()),
             "fixture_digest": payload_digest(dict(self.files)),
-            "grader_digest": payload_digest(dict(self.expected_files)),
+            "grader_digest": payload_digest(
+                {"exact_files": dict(self.expected_files), "behavior_files": list(self.behavior_files),
+                 "checks": [check.descriptor() for check in self.behavior_checks]}
+                if self.behavior_checks else dict(self.expected_files)
+            ),
             "timeout_seconds": self.timeout_seconds,
             "model_mode": self.model_mode,
         }
@@ -176,7 +198,11 @@ class ScriptedAgentSnapshotEvaluator(DockerCandidateEvaluator):
             "worker": "scripted-agent-snapshot/v1",
             "driver_digest": sha256_bytes(self._driver.encode()),
             "tasks": [self.tasks[key].descriptor() for key in sorted(self.tasks)],
-            "grader": "host-exact-text-files/v1",
+            "grader": ("host-exact-and-behavior-json/v1" if any(task.behavior_checks for task in self.tasks.values())
+                       else "host-exact-text-files/v1"),
+            **({"behavior_grader_digest": sha256_bytes(
+                Path(__file__).with_name("behavior_grading.py").read_bytes()
+            )} if any(task.behavior_checks for task in self.tasks.values()) else {}),
             "model_mode": "scripted-no-network",
             "dependency": {
                 "name": "json-repair",
@@ -327,6 +353,17 @@ class ScriptedAgentSnapshotEvaluator(DockerCandidateEvaluator):
                 and worker["stop_reason"] == "final_answer_returned"
             )
             raw.update(worker=worker, grades=grades)
+            if task.behavior_checks:
+                behavior = grade_behavior(
+                    work, task.behavior_files, task.behavior_checks,
+                    executable=self.executable, image=descriptor["image_id"],
+                    path_converter=self.path_converter,
+                )
+                raw["behavior"] = behavior
+                if behavior["status"] != "completed":
+                    return {"status": "infrastructure_error", "score": None,
+                            "passed": None, "estimated_cost_usd": model_cost, "raw": raw}
+                passed = passed and behavior["passed"]
             return {
                 "status": "completed",
                 "score": float(passed),

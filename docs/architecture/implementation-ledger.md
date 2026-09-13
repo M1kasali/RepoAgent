@@ -6291,6 +6291,386 @@ by the verification command. Both standalone acceptances passed (accounting
 check passed; all 227 receipt hashes were independently verified. Final docs
 were updated afterward. No commit, push or paid provider call was performed.
 
+### TECH-157: Clean Pushed Candidate Installation Acceptance
+
+Verified clean, pushed commit bc18a863b2f4ee8bad001113b1061b9fe64e17a2
+before editing documentation. Source checks before and after execution agreed.
+Full regression passed 1,352 tests with 43 skips and six existing warnings in
+178.70 seconds, without removing inherited secret variables. Repository-wide
+Ruff, diff check and offline wheel/source-distribution builds passed.
+
+Reused the retained installed-package helper from the previous candidate.
+The wheel installed with locked json-repair 0.63.4 into a new temporary venv
+outside the checkout. Dependency check and all five CLI help commands passed.
+Isolated imports resolved into that environment; all 156 installed Python
+module hashes exactly matched source. Installed repoagent-demo passed 12/12
+scripted contracts using the repository's benchmark assets. The self-contained
+untagged bundle verified after relocation and was correctly rejected by the
+default tagged-release verifier.
+
+Local receipt: `artifacts/acceptance/candidate-bc18a86/`. All 367 verification
+payload hashes checked. Archive path audit excluded ignored config/runtime
+paths; this is not exhaustive secret-content scanning. The original local
+runner failed only in postprocessing because uv wrote a .gitignore in dist
+and the runner treated every non-wheel as a tarball. Preserved that runner;
+review.py restricted inspection to wheel/tar.gz and completed the audit,
+summary and outer index without rerunning or altering the successful receipts.
+
+No application code, dependency version or package version changed. No tag,
+push or publication occurred in this slice. This is local WSL Python 3.12
+acceptance, not the full CI matrix or real-agent quality evidence. Version
+remains 0.1.1 and the old release tag still points to the old code. Updated
+release and mainline docs only after the clean candidate had been verified.
+
+### TECH-158: Real Docker Evolution Integration and Effectiveness Gaps
+
+Ran the existing opt-in lifecycle (two cases), pinned Agent snapshot (four)
+and binary paired-check (three) tests against the locally available Docker
+engine 29.7.2 and python:3.12-slim image
+sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17.
+All nine passed in 42.36 seconds; no paid Provider calls or image pulls occurred.
+Fixtures archive runtime code from HEAD bc18a86; working-tree changes at this
+point are documentation, and the receipt honestly records that dirty state.
+
+Receipt: `artifacts/acceptance/evolver-docker-20260913/`. Retained pytest working
+directories include fixture repositories, candidate evidence, model journals,
+sealed records and deployment/rollback records. These can contain test approval
+tokens and machine paths and remain untracked. All 2,272 payload hashes verified.
+Retaining workspaces supports inspection; their moved absolute paths are not a
+claim of portable replay after relocation. Replay assertions run during tests.
+
+The test lifecycle generated a scripted candidate, evaluated training/sealed
+tasks, awaited explicit fixture approval, routed deployed tasks and restored
+baseline on rollback. Pinned skill loading passed. The equal-outcome paired
+test correctly rejected promotion. MarkerLeaf intentionally returns different
+content for a candidate marker, so none of these outcomes is model improvement.
+
+Identified prerequisites for defensible real coding-effectiveness experiments:
+AgentSnapshotTask.expected_files grades exact bytes, not behavioral equivalence;
+SnapshotSealedBackend executes only the candidate, not a held-out baseline pair.
+Documented behavioral grader and sealed baseline work plus a proposed split,
+intervention separation and budget/selection constraints in evolver-workflow.md.
+These are explicitly TODOs, not implemented capabilities or a frozen dataset.
+No production code or deployment was changed. Ordinary full regression remains
+the previous 1,352/43 result; the nine Docker tests are a separate opt-in run.
+
+### TECH-159: Optional Host-Side Behavioral Probe Grading
+
+Added BehaviorCheck and opt-in behavior_checks/behavior_files on
+AgentSnapshotTask. Trusted host Python probes run after the Agent container
+has stopped, each in a fresh network-disabled container using the frozen image.
+Only explicitly declared regular, non-linked outputs are copied, within a
+1 MB cap. Missing/unsafe outputs fail before launching the grader. Candidate
+workspace/test files outside that allowlist are not mounted. Expected JSON
+stays on the host and is absent from both worker input and probe command.
+
+Canonical JSON comparison allows implementation differences while checking
+observable behavior. Wrong/malformed answers and nonzero probe exits fail;
+timeouts, output truncation and launch failures produce infrastructure_error
+with null score instead of a false quality result. Cleanup failures raise and
+cannot promote. Probe limits are separate bounded grading overhead, not model
+calls. Normal Runtime completion plus all requested exact/behavioral checks
+is required. Model usage/cost accounting is unchanged.
+
+Exact-only task digests and grader identity remain unchanged. Behavioral task
+identity binds artifact paths and probe/expected-result digests; evaluator
+descriptor additionally binds the host grader implementation. Both scripted
+and hosted evaluators use the same optional grading path. Probe configuration
+and expectations are immutable, and changes invalidate frozen checks.
+
+Tests cover host-answer separation, contract changes, invalid contracts,
+allowlisted independent copies, source immutability, missing/symlink/directory/
+oversized outputs and failure-versus-infrastructure classification. Real Docker
+tests accept addition and sum-based implementations, reject subtraction and
+exercise a complete pinned Agent snapshot through behavioral grading. Initial
+focused Docker run: 16 tests passed in 7.63 seconds.
+
+The host program is trusted reviewed code, not candidate-supplied tests. Probe
+inputs become visible during execution; finite probes are not ungameable and
+do not prove general correctness. This is not arbitrary pytest integration or
+a statistical claim. Sealed baseline pairing remains separate unfinished work.
+Full receipts: `artifacts/acceptance/behavior-grading-20260913/`; no paid calls.
+
+Final verification: ordinary full suite 1,364 passed, 47 skipped, six existing
+warnings in 174.48 seconds. Explicit Docker suite 25/25 passed in 47.45 seconds,
+including the four newly opt-in behavioral cases skipped in the ordinary run.
+Evolver Ruff and diff check passed. All 2,643 payload hashes verified; no running
+containers remained. Host evaluator/grader code is the current dirty tree;
+pinned Agent source fixtures archive HEAD bc18a86. Final documentation followed
+verification. No commit, push or paid API request occurred.
+
+### TECH-160: Origin-Bound Sealed Baseline Comparison
+
+SnapshotSealedBackend accepts optional baseline_commit, resolved to commit/tree
+at construction. Paired descriptors bind this identity and the existing frozen
+hosted evaluator. Finalization compares it with the completed search's original
+base before starting any sealed evaluation. Legacy candidate-only construction,
+descriptor and all-pass behavior remain supported.
+
+Both arms execute identical hidden tasks with the same evaluator, pinned image,
+grader, model settings and cost cap. Arm order alternates by task index. Budget
+admission reserves two arms for every task before calls; invalid/unpriced,
+incomplete or over-cap results stop with execution review. Each vault row keeps
+arm identities, boolean outcomes, full raw receipts, costs and execution order.
+Both arms count toward reported sealed cost. This is one observation per arm,
+not randomized replication or a statistical efficacy result.
+
+Finalization validates the pair structure, task order, source identities and
+cost summaries, then recomputes wins/ties/losses. Passing requires all candidate
+tasks to pass, at least one win and no losses. All-pass ties are not improvement.
+Existing finished-search admission, one-shot sealed latch, no reselection and
+explicit human approval remain unchanged. Raw measurements stay in the local
+host vault and are not sent to the proposer. This is workflow separation, not
+protection against a host operator inspecting the vault or altering trusted code.
+
+Tests cover two-arm pre-reservation, invalid budgets, descriptor drift, invalid
+arm costs, alternating order, legacy behavior, wins/ties/losses, mismatched
+baselines, malformed evidence, one-shot rejection and approval blocking. The
+real Docker lifecycle is parametrized over legacy and paired sealed modes,
+including generation/search, approval, activation and rollback. Its scripted
+marker-based improvement is deliberately programmed, not learned effectiveness.
+
+Verification bundle: `artifacts/acceptance/sealed-paired-20260913/`. Focused
+suite including explicit Docker integration passed 45/45 in 46.51 seconds.
+Full regression passed 1,386 tests, with 48 skips and six existing warnings in
+178.11 seconds. The new paired lifecycle case is opt-in and was executed in
+the separate focused Docker run. Evolver Ruff and diff checks passed; all
+2,591 payload hashes were independently verified and no containers remained
+running. Host orchestration is the dirty working tree; pinned Agent source
+fixtures archive HEAD bc18a86. Local retained workspaces contain machine paths
+and fixture approval tokens, not a portable or publishable evidence release.
+Documentation was finalized after verification. No commit or push occurred.
+No paid API calls or automatic deployment were authorized. Real Skills/prompt
+campaigns still require frozen tasks, model/pricing and approved budgets.
+
+### TECH-161: Private Offline Coding Pilot Preflight
+
+Added pilot_protocol and prepare_coding_pilot.py for an exploratory fixed-pair
+design. This does not call providers, start containers, execute trusted probe
+programs, generate candidates, approve deployment or grant spending authority.
+It validates existing exact baseline/candidate commits and permits one change
+category: prompt_prefix.py only, or regular files under skills/ only. Tasks use
+the same existing host behavioral-check contract, with Skills disabled for
+prompt pilots and enabled identically for both Skills arms.
+
+At least 12 training and 12 sealed tasks are required, with unique IDs, disjoint
+author-supplied family labels and no exact prompt/fixture duplicates. The
+host-only config/output paths must resolve outside the evaluated Git checkout
+so the configured corpus is not automatically included in source snapshots.
+This does not detect semantic duplicates, copies elsewhere in the repository,
+or protect against a malicious host operator. Probe correctness and family
+assignment remain manual review responsibilities; probes never execute here.
+
+Explicit model/settings/counter identity, image digest, full pricing including
+cache rates and bounded model limits are recorded. The total budget must cover
+every two-arm trial at its cap, and one fully reserved call must fit a trial.
+The receipt reports trial/call ceilings and estimated reservation, not measured
+cost. Generation and grading compute are excluded. Supplied provider prices,
+model settings and local image availability are not externally verified.
+
+Private config and preflight receipts use exclusive creation, restrictive
+directory/file permissions and configuration/source/task/implementation digest
+binding. Verification re-evaluates the config and rejects changed receipts or
+inputs. Output always states execution_authorized=false. These unsigned local
+records detect drift, not deliberate forgery. A live runner still needs to
+enforce the frozen configuration and gain an explicit spending decision.
+
+Tests use a synthetic 24-row corpus solely to exercise preflight constraints;
+this is not a real task set or success-rate experiment. Real corpus authoring,
+independent review, intervention selection and live runner binding remain open.
+Implementation details and the input schema are in evolver-workflow.md.
+Verification evidence is retained in
+`artifacts/acceptance/pilot-preflight-20260913/`. Focused suite passed 46/46 in
+5.93 seconds. Full regression passed 1,406 tests, with 48 skips and six existing
+warnings in 180.13 seconds. Ruff and diff checks passed, and all 1,774 payload
+hashes were independently verified. Retained workspaces contain synthetic
+configs only, not real credentials or a real private corpus. This phase did not
+rerun opt-in Docker tests; their previous TECH-160 result remains separate.
+Final documentation followed verification. No paid calls, commit or push.
+
+### TECH-162: External Authored Coding Microtask Corpus
+
+Created `../repoagent-private-pilot/` outside the evaluated checkout. It contains
+the declarative authoring script, tasks.json, oracles.json, Docker audit script,
+private README and audit-v1 receipts. This location is intentional: storing
+sealed inputs/answers/reference code inside product source could expose them
+through the Harness archive. The private directory has mode 0700 and generated
+input/receipt files use 0600. It is not committed with RepoAgent; preserve and
+version private evidence separately instead of silently rewriting audited files.
+
+The corpus has 12 training and 12 sealed standard-library Python microtasks,
+75 behavioral cases, and disjoint declared problem-family IDs. Contracts cover
+practical data/config/text transformations and bounded state/ordering behavior.
+These are single-function engineering exercises, NOT a public benchmark, a
+repository-scale patch workload or statistically independent problem domains.
+Shared primitives and author bias remain despite distinct family labels.
+
+Each workspace contains a solution.py stub and one visible unittest example.
+Hidden host probes import solve(value), compare authored literal expected
+outputs and check that input was not mutated. References and one targeted wrong
+implementation per task stay outside the Agent workspace. Expected answers are
+not generated by executing the reference. During author review an ASCII-only
+slug contract was given a non-ASCII boundary case and the reference adjusted
+to lowercase ASCII letters only, avoiding Unicode lowercasing ambiguity.
+
+Executed all references, targeted mutants and stubs through the existing
+grade_behavior path, each in a fresh network-disabled Docker container with
+image sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17.
+Results: 24/24 references passed, 24/24 mutants rejected, 24/24 stubs rejected;
+72 completed audit executions, no infrastructure failures. Four source/input
+hashes and 72 receipt hashes were independently verified. No containers remained
+running. Full evidence: `../repoagent-private-pilot/audit-v1/summary.json`.
+
+This is self-audit, not independent review or exhaustive mutation coverage.
+No coding Agent or model was run against these tasks, and no effectiveness,
+cost-saving or significance claim follows. Corpus review, broader probes,
+end-to-end task integration, intervention selection and live runner binding
+remain open. No paid API calls, commit or push occurred. Product runtime code
+was unchanged this turn; the prior 1,406-pass / 48-skip regression remains a
+historical result, not a newly rerun suite. Documentation diff check passed.
+
+### TECH-163: Snapshot Visible-Test Execution And Corpus Integration
+
+During private task-workspace integration, found that the snapshot guest exposed
+only read/write/patch/list tools, so it could not run the corpus's visible tests.
+Added opt-in AgentSnapshotTask.enable_tests, strict boolean validation and
+conditional worker-input binding. Default false preserves old task input
+identities and file-only tools. Enabled guests add the existing run_tests tool,
+not run_shell, and return bounded tool names plus refreshed test-verification
+records. The guest driver digest changes as expected; old frozen evaluator
+plans cannot silently reuse this new execution behavior.
+
+run_tests executes the existing bounded unittest runner inside the outer Docker
+container. The inner adapter reports direct execution; isolation is provided by
+the outer container, not a nested sandbox. Candidate-visible tests are not
+independent oracles. Final host grading remains unchanged. Test records describe
+counts/verdict/freshness and do not automatically become a new task-success
+gate. A later file edit marks earlier passing evidence stale. Private corpus
+integration explicitly checks the expected workflow and current passing record.
+
+Pilot task assembly enables testing identically in both arms. New pilot task
+digests reflect this setting, and previously frozen protocols need re-preflight.
+Focused tests cover strict opt-in identity, failing tests, repair and retest,
+stale pass evidence after a later edit, fixture preservation and clean source.
+The initial explicit Docker check passed all four tests in 9.51 seconds.
+
+Added an external private audit_runtime.py. Each of 24 corpus tasks uses the
+real pinned Agent to read implementation/test files, test the failing stub,
+write a supplied reference, rerun unittest and return a final answer, followed
+by independent host behavioral probes. The visible test itself must remain
+unchanged. All 24/24 integration trials passed, with 144 scripted responses,
+zero paid calls and normal Runtime completion. Initial failure records were
+stale after repair; final passing records were current. Three input hashes and
+24 per-task receipt hashes were verified. Private evidence is retained under
+`../repoagent-private-pilot/runtime-v1/`, not in candidate source archives.
+
+Agent source is bc18a863b2f4ee8bad001113b1061b9fe64e17a2 / tree
+44d1617f2c8aa2e59b47cfc4fa859c65e4a8fdac. Host driver and grader are the dirty
+working versions bound by the stored descriptors. Reference answers were
+deliberately supplied to the scripted provider: this validates integration,
+NOT autonomous solving, learned improvement or a blind 100% task success rate.
+Independent corpus review, intervention selection and paid runner binding
+remain open. No paid request, commit or push occurred.
+
+Regression evidence: `artifacts/acceptance/snapshot-visible-tests-20260913/`.
+Explicit Docker/focused suite passed 44/44 in 28.85 seconds. Full ordinary
+regression passed 1,407 tests, with 51 skips and six existing warnings in
+179.19 seconds. The three new Docker-only cases skipped in the ordinary run
+were executed explicitly. Ruff and diff checks passed; all 3,501 payload
+hashes were independently verified, and no containers remained running.
+Final documentation followed verification. No commit or push occurred.
+
+### TECH-164: Frozen Hosted Pilot Execution
+
+Added pilot_runner.run_frozen_pilot, pilot_model_identity and run_coding_pilot.py.
+The runner connects an already selected baseline/candidate pair to the existing
+HostedAgentSnapshotEvaluator. Training tasks precede sealed tasks; arm order
+alternates by task index. No generation, selection, deployment or automatic
+promotion occurs, and no sealed results are fed back into a search.
+
+The model identity now has an executable definition: configuration_digest is
+payload_digest(BudgetedEvaluationClient.descriptor()), including explicit
+ModelProfile, limits, pricing and counter identity. The factory must be trusted
+host code, construct without requests and return fresh unused gateways. Both
+identity and separate pricing/limit declarations must match the preflight.
+Existing per-trial hosted admission and budget accounting remain in control.
+Credentials are not added to task inputs. Arbitrary factory honesty, accurate
+token counting and the absence of hidden leaf retries remain integration duties.
+
+Execution requires an explicit exact digest of the full preflight, including
+host implementation hashes. prepare_coding_pilot now prints that digest; the
+runner CLI verifies it before importing the trusted factory. The actor string
+is an audit label, not authentication. A nonblocking file lock rejects concurrent
+starts, and an exclusive fsynced execution directory fences repeats before
+gateway construction. The runner implementation is itself included in newly
+frozen preflight digests, so old frozen receipts require preparation again.
+
+Rechecks frozen inputs before every trial and at completion. The actual image,
+model gateway and task configuration are bound before inference. Each attempt
+has a durable started event, atomic result file and hash-bound completed event.
+Complete runs report per-split baseline/candidate passes and win/tie/loss counts,
+including regressions and ties without treating them as improvement. Both arms'
+priced cost is counted. Invalid/unpriced/over-cap outcomes, source mismatches,
+config drift, interrupts or exceptions stop with needs_review and no comparison.
+No retries/refunds occur; partial known cost may omit uncertain sends, whose
+model journals must be reviewed. A crash without a final summary is incomplete.
+
+Tests cover approval before factory construction/import, full-matrix ordering,
+cost aggregation, wins/ties/losses, identity and pricing mismatch, missing cost,
+over-cap values, infrastructure failure, interruption, changed inputs, repeated
+execution, concurrent starts and reused gateways. Real Docker integration uses
+24 synthetic task pairs, actual hosted stdio transport and a network-free fake
+leaf: 48 isolated trials, 96 fixture calls, 48 verifiable model journals and 24
+ties. Re-execution was refused. Initial Docker suite: 15 tests passed in 165.81
+seconds, before adding two further offline guard cases. This is not the private
+authored corpus, a real provider test or a measured quality improvement.
+
+Evidence retained from the Docker run and rechecked under
+`artifacts/acceptance/pilot-runner-20260913/`. Runtime fixture source archives
+HEAD bc18a86; host orchestration uses the working tree. Copied artifacts retain
+original absolute journal paths, so this is local evidence, not portable replay.
+The real model factory/counter, reviewed corpus/interventions and explicit paid
+budget decision remain pending. No paid API call, commit or push occurred.
+Final focused regression passed 36 tests with one opt-in Docker skip in 5.58
+seconds; the skipped full matrix was executed separately as described above.
+Full ordinary regression passed 1,423 tests, with 52 skips and six existing
+warnings in 216.06 seconds. Ruff and diff checks passed. The retained Docker
+evidence was revalidated: 48 hash-bound trial receipts, 48 chained model journals
+and 96 fixture calls. All 1,249 verification-bundle payload hashes were checked;
+no containers remained running. Final documentation followed verification.
+
+### TECH-165: Implementation Closeout And Scope Freeze
+
+Per the user's explicit direction, closed the currently agreed implementation
+scope for this iteration instead of adding more evaluation modules. This is
+not a declaration of full upstream parity, production readiness or a new release.
+Unchecked Myna, external-platform, full Polyglot, formal-release and real-effect
+items remain visible; they are not prerequisites for delivering this slice.
+
+Updated README with delivery status, implementation/effectiveness boundaries,
+project-virtualenv startup guidance, explicit direct-versus-Docker execution
+semantics and unchanged version/tag status. The provider model example is now
+an explicit placeholder, not a claim about current remote model availability.
+No credentials or local provider configuration were changed.
+
+Reorganized mainline status to lead with the delivery decision, operational
+limits and separate follow-ups. Historical milestones are retained in a folded
+section, clearly marked as history rather than the current work queue. The
+implementation plan now pauses effects work and replaces its stale immediate
+next slice with closeout. Release and Evolver documents reflect the same scope.
+Any future effect campaign should combine model/counter, corpus/intervention
+and spending checks into one bounded launch decision, not another chain of
+implementation phases.
+
+This turn changed documentation only. Reused the just-completed TECH-164 source
+regression (1,423 passed, 52 skips, six existing warnings); did not rerun a full
+suite, Docker matrix or benchmark campaign. Lightweight startup checks passed:
+repoagent --help, repoagent-demo --help, both pilot scripts' --help, and the
+existing offline demo (12/12 runtime contracts, 12 evidence bundles) at
+`artifacts/closeout-20260913/offline-demo/`. Documentation diff check passed and
+linked architecture/security/migration guides are tracked. No paid API call,
+package/version/tag change, commit or push occurred during this closeout turn.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

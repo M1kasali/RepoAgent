@@ -1,8 +1,22 @@
 # Mainline Status
 
-Reconciled 2026-09-12 against the implementation ledger and current roadmap.
+Reconciled 2026-09-13 against the implementation ledger and current roadmap.
 This is a delivery-status reconciliation, not a new full-source parity audit.
 Implemented behavior and measured effectiveness are separate claims.
+
+## Delivery Decision
+
+The currently agreed implementation scope is closed for this iteration.
+Per user direction, stop expanding evaluation infrastructure and stop treating
+future effect campaigns as prerequisites for delivering the application.
+This is an implementation closeout, not a declaration of complete upstream
+parity, production readiness or a new tagged release.
+
+Latest verification: 1,423 ordinary tests passed, 52 conditional skips and six
+existing warnings (TECH-164). Separately executed Docker integration covered a
+48-trial hosted matrix with a fake provider; private corpus integration covered
+24 scripted tasks (TECH-163). These are mechanism checks, not model quality.
+Use README for installation/startup and the table below for feature boundaries.
 
 ## Implemented
 
@@ -14,18 +28,35 @@ Implemented behavior and measured effectiveness are separate claims.
 | Context and Skills | Budget assembly, compaction, retrieval/fusion/admission, lazy hydration | Skill live effectiveness remains unverified; TECH-109 |
 | Local memory | Existing local memory plus opt-in SQLite/FTS5, provenance and track isolation | SQLite is independent, not Myna; one controlled DeepSeek recall case passed |
 | Tracing and evaluation | Correlation, retained receipts, replay and paired evaluation infrastructure | Own mainline metric campaigns remain pending; no borrowed resume numbers |
-| Subagents and Evolver | Budgets, messaging, isolated candidate execution, multi-round search, sealed checks, human approval and activation | Real-model effectiveness remains unverified; TECH-102 through TECH-108 |
+| Subagents and Evolver | Budgets, messaging, isolated execution, multi-round search, behavioral grading, paired sealed checks, human approval/rollback and one-shot pilot runner | Real-model effectiveness remains unverified; TECH-102 through TECH-108 and TECH-159 through TECH-164 |
 | Product surfaces | CLI, native terminal, RPC, session/model management, durable directory Gateway | Optional QQ is fixture-tested, not live-platform accepted |
 | Coding verification | Source-bound unittest records, freshness checks, native schema-aware prompts, live budget feedback and revalidation guidance | Bounded failure/repair/retest/normal completion passed on dc432b3; one controlled case, TECH-148 |
 
-## Remaining Work
+## Separate Follow-Ups
 
-- M5-01: module-specific paired acceptance for the mainline, with own workloads,
-  denominators, costs and immutable evidence. Infrastructure is not itself a
-  measured improvement.
-- Formal release: local clean candidate 6cd7ade passed build, isolated wheel
-  install and 12/12 scripted contracts (TECH-149). A version/tag decision and
-  full release/CI workflow remain pending; the old v0.1.1 tag is unchanged.
+- Real effect campaign, paused: combine corpus/intervention review, real
+  provider/counter checks and explicit budget approval into one campaign-start
+  check when requested. Do not create additional implementation phases for it.
+  Infrastructure and fixture results do not establish measured improvement.
+- Formal release, separate decision: bc18a86 previously passed clean package
+  installation and scripted contracts (TECH-157); later changes are source
+  development, not a newly accepted wheel/tag. Version remains 0.1.1 and the old
+  v0.1.1 tag is unchanged. No version bump/publication is part of this closeout.
+
+## Operational Limits
+
+- Default execution is direct host execution; Docker isolation must be chosen
+  explicitly. Approvals and sender allowlists are not authentication or a
+  multi-tenant security boundary.
+- Native TUI and MCP need their optional dependencies. RPC is a local,
+  single-active-session connection. QQ is fixture-tested, not live accepted.
+- Local/SQLite memory is available; Myna is not integrated. Memory and local
+  configuration are not encrypted, and session deletion does not erase backups.
+- Evolver experiments require explicit operator configuration. The hosted pilot
+  runner needs a reviewed real-provider factory/counter and spending decision;
+  it does not run automatically during ordinary coding sessions.
+- Private datasets and local artifacts are deliberately outside product Git
+  history. They need separate retention and must not enter candidate snapshots.
 
 ## Deferred
 
@@ -37,7 +68,14 @@ Implemented behavior and measured effectiveness are separate claims.
 - Polyglot: input-policy corrections, snapshot-overhead diagnosis, clean canary
   rerun and the 225-task campaign remain deferred; they do not block this slice.
 
-## Current Sequence
+## Historical Progress
+
+The following chronology preserves previous results. References to "next" or
+"pending" describe those milestones, not the current delivery queue. Current
+scope is governed by Delivery Decision and Separate Follow-Ups above.
+
+<details>
+<summary>Implementation and verification history</summary>
 
 1. Done: retained SQLite and status corrections committed as 252c157; full
    regression passed 1,284 tests with 43 skips.
@@ -84,9 +122,51 @@ Implemented behavior and measured effectiveness are separate claims.
    defect without removing inherited secrets from production or test commands.
    Original-environment regression now passes 1,352 tests / 43 skips, alongside
    accounting 7/7 and tight-context 2/2 rechecks; 227 receipt hashes verified.
-8. Next: continue remaining M5-01 module measurements and decide whether to
+8. Done: pushed clean candidate bc18a86 passed build, independent wheel install,
+   156 module identity checks, five CLI smokes and 12/12 installed contracts
+   (TECH-157). Regression 1,352 passed / 43 skipped; 367 evidence hashes checked.
+   Version/tag unchanged; only local WSL Python 3.12 was exercised.
+9. Next: continue remaining M5-01 module measurements and decide whether to
    prepare a new formal release. Do not generalize the debugged fixture into
    a recovery rate, reopen deferred integrations or launch full Polyglot.
+   Nine opt-in Docker Evolver/Skills cases now pass (TECH-158), including
+   deployment/rollback and tie rejection. Exact-file/candidate-only checks
+   alone do not establish coding-quality gains.
+   Behavioral JSON probes are now implemented (TECH-159): equivalent code can
+   pass without matching reference bytes. Opt-in sealed baseline pairing is
+   now implemented (TECH-160): origin-bound control, two-arm budget reservation,
+   retained per-arm outcomes and recomputed win/tie/loss. No real-model
+   improvement is claimed; task/protocol/budget freezing remains next.
+   Behavioral-grader verification: 1,364 ordinary tests passed / 47 skipped;
+   separately enabled Docker integration passed 25/25, including four new cases.
+   Sealed-pair verification: 1,386 ordinary tests passed / 48 skipped; focused
+   suite with Docker enabled passed 45/45 and 2,591 payload hashes verified.
+   Offline pilot preflight is now implemented (TECH-161), including private
+   external inputs, 12+12 split validation, intervention-only source changes,
+   two-arm reservation and drift verification. It is NOT a live runner or a
+   completed real corpus; M5-01k2/k3 remain open and no spending is authorized.
+   Preflight verification: 1,406 ordinary tests passed / 48 skipped, focused
+   checks 46/46 and 1,774 payload hashes verified. No new paid or Docker campaign.
+   A private authored 12+12 microtask corpus now exists outside the checkout
+   (TECH-162), with 75 cases and 72 isolated grader trials: 24 references passed,
+   24 mutants and 24 stubs rejected. This is not an Agent/model campaign;
+   independent review and paid runner binding remain pending. Corpus content is
+   intentionally not in product Git history. Full task-workspace integration
+   now passes 24/24 (TECH-163): real read/fail/write/retest/final/hidden-grade
+   workflow, 144 scripted responses, no paid calls. This is not model efficacy.
+   Snapshot-test verification: 1,407 ordinary tests passed / 51 skipped;
+   explicit Docker/focused checks 44/44 and 3,501 payload hashes verified.
+   The frozen hosted execution mechanism is now connected (TECH-164), including
+   explicit receipt acknowledgement, exclusive start, per-trial durability and
+   training/sealed win/tie/loss reports. A real Docker fixture ran 48 trials /
+   96 fake model calls, with 24 ties and no promotion. Actual provider/counter
+   validation, corpus review, intervention selection and paid approval remain
+   open; no paid effectiveness result exists.
+   Runner regression: 1,423 ordinary tests passed / 52 skipped; final focused
+   checks 36 passed / one separately executed Docker skip. All 1,249 retained
+   payload hashes and the 48 model journals/trial receipts were verified.
+
+</details>
 
 Details and historical evidence are in the
 [implementation ledger](../architecture/implementation-ledger.md) and

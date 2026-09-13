@@ -74,7 +74,8 @@ def main():
             max_steps=config["max_calls"],
             max_provider_calls=config["max_calls"],
             max_new_tokens=config["max_output_tokens"],
-            allowed_tools=["read_file", "write_file", "patch_file", "list_files"],
+            allowed_tools=["read_file", "write_file", "patch_file", "list_files"]
+            + (["run_tests"] if config.get("enable_tests", False) else []),
             feature_flags={"skills": config.get("enable_skills", False)},
             skill_roots={"workspace": source / "skills"},
         )
@@ -98,6 +99,19 @@ def main():
             "prefix_excerpt": agent.prefix[:2048],
             "active_skills": [skill.qualified_id for skill in agent.active_skills],
         }
+        if config.get("enable_tests", False):
+            from repoagent.test_verification import refreshed_verifications
+
+            names = [
+                row["name"]
+                for row in agent.session["history"]
+                if row.get("role") == "tool"
+            ]
+            result["tool_names"] = names[:100]
+            result["tool_names_truncated"] = len(names) > 100
+            result["test_verifications"] = refreshed_verifications(
+                agent.current_task_state.test_verifications, task_root
+            )
         assert Path(repoagent.__file__).resolve().is_relative_to(source)
     if "channel_source" in config:
         result = {"worker_result": result}

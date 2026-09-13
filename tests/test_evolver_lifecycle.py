@@ -58,7 +58,10 @@ def model_factory():
     not os.environ.get("REPOAGENT_TEST_DOCKER"),
     reason="opt-in Docker lifecycle integration",
 )
-def test_search_sealed_approval_execute_and_rollback(source_repository, tmp_path):
+@pytest.mark.parametrize("paired_sealed", [False, True])
+def test_search_sealed_approval_execute_and_rollback(
+    source_repository, tmp_path, paired_sealed
+):
     root, proposal, evolver = source_repository
 
     def evaluator(task):
@@ -114,7 +117,9 @@ def test_search_sealed_approval_execute_and_rollback(source_repository, tmp_path
         limits=SearchLimits(max_rounds=1),
     )
     sealed = SnapshotSealedBackend(
-        root, evaluator(_task(task_id="hidden", model_mode="host", responses=()))
+        root,
+        evaluator(_task(task_id="hidden", model_mode="host", responses=())),
+        baseline_commit=proposal.manifest.base_commit if paired_sealed else None,
     )
     vault = SealedEvaluationVault(
         tmp_path / "sealed",
@@ -128,10 +133,12 @@ def test_search_sealed_approval_execute_and_rollback(source_repository, tmp_path
         select_finalist=lambda state: state["qualified_candidates"][0],
         vault=vault,
         sealed_backend=sealed,
-        sealed_cost_limit_usd=1,
+        sealed_cost_limit_usd=2 if paired_sealed else 1,
     )
     assert prepared["status"] == "awaiting_human_approval"
     assert prepared["sealed"]["passed"]
+    if paired_sealed:
+        assert prepared["sealed"]["comparison"] == {"wins": 1, "ties": 0, "losses": 0}
     candidate = prepared["search"]["qualified_candidates"][0]
 
     control_receipt = json.loads(

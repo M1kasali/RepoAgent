@@ -2,9 +2,18 @@
 
 `RepoAgent` 是一个面向多轮代码仓库任务的本地 coding-agent runtime。它把模型接入、任务调度、上下文与长期记忆、受约束工具、恢复、链路追踪、评测和受控策略演进放在同一套可审计运行时中。
 
-它不是用来和 Claude Code、Codex 比拼模型本身，而是把 coding agent 在长任务中的工程问题做成可测试基础设施：同一 Turn 可从 CLI、TUI、channel 或 cron 进入；工具调用经过权限和隔离边界；每次执行保留可复核证据；策略候选只有通过 sealed 评测和人工确认后才能激活。
+它围绕 coding agent 的长任务执行组织工程能力：同一 Turn 可从 CLI、TUI、channel 或 cron 进入；工具调用经过权限与执行策略检查；运行过程保留可复核证据；受控策略演进提供候选评测、封闭验证、人工确认和回滚流程。
 
 内部 Python 包、CLI 和新配置统一使用 `repoagent` / `REPOAGENT_*`。旧版 `.pico/` 状态目录和 `PICO_*` 环境变量仍可读取，新的工作区只会创建 `.repoagent/`。
+
+## 当前交付状态
+
+当前约定范围的实现已进入收尾：Runtime、模型与成本、工具与沙箱、上下文与本地记忆、Skills/MCP、追踪、Subagent、受控 Evolver，以及 CLI/TUI/RPC/目录 Gateway 均已有实现。具体范围和限制见[主线状态](docs/roadmaps/mainline-status.md)，不等于所有上游功能完全等价或已达到生产级可靠性。
+
+- 最新本地回归：1,423 项通过、52 项条件跳过；另有单独执行的 Docker 集成测试。测试通过不等于真实模型效果提升。
+- Myna 未接入；现有 SQLite 记忆不是 Myna 的替代实现。其他平台扩展、完整 Polyglot 和真实效果实验暂缓，不阻塞这一版使用。
+- 包版本仍为 `0.1.1`；当前源码包含旧 `v0.1.1` 标签之后的改动，并非新正式发布。
+- 原项目的性能、成本、记忆和自进化指标不能作为 RepoAgent 自己的实测结果。
 
 ## 适合做什么
 
@@ -47,10 +56,11 @@ pip install -e .
 ```dotenv
 REPOAGENT_PROVIDER=deepseek
 REPOAGENT_DEEPSEEK_API_KEY=your-api-key
-REPOAGENT_DEEPSEEK_MODEL=deepseek-v4-pro
+REPOAGENT_DEEPSEEK_MODEL=your-enabled-model
 ```
 
 Shell 环境变量优先于用户级配置；目标仓库自身的 `.env` 可以进一步覆盖配置。
+请将示例模型名替换为自己账号可用的模型；不要提交真实密钥或含密钥的配置文件。
 
 ## 快速开始
 
@@ -63,6 +73,20 @@ uv run repoagent
 ```bash
 repoagent --cwd /path/to/other-repo
 ```
+
+`uv sync` 安装在项目虚拟环境中，不会自动创建全局命令。在项目目录使用
+`uv run repoagent --cwd /path/to/other-repo`；在其他目录使用已激活环境中的
+`repoagent`，或该虚拟环境下可执行文件的绝对路径。
+
+普通模型请求会消耗所配置服务的额度。默认执行后端是 `direct`，工具以当前
+用户权限在宿主机运行，不会自动启用 Docker。需要隔离执行时，应准备本地镜像并显式选择：
+
+```bash
+uv run repoagent --cwd /path/to/other-repo --approval ask \
+  --sandbox-backend docker-persistent --require-isolation
+```
+
+审批不是沙箱；Docker 模式也不承诺多租户安全。建议在可回滚的工作区使用。
 
 无需模型密钥即可运行完整的本地 runtime-contract demo：
 
@@ -207,6 +231,8 @@ repoagent --memory-backend sqlite --memory-track personal "项目部署区域是
 - [迁移指南](docs/migration.md)
 - [威胁模型](docs/security/threat-model.md)
 - [发布与评测证据](docs/release.md)
+- [主线交付状态与限制](docs/roadmaps/mainline-status.md)
+- [Evolver 与实验入口](docs/architecture/evolver-workflow.md)
 
 代码编辑工具 `patch_file` 优先精确匹配，找不到时才尝试逐行忽略首尾空白，
 不做字符级模糊替换。多处匹配必须显式传入 JSON 布尔值 `replace_all: true`；

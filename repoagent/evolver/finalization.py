@@ -74,6 +74,18 @@ def finalize_search(
             "budget_usd": max_estimated_cost_usd,
             "backend": backend.descriptor(repo_root),
         }
+        paired_sealed = plan["backend"].get("kind") == "snapshot-sealed-paired/v1"
+        if paired_sealed:
+            baseline = {
+                "commit_sha": state["base_commit"],
+                "tree_sha": _git(
+                    repo_root, "rev-parse", state["base_commit"] + "^{tree}"
+                ),
+            }
+            if plan["backend"].get("baseline") != baseline:
+                raise CandidateEvaluationError(
+                    "sealed baseline differs from search origin"
+                )
 
         def record(kind, payload):
             return evolver.ledger._append_protocol(
@@ -106,7 +118,12 @@ def finalize_search(
             if not isinstance(rows, list) or len(rows) != len(expected):
                 raise CandidateEvaluationError("sealed measurements incomplete")
             seen, cost = set(), 0.0
-            for row in rows:
+            comparison = {"wins": 0, "ties": 0, "losses": 0}
+            for index, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    raise CandidateEvaluationError(
+                        "sealed measurement must be an object"
+                    )
                 task = row.get("task_id")
                 amount = row.get("estimated_cost_usd")
                 if (
@@ -122,6 +139,58 @@ def finalize_search(
                     )
                 seen.add(task)
                 cost += amount
+                if paired_sealed:
+                    if task != vault._sealed_task_ids[index]:
+                        raise CandidateEvaluationError(
+                            "sealed paired task order changed"
+                        )
+                    sources = {
+                        "baseline": baseline,
+                        "candidate": {
+                            "commit_sha": commit,
+                            "tree_sha": _git(
+                                repo_root, "rev-parse", commit + "^{tree}"
+                            ),
+                        },
+                    }
+                    arms = row.get("arms")
+                    order = (
+                        ["baseline", "candidate"]
+                        if index % 2 == 0
+                        else ["candidate", "baseline"]
+                    )
+                    if (
+                        not isinstance(arms, dict)
+                        or set(arms) != set(sources)
+                        or row.get("execution_order") != order
+                    ):
+                        raise CandidateEvaluationError("sealed paired arms incomplete")
+                    for arm, source in sources.items():
+                        value = arms[arm]
+                        price = (
+                            value.get("estimated_cost_usd")
+                            if isinstance(value, dict)
+                            else None
+                        )
+                        if (
+                            not isinstance(value, dict)
+                            or value.get("source") != source
+                            or type(value.get("passed")) is not bool
+                            or type(price) not in {int, float}
+                            or not math.isfinite(price)
+                            or price < 0
+                        ):
+                            raise CandidateEvaluationError(
+                                "sealed paired arm invalid or unpriced"
+                            )
+                    if row["passed"] != arms["candidate"]["passed"] or amount != sum(
+                        a["estimated_cost_usd"] for a in arms.values()
+                    ):
+                        raise CandidateEvaluationError("sealed paired summary mismatch")
+                    delta = int(arms["candidate"]["passed"]) - int(
+                        arms["baseline"]["passed"]
+                    )
+                    comparison[{1: "wins", 0: "ties", -1: "losses"}[delta]] += 1
             if cost > max_estimated_cost_usd:
                 raise CandidateEvaluationError("sealed reported cost exceeded budget")
             if _git(repo_root, "rev-parse", candidate_ref(candidate_id)) != commit:
@@ -132,6 +201,13 @@ def finalize_search(
                 "passed": all(row["passed"] for row in rows),
                 "estimated_cost_usd": cost,
             }
+            if paired_sealed:
+                result["comparison"] = comparison
+                result["passed"] = (
+                    result["passed"]
+                    and comparison["wins"] > 0
+                    and comparison["losses"] == 0
+                )
             record("sealed.completed", result)
             return result
         except BaseException as exc:

@@ -29,6 +29,7 @@ from .measurements import PairedMeasurement
 from .paired_execution import DockerPairedCheckEvaluator, EvolutionRunBudget
 from .model_budget import BudgetedEvaluationClient, EvaluationBudgetError, EvaluationModelLimits
 from .agent_snapshot import AgentSnapshotTask, ScriptedAgentSnapshotEvaluator
+from .behavior_grading import BehaviorCheck
 from .hosted_snapshot import HostedAgentSnapshotEvaluator
 from .search import SearchLimits
 from .sealed_snapshot import SnapshotSealedBackend
@@ -44,6 +45,7 @@ from .sealed import (
 from .workspace import CandidateWorkspaceError, GitCandidateWorkspace
 
 __all__ = [
+    "BehaviorCheck",
     "ActivationError",
     "ActivationRegistry",
     "ActiveStrategy",

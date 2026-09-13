@@ -1,11 +1,16 @@
 # RepoAgent Harness Implementation Plan
 
-> Status: active
+> Status: current implementation scope closed; effects campaigns and deferred integrations paused
 > Started: 2026-08-24
 > Target: implement a complete production-oriented Agent Harness in RepoAgent while preserving RepoAgent's identity, interfaces, history, and evidence
 > Technical record: [`docs/architecture/implementation-ledger.md`](../architecture/implementation-ledger.md)
 
 ## 1. Purpose
+
+Closeout decision (2026-09-13, TECH-165): ship the currently agreed implementation
+scope without expanding evaluation infrastructure. Unchecked effect-campaign,
+formal-release and deferred-integration items remain explicitly open; they are
+not a requirement to keep developing before this iteration can be delivered.
 
 This document answers four questions:
 
@@ -316,6 +321,38 @@ and further paid campaigns are paused; they do not block mainline delivery.
 - [x] `M5-01h` Finalize literal-secret stream filtering on confirmed normal
   completion, retaining exact-match redaction and discarding abnormal tails
   (TECH-156). Verify ordinary suffix integrity under inherited secret variables.
+- [x] `M5-01i` Run nine opt-in Evolver/Skills integration tests in real Docker
+  with retained workspaces and receipts (TECH-158). Scripted marker-based gains
+  are functional checks, not model-quality improvements.
+- [x] `M5-01j` Add behavioral grading and sealed baseline comparison for
+  coding-effectiveness acceptance; preserve existing exact-file contracts.
+- [x] `M5-01j1` Add optional host-compared JSON behavioral probes in fresh
+  isolated containers while preserving exact-file contracts (TECH-159).
+- [x] `M5-01j2` Add same-task sealed baseline/finalist comparison without
+  leaking held-out results to candidate generation or selection (TECH-160).
+- [ ] `M5-01k` Freeze separate Skills/prompt experiments, held-out tasks and
+  approved provider budgets before running live effectiveness campaigns.
+- [x] `M5-01k1` Add offline fixed-pair pilot preflight with private external
+  inputs, disjoint family checks, source/intervention bounds, full two-arm
+  reservations and re-verification (TECH-161); no inference authorization.
+- [ ] `M5-01k2` Author/review a real 12+12 corpus and separately select the
+  Skills and prompt interventions; synthetic preflight fixtures do not count.
+- [x] `M5-01k2a` Author an external 12+12 engineering microtask corpus and
+  self-audit 24 references, 24 targeted mutants and 24 stubs in Docker
+  (TECH-162). This does not establish Agent effectiveness or independent review.
+- [ ] `M5-01k2b` Independently review corpus contracts/coverage and select
+  separate Skills/prompt interventions without using sealed results to tune.
+- [x] `M5-01k2c` Run all 24 private task workspaces through the pinned Runtime,
+  with opt-in visible tests, failure/repair/retest, fresh evidence and hidden
+  grading (TECH-163). Fixed supplied answers are integration, not model efficacy.
+- [ ] `M5-01k3` Bind frozen protocol to a live runner with reviewed model,
+  counter, image, pricing and explicit budget approval before paid execution.
+- [x] `M5-01k3a` Connect a one-shot hosted pilot runner and CLI to frozen
+  preflight, typed budgeted gateways, durable trial receipts and split-level
+  comparisons; test the full Docker matrix using a fake provider (TECH-164).
+- [ ] `M5-01k3b` Validate the actual provider factory/full-request counter,
+  freeze reviewed interventions/corpus and obtain an explicit real spending
+  decision. The execution mechanism alone does not close M5-01k3.
 - [x] `M6-01` Harden coding-file edits for LF/CRLF equivalence without rewriting
   untouched mixed endings; retain exact unique-match checks and verify the full
   read/edit/check tool workflow (TECH-123). No fuzzy patching or coding-quality
@@ -676,19 +713,17 @@ For each TODO:
 
 ## 9. Immediate Next Slice
 
-Current status and explicit deferrals are summarized in
-[Mainline Status](mainline-status.md). Original Myna and further platform
-adaptation are paused. SQLite and reconciled documents were committed as
-252c157 after full regression. Selective context reduction followed in 52a3418
-(TECH-139). Test-result semantics and conditional guidance followed in 65972a4
-and 6e1500e. Native prefixes and live budget feedback followed in e5ac7db and
-dc432b3. M6-09 passed with unchanged limits and normal completion (TECH-148).
-Clean candidate 6cd7ade passed package installation and 12/12 scripted runtime
-contracts, with reverified evidence indexed locally (TECH-149). Next scope
-M5-01 paired acceptance and make a deliberate formal version/tag decision.
-Do not start a full Polyglot campaign or
-substitute unrelated memory integrations. Module-level paired effectiveness
-measurements remain separate work under M5-01.
+Current scope is implementation closeout, not another acceptance module.
+[Mainline Status](mainline-status.md) is the delivery summary; README is the
+startup guide. Keep existing runtime behavior, tests and local receipts, and
+record known limits without claiming complete parity or measured effectiveness.
+
+Real effect experiments are paused until separately requested. At that point,
+combine actual model/counter checks, corpus/intervention review and explicit
+budget approval into one start check for a bounded comparison. Do not silently
+restart the M5-01 work queue, expand platforms or start a full Polyglot campaign.
+Myna and other deferred integrations remain deferred. A formal release/tag is
+also a separate decision, not an automatic action in this closeout.
 
 ## 10. Historical Delivery Notes
 
