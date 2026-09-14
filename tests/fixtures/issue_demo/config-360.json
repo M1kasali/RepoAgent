@@ -1,0 +1,7 @@
+{
+  "image": "python@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17",
+  "pythonpath": "src",
+  "mutable_paths": ["src/dotenv/main.py"],
+  "failure_marker": "ISSUE_360_BINDINGS_CORRUPTED",
+  "probe": "from pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom dotenv import set_key, dotenv_values\nwith TemporaryDirectory() as directory:\n    path = Path(directory) / 'case.env'\n    for original in ['TEST=ABCD', 'TEST=ABCD\\n', 'TEST=ABCD\\n# comment']:\n        path.write_text(original)\n        set_key(str(path), 'FOO', '1234')\n        actual = dict(dotenv_values(str(path)))\n        print(repr(original), repr(path.read_text()), actual)\n        assert actual == {'TEST': 'ABCD', 'FOO': '1234'}, 'ISSUE_360_BINDINGS_CORRUPTED'\n    path.write_text('')\n    set_key(str(path), 'FOO', '1234')\n    assert dict(dotenv_values(str(path))) == {'FOO': '1234'}, 'EMPTY_FILE_REGRESSION'\n    set_key(str(path), 'FOO', 'updated')\n    assert dict(dotenv_values(str(path))) == {'FOO': 'updated'}, 'UPDATE_REGRESSION'\nprint('All five maintainer checks passed')\n"
+}

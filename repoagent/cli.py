@@ -577,6 +577,7 @@ PRODUCT_COMMANDS = frozenset(
         "eval",
         "evolver",
         "gateway",
+        "issue",
         "mcp",
         "provider",
         "sandbox",
@@ -594,6 +595,8 @@ def build_product_parser():
         description="Operate and inspect the RepoAgent runtime.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    from .issue_agent.cli import add_parser as add_issue_parser
+    add_issue_parser(commands)
 
     doctor = commands.add_parser("doctor", help="Check the local runtime environment.")
     doctor.add_argument("--cwd", default=".")
@@ -696,7 +699,10 @@ def build_product_parser():
 def run_product_command(argv):
     args = build_product_parser().parse_args(argv)
     try:
-        if args.command == "doctor":
+        if args.command == "issue":
+            from .issue_agent.cli import run as run_issue
+            payload = run_issue(args)
+        elif args.command == "doctor":
             payload = doctor_report(args.cwd)
         elif args.command == "mcp":
             from .evaluation.container import wsl_windows_path

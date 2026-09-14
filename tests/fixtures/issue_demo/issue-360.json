@@ -1,0 +1,5 @@
+{
+  "html_url": "https://github.com/theskumar/python-dotenv/issues/360",
+  "title": "Adding a variable to an env file without a final newline corrupts the existing binding",
+  "body": "Historical report, behavior-only snapshot: create a file whose exact contents are TEST=ABCD, without a trailing newline. Call dotenv.set_key(path, 'FOO', '1234'). The new binding is concatenated to the old one. Expected: dotenv_values should return TEST with value ABCD and FOO with value 1234 independently. Investigate this behavior, preserve existing supported behavior, and include a regression check. The environment supports Python source imports through PYTHONPATH=src."
+}

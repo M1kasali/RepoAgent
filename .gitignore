@@ -46,14 +46,17 @@ docs/architecture/*
 !docs/architecture/current-architecture.md
 !docs/architecture/evolver-workflow.md
 !docs/architecture/busy-policy.md
+!docs/architecture/issue-maintainer-demo.md
 !docs/architecture/polyglot-convergence-diagnosis-20260907.md
 !docs/architecture/polyglot-input-contract-audit-20260910.md
 !docs/roadmaps/
 docs/roadmaps/*
 !docs/roadmaps/agent-harness-implementation-plan.md
 !docs/roadmaps/mainline-status.md
+!docs/roadmaps/issue-maintainer-demo-plan.md
 !docs/migration.md
 !docs/release.md
+!docs/issue-maintainer-demo.md
 !docs/security/
 docs/security/*
 !docs/security/threat-model.md
