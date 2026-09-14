@@ -4,6 +4,48 @@ Reconciled 2026-09-13 against the implementation ledger and current roadmap.
 This is a delivery-status reconciliation, not a new full-source parity audit.
 Implemented behavior and measured effectiveness are separate claims.
 
+## Original-Protocol Follow-Up (2026-09-14)
+
+The later user-requested comparison reopened specific compatibility work; it
+does not retroactively make the September 13 closeout a full parity audit.
+
+- [x] Add real INJECT/INTERRUPT scheduling, mailbox fallback and durable merged
+  completion; connect injection to the Agent's next model boundary. See
+  [Busy policies](../architecture/busy-policy.md).
+- [x] Pass original R0 correctness predicates for 10,000 requests on each subject
+  and independently verify 10,000 native journals (80 merged). Native state used
+  tmpfs; ordinary-disk RunStore exceeded the original bulk timeout and remains
+  a separate performance issue, not erased by this successful correctness run.
+- [x] Support explicit, frozen benchmark mutation targets without changing
+  product strategy allowlists; verify native materialization with the original
+  small-real grader (comment-only candidate, not a model improvement result).
+- [x] Run the original one-round live evolution and sealed validation; replay
+  its sole candidate through native search and original scoring. Both yield
+  training 40% -> 60%, test 25% -> 50%; 56 trial records match (TECH-171).
+- [x] Add opt-in original single-module repair and focused-Fisher evaluation
+  APIs; verify 1000 policy cases, 1000 Fisher tables and 52 original scoring
+  records through native proposer/evaluator replay (TECH-172).
+- [x] Connect automatic cold-start, lexicographic WHY selection, stratified
+  sentinels and bounded multi-round per-parent training search (TECH-173).
+- [x] Connect focused-search output to frozen, one-way sealed-retention
+  finalization and JSON/Markdown reports (TECH-174). Full original-grader replay
+  performs 68 scoring trials; one WHY/candidate per round remains the scope,
+  without wider tree/archive or full orchestrator parity claims.
+- Native test results above are replay, not an independent blind sealed campaign;
+  original significance credit is false.
+- [x] Resolve strict provider identity with the user-approved V4.1-Flash scope:
+  request and raw response both use `deepseek-flash`. Official documentation
+  confirms the retired v4 name redirects to V4.1; no identity guard was disabled.
+- [x] Complete one fresh native live small-real evolution (TECH-175): one paid
+  call, 68 original-grader trials, training 40% -> 60%, test 25% -> 50%, z=1,
+  no two-sigma credit or activation. The original test split is already known;
+  this is live functional acceptance, not a fresh blind benchmark campaign.
+- [ ] Complete remaining same-protocol live/context/tracing/evolution comparisons.
+  No historical resume numbers are adopted as RepoAgent measurements.
+
+Latest full regression including focused sealed finalization:
+1,511 passed, 52 conditional skips, six existing warnings (TECH-174).
+
 ## Delivery Decision
 
 The currently agreed implementation scope is closed for this iteration.

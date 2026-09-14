@@ -1,11 +1,37 @@
 # RepoAgent Harness Implementation Plan
 
-> Status: current implementation scope closed; effects campaigns and deferred integrations paused
+> Status: September 13 delivery scope closed; targeted original-protocol compatibility follow-up active
 > Started: 2026-08-24
 > Target: implement a complete production-oriented Agent Harness in RepoAgent while preserving RepoAgent's identity, interfaces, history, and evidence
 > Technical record: [`docs/architecture/implementation-ledger.md`](../architecture/implementation-ledger.md)
 
 ## 1. Purpose
+
+Follow-up requested 2026-09-14:
+
+- [x] Implement scheduler INJECT/INTERRUPT, fallback, cancellation ownership and
+  real Agent consumption. Verify original R0 and independent native journals.
+- [ ] Investigate ordinary-disk state persistence exceeding R0's bulk timeout;
+  the passing tmpfs run is correctness evidence, not disk throughput evidence.
+- [x] Support the original evolution benchmark's explicit mutation target through
+  a frozen, validated product contract, not an evaluation-only whitelist bypass.
+  Native materialization and the original grader are integrated (TECH-170).
+- [x] Run original live small-real search/sealed validation and verify native
+  shared-candidate replay against all 56 train/test records (TECH-171).
+- [x] Add original single-module generation and focused-Fisher policy as opt-in
+  native APIs; pass differential policy and recorded-response replay (TECH-172).
+- [x] Connect automatic cold-start/WHY selection, rotated sentinels and bounded
+  per-parent training search with durable budget reservations (TECH-173).
+- [x] Connect focused training search to sealed-retention finalization and
+  durable JSON/Markdown reports (TECH-174); one
+  WHY/candidate per round remains the supported scope, not the wider archive/tree.
+- [x] Run one fresh native end-to-end small-real acceptance with user-approved
+  V4.1-Flash, original grading and complete model receipts (TECH-175). No
+  significant-gain, historical-version equivalence or full upstream parity claim.
+- [ ] Finish compatible original-script effect campaigns, preserving all original
+  gates and recording external model-identity constraints.
+
+Implemented design and current evidence: [Busy policies](../architecture/busy-policy.md).
 
 Closeout decision (2026-09-13, TECH-165): ship the currently agreed implementation
 scope without expanding evaluation infrastructure. Unchecked effect-campaign,

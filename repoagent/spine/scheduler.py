@@ -7,7 +7,7 @@ from typing import Protocol
 
 from ._barrier import finish_barrier
 from .runner import Drain, Emit, RunnerEvent, TurnOutcome
-from .turn import TurnRequest, WorkClass
+from .turn import BusyPolicy, TurnRequest, WorkClass
 
 
 class SchedulerDrainingError(RuntimeError):
@@ -22,6 +22,10 @@ class TurnExecutor(Protocol):
     ) -> TurnOutcome: ...
 
     async def cancel(self, request: TurnRequest, reason: str) -> TurnOutcome: ...
+
+    async def complete_injected(
+        self, request: TurnRequest, host_outcome: TurnOutcome
+    ) -> TurnOutcome: ...
 
 
 EventSink = Callable[[RunnerEvent], Awaitable[None]]
@@ -48,6 +52,7 @@ class _QueuedTurn:
         self.future = future
         self.cancel_requested = asyncio.Event()
         self.events: list[RunnerEvent] = []
+        self.merged: list[_QueuedTurn] = []
 
 
 class _Lane:
@@ -61,6 +66,7 @@ class _Lane:
         self._pools = pools
         self._sink = sink
         self._pending: deque[_QueuedTurn] = deque()
+        self._mailbox: deque[_QueuedTurn] = deque()
         self._worker: asyncio.Task | None = None
         self._running: _QueuedTurn | None = None
         self._running_task: asyncio.Task | None = None
@@ -69,7 +75,15 @@ class _Lane:
     def submit(self, request: TurnRequest) -> tuple[asyncio.Future, _QueuedTurn]:
         loop = asyncio.get_running_loop()
         item = _QueuedTurn(request, loop.create_future())
-        self._pending.append(item)
+        running = self._running_task is not None and not self._running_task.done()
+        if request.busy is BusyPolicy.INJECT and running:
+            self._mailbox.append(item)
+            return item.future, item
+        if request.busy is BusyPolicy.INTERRUPT and running:
+            self.cancel_running()
+            self._pending.appendleft(item)
+        else:
+            self._pending.append(item)
         if self._worker is None or self._worker.done():
             self._worker = loop.create_task(self._run_worker())
         return item.future, item
@@ -77,11 +91,12 @@ class _Lane:
     def cancel(self, item: _QueuedTurn) -> None:
         if item.future.done():
             return
-        for index, queued in enumerate(self._pending):
-            if queued is item:
-                del self._pending[index]
-                self._schedule_cancel(item, "cancelled while queued")
-                return
+        for queue in (self._pending, self._mailbox):
+            for index, queued in enumerate(queue):
+                if queued is item:
+                    del queue[index]
+                    self._schedule_cancel(item, "cancelled while queued")
+                    return
         if self._running is item:
             item.cancel_requested.set()
 
@@ -93,13 +108,14 @@ class _Lane:
 
     def drain_pending(self) -> int:
         count = 0
-        while self._pending:
-            self._schedule_cancel(self._pending.popleft(), "cancelled during shutdown")
-            count += 1
+        for queue in (self._pending, self._mailbox):
+            while queue:
+                self._schedule_cancel(queue.popleft(), "cancelled during shutdown")
+                count += 1
         return count
 
     def has_work(self) -> bool:
-        return self._running is not None or bool(self._pending) or bool(self._finalizers)
+        return self._running is not None or bool(self._pending) or bool(self._mailbox) or bool(self._finalizers)
 
     def running_future(self) -> asyncio.Future | None:
         return self._running.future if self._running is not None else None
@@ -134,14 +150,43 @@ class _Lane:
             try:
                 outcome = await self._running_task
             except Exception as exc:
+                for merged in item.merged:
+                    if not merged.future.done():
+                        merged.future.set_exception(exc)
                 if not item.future.done():
                     item.future.set_exception(exc)
             else:
+                for merged in item.merged:
+                    try:
+                        result = await self._executor.complete_injected(merged.request, outcome)
+                    except Exception as exc:
+                        merged.future.set_exception(exc)
+                    else:
+                        merged.future.set_result(result)
                 if not item.future.done():
                     item.future.set_result(outcome)
             finally:
+                # Requests not consumed by the runner keep their existing handles.
+                self._pending.extend(self._mailbox)
+                self._mailbox.clear()
                 self._running_task = None
                 self._running = None
+
+    def _drain_for(self, item: _QueuedTurn) -> Drain:
+        def drain() -> list[TurnRequest]:
+            if (
+                self._running is not item
+                or item.cancel_requested.is_set()
+                or self._running_task is None
+                or self._running_task.done()
+            ):
+                return []
+            merged = list(self._mailbox)
+            self._mailbox.clear()
+            item.merged.extend(merged)
+            return [entry.request for entry in merged]
+
+        return drain
 
     async def _run_item(self, item: _QueuedTurn) -> TurnOutcome:
         semaphore = self._pools.for_class(item.request.work_class)
@@ -172,7 +217,7 @@ class _Lane:
 
             run_task = asyncio.create_task(
                 self._executor.run(
-                    item.request, self._emit_for(item), lambda: []
+                    item.request, self._emit_for(item), self._drain_for(item)
                 )
             )
             done, _pending = await asyncio.wait(
@@ -258,6 +303,10 @@ class Scheduler:
             raise SchedulerDrainingError(
                 "scheduler is draining; new turns are not accepted"
             )
+        if request.busy is BusyPolicy.INJECT and not callable(
+            getattr(self._executor, "complete_injected", None)
+        ):
+            raise TypeError("INJECT requires executor.complete_injected for terminal ownership")
         turn_id = str(request.turn_id)
         existing = self._handles_by_turn_id.get(turn_id)
         if existing is not None:

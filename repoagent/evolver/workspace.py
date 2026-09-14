@@ -38,6 +38,16 @@ def candidate_ref(candidate_id):
     return f"refs/repoagent/candidates/{candidate_id}"
 
 
+def verify_benchmark_target(repo_root, target):
+    """Verify scope against immutable baseline objects, without loading the grader."""
+    if _git(repo_root, "rev-parse", target.base_commit + "^{commit}") != target.base_commit:
+        raise CandidateWorkspaceError("benchmark target base is not an exact commit")
+    for path in (*target.mutable_paths, *target.protected_paths):
+        entry = _git_bytes(repo_root, "ls-tree", "-z", target.base_commit, "--", path)
+        if entry.split(b" ", 1)[0] not in {b"100644", b"100755"}:
+            raise CandidateWorkspaceError("benchmark target paths must be tracked regular files")
+
+
 def verify_candidate_commit(repo_root, proposal, commit_sha):
     """Check immutable Git objects without importing or executing candidate code."""
     if not isinstance(proposal, CandidateProposal):
@@ -47,6 +57,8 @@ def verify_candidate_commit(repo_root, proposal, commit_sha):
     if _git(repo_root, "rev-parse", f"{commit_sha}^{{commit}}") != commit_sha:
         raise CandidateWorkspaceError("candidate identity is not a commit")
     base = proposal.manifest.base_commit
+    if proposal.manifest.benchmark_target is not None:
+        verify_benchmark_target(repo_root, proposal.manifest.benchmark_target)
     if _git(repo_root, "show", "-s", "--format=%P", commit_sha).split() != [base]:
         raise CandidateWorkspaceError("candidate commit has an unexpected parent")
     paths = set(_git_bytes(
@@ -85,6 +97,8 @@ class GitCandidateWorkspace:
         self.commit_sha = ""
 
     def __enter__(self):
+        if self.proposal.manifest.benchmark_target is not None:
+            verify_benchmark_target(self.repo_root, self.proposal.manifest.benchmark_target)
         resolved = _git(self.repo_root, "rev-parse", self.proposal.manifest.base_commit)
         if resolved != self.proposal.manifest.base_commit:
             raise CandidateWorkspaceError("candidate base commit must be an exact commit SHA")

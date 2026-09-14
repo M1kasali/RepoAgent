@@ -48,6 +48,7 @@ class TurnRuntime:
                 "request": {
                     "text": request.text,
                     "work_class": request.work_class.value,
+                    "busy": request.busy.value,
                 },
             }),
             trace_context=request.trace_context.for_stage("scheduler"),
@@ -189,6 +190,38 @@ class TurnRuntime:
         self._accepted.pop(str(request.turn_id), None)
         return outcome
 
+    async def complete_injected(
+        self, request: TurnRequest, host_outcome: TurnOutcome
+    ) -> TurnOutcome:
+        """Persist a merged request's own terminal identity without billing twice."""
+        if (
+            request.session_id != host_outcome.session_id
+            or request.turn_id == host_outcome.turn_id
+            or not host_outcome.terminal
+            or self._accepted.get(str(request.turn_id)) != request
+        ):
+            raise ValueError("invalid injected request completion")
+        lifecycle = TurnLifecycle(request)
+        lifecycle.sequence = 1
+        lifecycle.transition(TurnState.RUNNING)
+        await self._record(
+            lifecycle, "turn.merged", {"host_turn_id": str(host_outcome.turn_id)},
+            self._snapshot(lifecycle),
+        )
+        lifecycle.transition(host_outcome.state)
+        outcome = TurnOutcome(
+            turn_id=request.turn_id, request_id=request.request_id,
+            session_id=request.session_id, state=host_outcome.state,
+            error=host_outcome.error,
+        )
+        await self._record(
+            lifecycle, "turn." + outcome.state.value,
+            {**outcome.to_dict(), "host_turn_id": str(host_outcome.turn_id)},
+            self._snapshot(lifecycle, outcome),
+        )
+        self._accepted.pop(str(request.turn_id), None)
+        return outcome
+
     async def _record(
         self,
         lifecycle: TurnLifecycle,
@@ -239,6 +272,7 @@ class TurnRuntime:
                 "request": {
                     "text": request.text,
                     "work_class": request.work_class.value,
+                    "busy": request.busy.value,
                 },
                 "outcome": outcome.to_dict() if outcome else None,
             }

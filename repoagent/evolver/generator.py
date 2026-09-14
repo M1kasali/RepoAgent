@@ -19,6 +19,7 @@ class CandidateGenerator:
         evidence,
         repository_reader,
         budget=None,
+        benchmark_target=None,
     ):
         evidence = tuple(evidence)
         if not evidence:
@@ -39,6 +40,7 @@ class CandidateGenerator:
             before=before,
             after=after,
             budget=budget,
+            benchmark_target=benchmark_target,
         )
         return CandidateProposal(manifest, after)
 

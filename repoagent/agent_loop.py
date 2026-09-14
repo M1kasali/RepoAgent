@@ -154,6 +154,7 @@ class AgentLoop:
         model_text_sink=None,
         cancellation_token: CancellationToken | None = None,
         deadline: float | None = None,
+        drain_messages=None,
     ):
         agent = self.agent
         if cancellation_token is not None:
@@ -571,6 +572,16 @@ class AgentLoop:
                 cancellation_token.raise_if_cancelled(
                     provider=type(agent.model_client).__name__
                 )
+            if attempts and drain_messages is not None:
+                for injected in drain_messages():
+                    text = agent.redact_text(injected.text)
+                    agent.record({
+                        "role": "user", "content": text, "created_at": now(),
+                        "turn_id": str(injected.turn_id),
+                        "host_turn_id": str(turn_request.turn_id),
+                    })
+                    if use_structured_history:
+                        provider_messages.append(ModelMessage(role="user", content=text))
             attempts += 1
             task_state.record_attempt()
             agent.run_store.write_task_state(task_state)

@@ -106,6 +106,8 @@ class ActivationRegistry:
 
     def activate(self, label, candidate_id, *, actor):
         label = EvolutionLabel(label)
+        if label is EvolutionLabel.BENCHMARK:
+            raise ActivationError("benchmark candidates cannot activate product strategies")
         events = self._candidate_events(candidate_id)
         created = [item for item in events if item["event_type"] == "candidate.created"]
         materialized = [

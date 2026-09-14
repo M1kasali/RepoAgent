@@ -6,7 +6,7 @@ from dataclasses import asdict
 from .contracts import (
     CandidateBudget,
     EvolutionLabel,
-    MUTATION_POLICIES,
+    mutation_policy,
     safe_candidate_path,
 )
 from .evaluation import payload_digest
@@ -14,10 +14,11 @@ from .generator import CandidateGenerator
 from .model_channel import ModelCallJournal
 from .model_proxy import HostModelProxy, _object, _reject_constant
 from .workspace import _git, _git_bytes
+from .module_repair import ModuleRepairError, ModuleRepairProtocol
 
 
 class ModelCandidateProposer:
-    """A single gateway budget spans all rounds; no shell execution or retries."""
+    """One gateway budget across rounds and optional bounded parse repairs."""
 
     def __init__(
         self,
@@ -30,16 +31,25 @@ class ModelCandidateProposer:
         client,
         journal_directory,
         candidate_budget=None,
+        benchmark_target=None,
+        repair_protocol=None,
     ):
         self.base = _git(repo_root, "rev-parse", base_commit + "^{commit}")
         self.label = EvolutionLabel(label)
+        self.benchmark_target = benchmark_target
+        policy = mutation_policy(self.label, benchmark_target)
+        if benchmark_target is not None:
+            from .workspace import verify_benchmark_target
+            if benchmark_target.base_commit != self.base:
+                raise ValueError("proposal benchmark target base changed")
+            verify_benchmark_target(repo_root, benchmark_target)
         self.budget = candidate_budget or CandidateBudget()
         paths = tuple(safe_candidate_path(path) for path in paths)
         if (
             not paths
             or len(set(paths)) != len(paths)
             or len(paths) > self.budget.max_files
-            or any(not MUTATION_POLICIES[self.label].allows(path) for path in paths)
+            or any(not policy.allows(path) for path in paths)
         ):
             raise ValueError("proposal source paths exceed mutation policy")
         self.before = {}
@@ -55,13 +65,22 @@ class ModelCandidateProposer:
         self.evidence = tuple(evidence)
         if not self.evidence:
             raise ValueError("proposal requires training failure evidence")
+        self.repair_protocol = repair_protocol
+        if repair_protocol is not None:
+            if (not isinstance(repair_protocol, ModuleRepairProtocol)
+                    or benchmark_target is None or self.label is not EvolutionLabel.BENCHMARK
+                    or set(self.before) != {repair_protocol.path}
+                    or not set(repair_protocol.task_ids) <= {e.task_id for e in self.evidence}):
+                raise ValueError("module repair requires a scoped benchmark and matching training evidence")
+            if not client.supports_structured_messages:
+                raise ValueError("module repair requires structured messages")
         self.client = client
         self.journal = ModelCallJournal(journal_directory, worker_root=repo_root)
         self.proxy = HostModelProxy(client, evidence_sink=self.journal)
         self.sequence = 0
 
     def descriptor(self):
-        return {
+        descriptor = {
             "kind": "model-candidate-proposer/v1",
             "base": self.base,
             "label": self.label.value,
@@ -73,10 +92,31 @@ class ModelCandidateProposer:
                 [e.to_dict() for e in self.evidence]
             ),
         }
+        if self.benchmark_target is not None:
+            descriptor["benchmark_target"] = self.benchmark_target.to_dict()
+        if self.repair_protocol is not None:
+            descriptor["repair_protocol"] = self.repair_protocol.descriptor()
+        return descriptor
 
     def __call__(self, context):
         if context["base_commit"] != self.base:
             raise ValueError("proposal baseline changed")
+        if self.repair_protocol is not None:
+            protocol = self.repair_protocol
+            messages = protocol.messages(self.before[protocol.path].decode("utf-8"))
+            for attempt in range(protocol.max_retries + 1):
+                text = self._call({"prompt": messages[-1]["content"], "messages": messages})
+                try:
+                    changed = protocol.parse(text)
+                    break
+                except ModuleRepairError as exc:
+                    self.journal({"status": "parse_failed", "attempt": attempt,
+                                  "error_type": type(exc).__name__})
+                    if attempt == protocol.max_retries:
+                        raise
+                    messages += [{"role": "assistant", "content": text},
+                                 {"role": "user", "content": protocol.repair_prompt(exc)}]
+            return self._candidate(changed)
         prompt = (
             "Propose a minimal source change for the training failures. Return only "
             'a JSON object {"files":{"allowed/path":"complete new file text"}}. '
@@ -95,20 +135,7 @@ class ModelCandidateProposer:
                 allow_nan=False,
             )
         )
-        response = self.proxy.dispatch(
-            json.dumps(
-                {
-                    "sequence": self.sequence,
-                    "request": {
-                        "prompt": prompt,
-                        "max_output_tokens": self.client.limits.max_output_tokens,
-                    },
-                },
-                allow_nan=False,
-            ).encode()
-        )
-        self.sequence += 1
-        text = json.loads(response)["result"]["text"]
+        text = self._call({"prompt": prompt})
         values = json.loads(
             text, object_pairs_hook=_object, parse_constant=_reject_constant
         )
@@ -118,7 +145,25 @@ class ModelCandidateProposer:
             or not isinstance(values["files"], dict)
         ):
             raise ValueError("proposal must contain only a files mapping")
-        changed = values["files"]
+        return self._candidate(values["files"])
+
+    def _call(self, request):
+        response = self.proxy.dispatch(
+            json.dumps(
+                {
+                    "sequence": self.sequence,
+                    "request": {
+                        **request,
+                        "max_output_tokens": self.client.limits.max_output_tokens,
+                    },
+                },
+                allow_nan=False,
+            ).encode()
+        )
+        self.sequence += 1
+        return json.loads(response)["result"]["text"]
+
+    def _candidate(self, changed):
         if (
             not changed
             or set(changed) - self.before.keys()
@@ -137,6 +182,7 @@ class ModelCandidateProposer:
             evidence=self.evidence,
             repository_reader=self.before.get,
             budget=self.budget,
+            benchmark_target=self.benchmark_target,
         )
         self.journal(
             {"status": "candidate_generated", "manifest": proposal.manifest.to_dict()}

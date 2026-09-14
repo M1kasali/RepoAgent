@@ -151,6 +151,38 @@ class ControlledEvolver:
 
         return run_search(self, repo_root, **options)
 
+    def search_focused(self, repo_root, **options):
+        """Run bounded module repair with per-parent frozen training baselines."""
+        from .focused_search import run_focused_search
+
+        return run_focused_search(self, repo_root, **options)
+
+    def finalize_focused_search(self, repo_root, **options):
+        from .focused_finalization import finalize_focused_search
+
+        return finalize_focused_search(self, repo_root, **options)
+
+    def prepare_focused_evolution(self, repo_root, *, search_options, vault, sealed_backend,
+                                  max_estimated_cost_usd=0.0):
+        """Freeze held-out evaluation before training; never activate candidates."""
+        from .focused_finalization import freeze_focused_sealed_plan
+        from .focused_fisher import FocusedFisherGate
+
+        options = dict(search_options)
+        options["tasks"] = tuple(options["tasks"])
+        if set(vault.training_task_ids) != {task.task_id for task in options["tasks"]}:
+            raise CandidateEvaluationError("sealed training split differs")
+        gate = options.get("gate") or FocusedFisherGate(k=2)
+        sealed_plan = freeze_focused_sealed_plan(repo_root, vault=vault, backend=sealed_backend,
+            k=gate.k, max_estimated_cost_usd=max_estimated_cost_usd)
+        if options.get("sealed_plan", sealed_plan) != sealed_plan:
+            raise CandidateEvaluationError("conflicting sealed plan")
+        options["sealed_plan"] = sealed_plan
+        training = self.search_focused(repo_root, **options)
+        result = self.finalize_focused_search(repo_root, run_id=options["run_id"],
+                                              vault=vault, backend=sealed_backend)
+        return {"training": training, "finalization": result}
+
     def finalize_search(self, repo_root, **options):
         from .finalization import finalize_search
 

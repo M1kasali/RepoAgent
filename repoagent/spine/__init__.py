@@ -6,6 +6,7 @@ from .runner import Drain, Emit, Text, TurnOutcome, TurnRunner, Usage
 from .runtime import TurnRuntime
 from .scheduler import Scheduler, SchedulerDrainingError, TurnHandle, WorkPools
 from .turn import (
+    BusyPolicy,
     LEGAL_TURN_TRANSITIONS,
     TERMINAL_TURN_STATES,
     IllegalTurnTransition,
@@ -16,6 +17,7 @@ from .turn import (
 )
 
 __all__ = [
+    "BusyPolicy",
     "Drain",
     "Emit",
     "EVENT_FORMAT_VERSION",

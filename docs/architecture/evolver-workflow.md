@@ -7,7 +7,231 @@ until separately requested; see [Mainline Status](../roadmaps/mainline-status.md
 
 ## Scope
 
-The opt-in isolated task Runtime now supports this complete path:
+### Explicit Benchmark Targets (2026-09-14)
+
+The original small-real subject is outside the product strategy allowlists.
+Use the separate `benchmark` label, not a tool-policy whitelist override:
+
+```python
+from repoagent.evolver import BenchmarkTarget
+
+target = BenchmarkTarget(
+    target_id="original-small-real",
+    base_commit=baseline_sha,
+    mutable_paths=("benchmarks/appworld/agent_cli.py",),
+    protected_paths=(
+        "benchmarks/appworld/evolve/grade.py",
+        "benchmarks/appworld/evolve/tasks.py",
+    ),
+)
+```
+
+Pass `benchmark_target=target` to `CandidateGenerator.generate` or
+`ModelCandidateProposer`, and independently to `ControlledEvolver.search`.
+The trusted caller declares this scope before generation. The model only
+returns replacement contents of its permitted source files; it cannot choose
+or widen scope. This is an API contract, not a CLI configuration feature.
+
+- Base commit and exact, non-overlapping file lists are immutable. Paths must
+  identify tracked regular files at the baseline; symlinks are rejected.
+- Scoped manifests use schema v2 and bind scope into the patch digest. Existing
+  strategy manifests retain their v1 representation and digest.
+- Search freezes scope in its persisted plan, rejects mismatched proposals and
+  refuses resume with a different scope. Existing Git verification rejects any
+  undeclared changed file, including grading and task files.
+- Benchmark candidates are evaluation-only and cannot activate product routes.
+  Existing prompt, skill, tool-policy and routing allowlists are unchanged.
+- Protected declarations do not themselves sandbox execution or pin an external
+  evaluator. The evaluator must retain its own isolation and grader integrity
+  checks; training-only evidence and sealed-test separation still apply.
+
+Integration evidence uses the original disposable subject and unchanged original
+grader: a comment-only candidate preserved 8/20 passing training trials and 4/10
+fully passing tasks. Zero model calls; sealed tests were not run. This verifies
+materialization/scorer compatibility, not learned improvement or completion of
+the original live evolution campaign.
+
+### Single-Module Repair and Focused Evaluation (2026-09-14)
+
+`ModuleRepairProtocol` adds the single fenced Python module protocol to
+`ModelCandidateProposer` via its optional `repair_protocol` argument. It only
+works with an explicit benchmark target, exactly one allowed source path,
+structured-message support, and failure task IDs covered by the caller's
+training evidence. Declare the public function names, WHY description and
+training failure records; no task corpus or grader is imported by the proposer.
+
+The system/user messages match the original small-real designer. Up to two
+parse repairs append the previous response and the original repair instruction.
+All attempts share the existing HostModelProxy, model call/token/cost budget and
+journal. Provider errors, budget denials and model identity mismatches are not
+parse-retry exceptions. The old JSON protocol remains the default.
+
+For original limits, configure the gateway for 8192 output tokens and at least
+three admitted calls, and explicitly set CandidateBudget.max_changed_bytes to
+32768. The parser checks one code fence, UTF-8 byte cap, syntax and public names.
+Like the original, it accepts surrounding prose and does not enforce signatures
+or imports itself. Those prompt requirements need grader enforcement; parsing
+is not sandboxing.
+
+`FocusedFisherGate(k=2)` owns focused/sentinel probe followed by full-train
+confirmation. Its rules match the original small-real policy:
+
+- Only significantly worse focused probes are rejected early. An insignificant
+  improvement or tie still enters confirmation.
+- Stable sentinels use the `1.5 / (count * K)` regression guard; fragile sentinels
+  use one-sided Fisher in the worse direction.
+- Missing, provider-failed, infrastructure-failed or inconclusive measurements
+  cannot become low quality scores or disappear through attribution.
+- Confirmation promotes positive attributed per-task mean lift only when the
+  full-training lift also satisfies the threshold. Per-task standard error and
+  2-sigma credit are separate statistics, not the promotion threshold.
+- Infinite z values use JSON strings `"inf"`/`"-inf"` in native receipts, because
+  native evidence rejects nonfinite JSON numbers. No statistical value changes.
+
+Use `FocusedBenchmarkEvaluator` with `ControlledEvolver.evaluate_candidate` and
+one `CandidateCheck("focused_fisher", ...)`. It freezes the target, task lists,
+policy and backend descriptor in the existing check plan and persists baseline,
+probe and confirm aggregates with the decision. Finished receipts replay without
+scoring; uncertain interrupted executions and changed plans are refused.
+
+The scorer contract is
+`backend.score(repo_root, identity, task_ids, k, phase) -> dict[str, TaskTrialSummary]`.
+The backend owns sandbox execution, fixed grader identity, per-trial artifacts,
+cost admission and bounded infrastructure salvage. Its `descriptor(repo_root)`
+must cover those settings and validate pinned sources. This wrapper is not a
+sandbox, general search policy replacement or native sealed finalization.
+The existing receipt filename/stage is `deterministic` because it uses the check
+API; the embedded result explicitly identifies the focused statistical policy.
+
+These are opt-in APIs, not a new CLI mode. The generic multi-round search still
+uses its separately supplied paired gate. The focused training coordinator below
+connects cold start, WHY selection and parent updates without replacing it.
+Live transport/model identity verification remains separate.
+
+Verification: 1000 seeded gate scenarios and 1000 Fisher tables matched original
+source verdicts, statistics and evaluation order. A recorded-response replay
+through the native proposer/evaluator matched the exact model messages, candidate
+bytes and 52 original baseline/probe/confirm records. No new inference or sealed
+tests were performed in this protocol-alignment verification.
+
+### Focused Training Search (2026-09-14)
+
+`ControlledEvolver.search_focused(...)` connects the benchmark APIs into bounded
+training search. Supply one-file `BenchmarkTarget`, typed `RepairTask` training
+metadata, public function names, a BudgetedEvaluationClient and a scoring backend.
+It reuses ModelCandidateProposer, FocusedBenchmarkEvaluator, native Git
+materialization, check receipts, EvolutionLedger and TerminationTracker.
+
+Execution order:
+
+1. Score every training task at K and freeze valid cold-start measurements.
+2. Group the current parent's failures by WHY; choose the lexicographically
+   first WHY and generate one candidate. This is the original small-real
+   designer's effective ordering, not an impact ranking.
+3. Select candidate-rotated stable/fragile sentinels from the original cold-start
+   pools. Default count is 12, divided between the two pools without backfill.
+4. Execute the focused probe and full confirmation under FocusedFisherGate.
+5. On promotion, retain the candidate commit and confirmation measurements as
+   the next parent. Rejection retains the old parent; neither path alters HEAD.
+6. Stop on exhausted rounds, patience, generation errors, budgets, or no remaining
+   training failures. No test task or activation API is invoked.
+
+Additional backend API:
+`failure_cases(repo_root, identity, task_ids, k, phase) -> dict[task_id, list[case]]`.
+It reads retained training failures, not a new model analysis. The coordinator
+only requests the selected WHY's task IDs and rejects other IDs. The backend
+must bind failures to the supplied commit and phase and retain raw evidence.
+Score phases are `cold_start`, `r0000_focused`, `r0000_confirm`, etc. Its descriptor
+must include a run-specific output location to avoid cross-run artifact reuse.
+
+Plans freeze task metadata, scope, scorer/model descriptors, gate, limits and
+budgets. Every generation conservatively reserves all three possible parse
+attempts and their worst-case token cost. Probe plus confirm trials are reserved
+before generation, against both candidate and run limits. Reservations are not
+refunded when a probe rejects or parsing succeeds early. Cached parent results
+avoid re-scoring the control on each round, matching per-parent frozen baselines.
+This controls model token costs, not host compute billing or a dishonest scorer.
+
+State is anchored in hash-chained `focused_search.*` ledger events. The readable
+projection is `focused-searches/<run_id>/state.json`. Finished runs can be read
+with `resume=True` without inference/scoring. Interrupted completed-round
+boundaries can continue with a new identically configured model client, while
+durable reservations prevent its empty in-memory counters from resetting the
+run budget. Mid-generation, diagnosis, cold-start or evaluation interruption
+is uncertain and refuses automatic replay. Changed configuration also refuses
+resume. This is conservative checkpointing, not transparent mid-call recovery.
+
+The current coordinator implements one WHY/one candidate per round. It does not
+implement the reference's wider candidate tree or archive/recombination. Focused
+sealed finalization uses the dedicated entry point below, not the generic
+fixed-base finalizer. This is not full reference orchestrator parity.
+
+Verification includes multi-round parent advancement and recovery tests,
+500 original-code sentinel-selection comparisons, and a one-round replay of the
+recorded original response through automatic cold start and diagnosis. All 52
+raw training records, messages, candidate tree and gate statistics matched. No
+new live inference or sealed-test experiment was run for this implementation.
+
+### Focused Finalization (2026-09-14)
+
+`ControlledEvolver.prepare_focused_evolution(repo_root, search_options=...,
+vault=..., sealed_backend=..., max_estimated_cost_usd=...)` freezes the held-out
+task IDs, grader digest, backend descriptor, repetitions, storage and cost limit
+before calling training. It then calls `finalize_focused_search`. For separate
+phases, use `freeze_focused_sealed_plan` from `focused_finalization` and pass its
+result as `sealed_plan` to `search_focused` before any training. A completed old
+training run cannot be retroactively assigned a held-out plan.
+
+Finalization validates qualified candidates against their training receipts and
+Git identities, selecting the highest training score, with earliest-round tie
+breaking. It falls back to the original baseline when no candidate qualified.
+Held-out results never drive another training round. A recorded `sealed.started`
+blocks automatic retries even after interruption or invalid scoring evidence.
+This is one-way evaluation per run, not cross-run prevention of human leakage.
+
+The isolated backend must implement `descriptor(repo_root)` and
+`evaluate(candidate_ref=..., baseline_ref=..., task_ids=..., grader_digest=...,
+k=..., max_estimated_cost_usd=...)`. It returns one row per frozen task, in order:
+`{task_id, arms: {baseline: ..., candidate: ...}}`. Each arm contains `source`
+with commit/tree SHA, a `TaskTrialSummary`-compatible `measurement`, and a known
+nonnegative `estimated_cost_usd`. The caller checks completeness, source identity,
+trial counts, infrastructure validity and aggregate cost; enforcing execution
+isolation and preventing overspend remain backend responsibilities.
+
+Reports are written to `focused-searches/<run_id>/report.json` and `report.md`.
+Task-level paired variance, not duplicated trial count, determines two-sigma
+credit. `execution_completed` does not imply `passed`; no candidate is activated.
+Reports retain train/test lift, retention ratio, independent task count and the
+sealed artifact receipt.
+
+Full original-grader replay retained 68 scoring trials and reproduced training
+40% -> 60%, held-out 25% -> 50%, z=1 and no statistical credit. The response was
+recorded, the test split was already known, and original grading used separate
+subprocesses rather than an OS security sandbox. These are functional protocol
+checks, not fresh blind effectiveness evidence. A new official-endpoint model
+preflight returned `deepseek-flash` for requested `deepseek-v4-flash`; strict live
+acceptance was initially blocked pending an approved model-scope change.
+
+The user subsequently approved V4.1-Flash (TECH-175). A fresh native run requests
+and receives `deepseek-flash`, using the original Chat Completions payload
+(temperature 0, maximum output 8192; default thinking behavior), without retry
+or fallback in the HTTP adapter. Budget admission, original repair prompts,
+training, finalist selection, paired held-out grading and reports all execute
+through the native workflow. This acceptance uses a local typed benchmark
+transport adapter, not an acceptance of every product CLI provider transport.
+
+One real call consumed 809 input tokens (640 cache hits) and 693 output tokens.
+The frozen official peak-price estimate is USD 0.00088614, not an invoice or a
+historical cost-reduction measurement. Sixty-eight scoring records match the
+prior original run; training 40% -> 60%, test 25% -> 50%, z=1, no two-sigma credit.
+The live run is new, but its test split is known and grading uses the original
+subprocess isolation. Raw model identity is strictly validated without replacing
+the server-reported model name. Evidence lives in
+`artifacts/upstream-protocol-20260914/evolution-v41-live/`.
+
+### Product Strategy Runtime
+
+The opt-in isolated task Runtime supports this path for product strategy labels:
 
 1. Generate bounded candidates from training failures.
 2. Check pinned commits, compare both arms and stop bounded search.

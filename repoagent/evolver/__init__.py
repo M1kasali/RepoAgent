@@ -1,6 +1,7 @@
 """Controlled, evidence-gated evolution of RepoAgent strategies."""
 
 from .contracts import (
+    BenchmarkTarget,
     CandidateBudget,
     CandidateManifest,
     CandidateMutation,
@@ -35,6 +36,9 @@ from .search import SearchLimits
 from .sealed_snapshot import SnapshotSealedBackend
 from .deployment import SnapshotDeployment
 from .model_proposer import ModelCandidateProposer
+from .module_repair import ModuleRepairProtocol, ModuleRepairError
+from .focused_search import RepairTask
+from .focused_fisher import FocusedFisherGate, FocusedBenchmarkEvaluator, TaskTrialSummary
 from .orchestrator import ControlledEvolver
 from .sealed import (
     SealedBoundaryError,
@@ -45,6 +49,13 @@ from .sealed import (
 from .workspace import CandidateWorkspaceError, GitCandidateWorkspace
 
 __all__ = [
+    "RepairTask",
+    "ModuleRepairProtocol",
+    "ModuleRepairError",
+    "FocusedFisherGate",
+    "FocusedBenchmarkEvaluator",
+    "TaskTrialSummary",
+    "BenchmarkTarget",
     "BehaviorCheck",
     "ActivationError",
     "ActivationRegistry",

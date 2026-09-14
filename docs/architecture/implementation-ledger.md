@@ -6671,6 +6671,365 @@ existing offline demo (12/12 runtime contracts, 12 evidence bundles) at
 linked architecture/security/migration guides are tracked. No paid API call,
 package/version/tag change, commit or push occurred during this closeout turn.
 
+### TECH-166: Real Measurements With Invalid Trials Retained
+
+After explicit approval of the configured model and unrestricted spending,
+completed five bounded measurement tracks against mainline 49e8143. Production
+source and provider configuration were unchanged. Drivers, raw evidence and the
+detailed comparison report are local under
+`artifacts/resume-measurements-20260914/FINAL-REPORT.md`; private coding tasks and
+candidate receipts remain outside the checkout.
+
+The valid cost matrix contains four workload classes, 36 pairs and 504 physical
+calls. Prefix-disrupted trials passed 36/36; stable-prefix trials passed 34/36.
+Cost per successful trial fell 41.66% under a frozen normalized price snapshot,
+including failed-trial costs, but the quality nonregression gate failed. The
+task-clustered exploratory cost interval is 30.63% to 49.31%; this does not
+establish quality equivalence or reproduce historical provider/model results.
+
+Six real scheduler pairs contain 192 requests. Capacity-one versus capacity-four
+median arm P95 was 15.625 versus 5.011 seconds, with 95/96 versus 96/96 task
+passes. Request conservation, same-session exclusion and FIFO were verified.
+This is a capacity experiment, not a same-capacity queue-policy comparison.
+
+Twelve SQLite track pairs passed all preparation and follow-up tasks; follow-up
+reads were 13 versus 11. Both arms retain native memory, so this measures the
+incremental shared SQLite track, not all-memory on/off. Six separate seeded
+context pairs passed both arms and reduced actual input usage from 24,602 to
+12,674 tokens with a 10,000-to-3,000 budget change. No Myna or LoCoMo claim.
+
+One real ModelCandidateProposer Skill candidate crossed isolated Git materialization
+and HostedAgentSnapshotEvaluator with host-owned inference and hidden Docker
+behavior grading. Training passed 11/12 versus 12/12; sealed passed 9/12 versus
+11/12. All 24 candidate trials loaded the Skill, and all 48 trial model journals
+were independently verified. Sealed exact McNemar p=0.5; no significant or stable
+generalization claim, no automatic approval, activation or deployment. The
+campaign used 269 evaluation calls plus one proposal call. It did not rerun the
+previously tested production approval/rollback lifecycle.
+
+One hundred whole-Turn local trace pairs preserved replies, two provider calls,
+one real read and trace identity. P95 was 174.444ms with trace JSONL appends
+disabled by an experiment-only RunStore subclass and 236.036ms normally: 61.592ms
+incremental tax and 27.26KiB per traced Turn. Lifecycle/accounting persistence
+remained enabled. This is not all-tracing-off or historical-protocol equivalence.
+
+Invalid pilot/campaign attempts remain explicitly excluded: a generate wrapper
+discarded structured history; fixture roots initially resolved to the parent
+repository; a memory flag disabled recall injection. Corrected drivers used the
+normal one-attempt SSE transport, explicit fixture roots and enabled memory.
+No failed model sample was rerun selectively, no sealed outcome tuned the sole
+candidate, and no old receipt was overwritten. An earlier pilot's 48.99% must
+not be used as a formal multi-turn result. Valid campaigns total 1,050 actual
+model calls; this excludes billed/possibly billed invalid and interrupted
+attempts and is not an account invoice count.
+
+Offline reducers reprice actual usage and verify runtime receipts. All five
+summaries rebuilt identically; 12,522 campaign payload hashes, 152 private payload
+hashes and 48 model journals passed verification. The existing
+10,000-request scheduler test passed; experiment scripts passed syntax checks.
+No full regression was rerun because implementation code was unchanged. No
+version change, mainline commit or push was performed.
+
+### TECH-167: Original-protocol evaluation correction
+
+The TECH-166 campaigns remain supplementary, locally designed experiments.
+They must not establish a performance gap against the reference implementation
+or its historical resume metrics. Original evaluation functions, workloads,
+timing boundaries, reducers and gates now take precedence; adapters translate
+product interfaces only. Original source and prior receipts are preserved.
+
+The original delayed-tool experiment ran against both actual tool executors.
+Both passed its gates; parallel medians were 44.429 ms for the reference and
+47.146 ms for RepoAgent, including RepoAgent's coroutine/thread bridge overhead.
+The original HOL and bulkhead functions also ran against both schedulers with
+default configuration. Correctness passed; paired HOL reductions were 82.40%
+and 86.50%, and isolated loaded/idle foreground P95 ratios were 1.006 and 1.005.
+These synthetic local results do not imply statistically established product
+superiority. The RepoAgent scheduler regression passed all 13 tests.
+
+The full reference R0 suite passed 10,000 requests, but that is not a RepoAgent
+result. The current adapter covers HOL/bulkhead only, not the original INJECT,
+INTERRUPT and lifecycle request-fate protocol. Reference tracing artifacts passed
+independent verification for 1,000 pairs; the run process nevertheless exited
+with SIGSEGV after output. No clean-exit claim or equivalent RepoAgent tracing
+comparison is made.
+
+The original paid cost preflight made four successful calls but failed strict
+model identity: requested deepseek/deepseek-v4-flash, reported deepseek-flash.
+Alias versus substitution is undetermined. Formal execution stopped; the gate
+was not bypassed. A current-model protocol would need explicit versioning for
+both subjects. Other original-protocol adapters remain incomplete.
+
+Local evidence, detailed limits and remaining checklist are retained under
+`artifacts/upstream-protocol-20260914/REPORT.md`. No runtime code, version,
+commit or remote branch was changed by this evaluation correction.
+
+### TECH-168: Original benchmark shutdown diagnosis and contract findings
+
+Repeated the original cost preflight with the user-requested
+deepseek/deepseek-v4-flash unchanged. Four successful requests again failed
+model_exact. A direct official HTTP call, without LiteLLM, likewise requested
+deepseek-v4-flash and reported deepseek-flash. The official model listing returned
+deepseek-flash and deepseek-v4-pro. No model identity rewriting, price change or
+gate bypass was applied; the formal cost comparison remains blocked.
+
+The original tracing SIGSEGV was reproduced with faulthandler, reduced to one
+Turn even with tracing disabled, and isolated to a surviving SkillFileWatcher
+after AgentLoop.close. A local launcher guard invokes the catalog's existing
+stop method after original close, retains the thread reference and checks that
+it terminates. Three unguarded subprocess probes crashed; all three guarded
+probes exited normally. The complete original 1,000-pair / 2,000-Turn campaign
+then exited 0 and passed independent original verification. Corrected original
+off/on P95 values were 9.502378/12.916169 ms, with 25,467.2 bytes per traced Turn.
+Cleanup is outside per-Turn timing; wrapper metadata and removal of accumulated
+watchers mean this run is retained separately, not treated as byte-identical to
+the crashing run. This is a local compatibility guard, not an upstream patch or
+a RepoAgent tracing result.
+
+The original R0 workload reached an unsupported INJECT contract through the
+adapter. RepoAgent's scheduler has FIFO/cancellation but no BusyPolicy/mailbox;
+AgentTurnRunner does not consume drain. Full R0 parity cannot be claimed from
+the existing FIFO-only 10,000-request test. The original small-real mutation
+target is also outside every current RepoAgent evolution mutation policy.
+Neither restriction was bypassed in an adapter. Completing those comparisons
+requires actual contract work, not fabricated lifecycle events or weakened
+mutation gates.
+
+Original small-real setup and grader were executed unchanged for its training
+cold-start: 10 tasks, K=2, 8/20 successful trials and 4/10 fully passing tasks.
+This reproduces the 40% initial subject score only; there was no candidate,
+model call, sealed-test execution, promotion or RepoAgent quality claim.
+Local raw evidence and scripts remain in `artifacts/upstream-protocol-20260914/`.
+
+### TECH-169: Busy policies, actual Agent injection and original R0 acceptance
+
+Added validated BusyPolicy.APPEND/INJECT/INTERRUPT to TurnRequest with APPEND as
+the compatible default. Per-session lanes own a mailbox, drained child handles
+and undrained fallback. Interrupt signals only the running Turn and places its
+replacement before backlog. Cancellation and shutdown include pending mailbox
+entries; cancelling a consumed child cannot cancel the host.
+
+TurnRuntime.complete_injected records each accepted child's own terminal identity
+and host link without rerunning the runner, duplicating usage or delivering the
+host answer again. Persistence failure resolves that child's handle with an error.
+AgentTurnRunner bridges drain back to the scheduler event loop, and AgentLoop
+consumes it at subsequent model boundaries. Redacted injected user text enters
+structured messages or normal text history and the final backend memory store.
+This is product runtime behavior, not adapter-simulated scheduling. No channel
+wire protocol, CLI default, model selection or evolution whitelist changed.
+
+Full regression with the production edits: 1,432 passed, 52 conditional skips,
+six existing warnings. Five later test-only additions passed in a final 41-test
+focused run; the new busy-policy module contains 14 tests in total.
+
+The original R0 workload, recorder, reducer and every original passed predicate
+ran for both subjects: 10,000 requests each, zero loss, duplicate execution,
+unresolved handles, lifecycle contradictions and pool violations. Adapter event
+translation follows actual TurnRuntime emissions; busy behavior lives in the
+native Scheduler. Independent retained-journal validation confirmed 10,000
+accept/terminal pairs, 80 merged requests with zero duplicated usage, 9,520
+completed and 480 cancelled.
+
+The first native adapter attempt with ordinary-disk RunStore timed out in the
+original bulk phase. The successful run used the identical RunStore on tmpfs
+(`/dev/shm`), without increasing the original timeout or disabling fsync. Treat
+this as scheduler correctness evidence only. Ordinary-disk performance remains
+open; no live scheduling P95, power-loss durability or general parity claim is
+made. Raw journals and comparison/verifier results remain local under
+`artifacts/upstream-protocol-20260914/`. See `busy-policy.md` for API and limits.
+
+### TECH-170: Frozen Benchmark Candidate Scope
+
+Added `BenchmarkTarget` and the evaluation-only `benchmark` label to support
+the original small-real `benchmarks/appworld/agent_cli.py` target without
+overriding global product mutation policies. The caller pins an exact baseline
+and disjoint mutable/protected file lists. Git verifies tracked regular files;
+candidate commit verification retains exact diff, mode and content checks.
+
+Scoped manifests bind the declaration into their v2 patch digest; legacy v1
+manifests keep their serialized shape and digest. ModelCandidateProposer only
+reads declared mutable inputs. Search independently freezes the operator's
+scope in its plan, rejects mismatched candidates and refuses changed-scope
+resume. Benchmark candidates cannot activate product strategies.
+
+The original disposable subject and original scorer were exercised with a
+comment-only candidate through native ControlledEvolver materialization. All
+protected source bytes and the parent checkout stayed unchanged. Original
+10-task K=2 training evaluation retained 8/20 passing trials and 4/10 fully
+passing tasks. No model or sealed calls were made: this is integration evidence,
+not self-evolution quality. Raw manifest, Git identity, original trial records,
+source hashes and reproducible driver remain local under
+`artifacts/upstream-protocol-20260914/evolution-target-integration/` and its
+sibling `evolution_target_integration.py`.
+
+Initial Evolver regression: 301 passed, 27 conditional skips. After adding
+legacy-manifest and symlink-grader cases, the full suite passed: 1,457 passed,
+52 conditional skips, six existing datetime deprecation warnings in 194.62s.
+The new benchmark-target module contains 20 cases. The reference checkout
+remains clean. See `evolver-workflow.md` for API and boundaries.
+
+### TECH-171: Original Live Evolution and Shared-Candidate Verification
+
+Executed the original small-real runner with its unchanged one-round funnel,
+designer/parser, manifest validation, focused Fisher gate, confirmation and
+post-termination sealed evaluation. One official API request specified
+deepseek-v4-flash; response identity remained deepseek-flash. Usage was 809
+prompt + 750 completion tokens. Transport instrumentation only retained request
+and response bodies; it changed no model payload, candidate or scoring gate.
+
+Original training improved 8/20 -> 12/20 trials (40% -> 60% over 10 tasks);
+four sealed tasks improved 2/8 -> 4/8 trials (25% -> 50%). Original sealed
+significance credit was false and activation remained pending human review.
+These are small-fixture measurements, not statistically established coding
+quality or proof of a particular backend model version.
+
+Replayed the exact generated candidate through native scoped CandidateGenerator,
+ControlledEvolver materialization, deterministic validation, search and paired
+receipt pipeline using the original scorer. Candidate trees and all 56
+train/test result records matched; protected grading sources stayed unchanged.
+Native default paired gate qualified the candidate and never activated it.
+
+Important boundaries: native generation was a fixed-candidate replay, native
+test scoring was known-holdout replay after search termination, and native
+PairedPromotionGate is not original FocusedFisherGate. This does not close
+end-to-end native generation/gate/sealed parity. Further blind experiments must
+not tune against this already-unsealed split. The exact-model cost campaign
+remains blocked independently; no model alias gate was bypassed.
+
+Reproducible drivers, model receipt, both runtime ledgers, raw trials and
+independent verification are local under
+`artifacts/upstream-protocol-20260914/evolution-live/` and sibling driver files.
+No product code changed in this experiment; previous full-suite verification
+remains 1,457 passed, 52 skipped. The verifier completed with exit 0.
+
+### TECH-172: Single-Module Repair and Focused-Fisher APIs
+
+Added frozen ModuleRepairProtocol and an opt-in ModelCandidateProposer path
+using original system/user messages, fenced Python parsing and two bounded
+parse-repair retries. Scope and training-evidence membership are checked before
+inference. Retries share the existing model proxy and budgets; provider errors
+and exact model identity mismatches remain fail-closed. Default JSON behavior
+is unchanged. The parser does not claim import/signature sandbox enforcement.
+
+Added FocusedFisherGate with original probe/confirm ordering, worse-direction
+Fisher screening, stable/fragile sentinel guards, measurement validity before
+attribution, fixed full-set lift, and separate navigator/2-sigma credit. Added
+FocusedBenchmarkEvaluator to use existing native candidate materialization and
+check receipts, frozen plans, replay and interruption fences. JSON-incompatible
+infinite z values are represented as strings without changing their meaning.
+
+The evaluator is an explicit benchmark check API, not a replacement for the
+generic search's default paired gate or native sealed finalizer. Its scorer
+backend owns sandboxing, trial receipts, cost admission and infrastructure
+salvage. Automatic cold-start/WHY selection and full campaign wiring remain
+separate follow-up work; no blanket orchestrator parity claim is made.
+
+Differential verification against unchanged original code: 1000 seeded gate
+cases, 1000 Fisher tables, identical small-real messages and parser output.
+Native proposer + focused evaluator recorded-response replay matched candidate
+bytes, 52 raw baseline/probe/confirm records and complete original gate stats:
+training score 0.6, per-task z=1.5, credit=false. No new model or sealed calls.
+Drivers and receipts remain local under `artifacts/upstream-protocol-20260914/`.
+
+Full regression: 1,478 passed, 52 conditional skips, six existing datetime
+deprecation warnings in 221.82 seconds. The new original-protocol module has
+21 tests. No production source changed after this run; documentation and local
+verification records were finalized afterward.
+
+### TECH-173: Bounded Focused Training Coordinator
+
+Added ControlledEvolver.search_focused and typed RepairTask metadata. The
+coordinator reuses native model generation, candidate materialization, focused
+check evaluator/receipts, ledger and termination tracker. Generic fixed-base
+search is unchanged. Cold-start results seed the parent; failures choose one
+WHY lexicographically, as the original small-real designer actually does.
+Passing confirmation becomes the next parent's commit and frozen measurements;
+rejected candidates leave the previous parent and user checkout unchanged.
+
+Sentinels use stable/fragile cold-start pools, half-pool quotas and SHA-256
+candidate rotation. They do not reclassify pools after promotion. Added 500
+original-code differential cases for this behavior. Native automatic one-round
+recorded-response replay matches the original messages, candidate tree, complete
+gate statistics and all 52 baseline/probe/confirm records. No new model or
+sealed calls were used in this verification.
+
+The frozen run plan binds model/scorer descriptors, training metadata, scope and
+limits. Before inference it reserves three possible parse attempts, worst-case
+token cost and probe/confirm trials; both candidate and run limits apply. The
+ledger retains reservations across client/process replacement. No refunds are
+assumed for successful early parsing or probe rejection. Finished replay and
+completed-round recovery avoid duplicate work; uncertain mid-operation states
+and configuration drift fail closed. Raw scorer integrity, sandbox execution
+and infrastructure salvage remain the backend's contract.
+
+Current scope is one WHY/one candidate per round, training only. No automatic
+activation, sealed-retention integration, reference archive/recombination or
+wider candidate tree is claimed. Technical API and remaining boundaries are
+documented in evolver-workflow.md. Final full regression: 1,493 passed,
+52 conditional skips, six existing datetime warnings in 220.72 seconds. The
+focused-search test module has 15 cases. Complete stdout/stderr is retained in
+`artifacts/upstream-protocol-20260914/evolution-search-replay/regression.txt`.
+
+### TECH-174: Focused sealed finalization and reports (2026-09-14)
+
+Connected focused training to a dedicated one-way finalizer. The facade freezes
+sealed tasks, grader, backend, repetitions and cost before training. Finalists
+are selected solely from validated training receipts and pinned Git identities;
+no qualified candidate means baseline selection, not an invented improvement.
+Sealed evidence validates both arms, task order, counts, sources, infrastructure
+status and known cost. A started finalization cannot silently retry. Reports
+separate execution completion from statistical credit and never activate code.
+
+The full native workflow replay uses the original grader and one recorded model
+response: 68 scoring trials, training 40% -> 60%, test 25% -> 50%, four independent
+test tasks at K=2, z=1, no two-sigma credit. Original subprocess isolation is not
+an OS sandbox; the known test split is not fresh blind evidence. Raw outcomes,
+ledger, sealed receipts and reports are retained under
+`artifacts/upstream-protocol-20260914/evolution-final-replay/`.
+
+The fresh official API preflight is retained as `live-model-preflight.json`:
+HTTP 200, requested `deepseek-v4-flash`, reported `deepseek-flash`. No identity
+normalization or unapproved substitution was used. Fresh native live evolution
+was not started; implementation completion must not be reported as live success.
+Tree/archive/recombination remain outside this bounded closeout.
+
+Verification: 18 new finalization tests passed; full regression passed 1,511
+tests with 52 conditional skips and six existing datetime warnings in 192.82
+seconds. Targeted Ruff and `git diff --check` passed. All 68 retained scoring
+records match the original run byte-independent JSON payloads. The full test
+log is `evolution-final-replay/regression.txt` under the artifact root above.
+
+### TECH-175: Fresh V4.1-Flash end-to-end acceptance (2026-09-14)
+
+After explicit user approval, the live benchmark requests `deepseek-flash` and
+validates that exact name in the raw response. The official pricing page confirms
+that `deepseek-v4-flash` is a legacy route to V4.1-Flash:
+https://api-docs.deepseek.com/quick_start/pricing/
+This resolves TECH-174's identity blocker without weakening product validation
+or silently changing global model configuration.
+
+The local live driver uses the original Chat Completions payload, temperature 0,
+8192 maximum output tokens and default thinking behavior. It wraps a no-retry
+HTTP leaf in BudgetedEvaluationClient, retains request/response without secrets,
+and counts the full serialized request conservatively for admission. Three parse
+attempts and USD 1 are the outer model caps; actual execution used one request.
+This tests the native evolution workflow, not every product transport or CLI.
+
+Fresh execution: 809 input tokens, including 640 cache-hit tokens; 693 output
+tokens, including 116 reasoning tokens. API elapsed time was 2.718 seconds.
+The frozen official peak-rate estimate is USD 0.00088614, not the billed amount.
+All 68 scoring JSON payloads equal the previous original run. Training improved
+8/20 -> 12/20 and held-out 2/8 -> 4/8, with four independent held-out tasks at K=2.
+Paired z=1; statistical credit false; no activation. This is a new real response,
+not replay, but a known split and original subprocess grading limit the claim
+to small-real live functional acceptance rather than blind generalization.
+
+Evidence: `artifacts/upstream-protocol-20260914/evolution-v41-live/`, including
+calls, model-budget.json, scoring, sealed receipts, ledger, summary and reports.
+Targeted budget/search/finalization regression: 74 passed. Production code did
+not change in this run; the preceding full regression remains 1,511 passed /
+52 conditional skips. Earlier blocked/replay receipts are preserved unchanged.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

@@ -5,10 +5,10 @@ import json
 import re
 
 from ..atomic_io import atomic_replace_unlocked, file_lock
-from .contracts import CandidateProposal
+from .contracts import BenchmarkTarget, CandidateProposal
 from .evaluation import CandidateEvaluationError, payload_digest
 from .gates import TerminationTracker
-from .workspace import _git
+from .workspace import _git, verify_benchmark_target
 
 
 @dataclass(frozen=True)
@@ -42,6 +42,7 @@ def run_search(
     repetitions=1,
     limits=None,
     resume=False,
+    benchmark_target=None,
 ):
     """propose(context) returns a CandidateProposal; context contains train history.
 
@@ -66,9 +67,15 @@ def run_search(
     ):
         raise ValueError("proposal failure evidence must belong to training tasks")
     base_commit = _git(repo_root, "rev-parse", base_commit + "^{commit}")
+    if benchmark_target is not None:
+        if not isinstance(benchmark_target, BenchmarkTarget):
+            raise TypeError("search benchmark target must be typed")
+        if benchmark_target.base_commit != base_commit:
+            raise ValueError("search benchmark target changed frozen baseline")
+        verify_benchmark_target(repo_root, benchmark_target)
 
     def current_plan():
-        return {
+        plan = {
             "deterministic": deterministic_evaluator.descriptor(repo_root),
             "paired": paired_evaluator.descriptor(repo_root),
             "checks": [asdict(check) for check in deterministic_checks],
@@ -82,6 +89,9 @@ def run_search(
             if callable(getattr(propose, "descriptor", None))
             else None,
         }
+        if benchmark_target is not None:
+            plan["benchmark_target"] = benchmark_target.to_dict()
+        return plan
 
     plan = json.loads(json.dumps(current_plan(), allow_nan=False))
     plan_digest = payload_digest(plan)
@@ -175,6 +185,8 @@ def run_search(
                         )
                     if proposal.manifest.base_commit != base_commit:
                         raise ValueError("search candidate changed frozen baseline")
+                    if proposal.manifest.benchmark_target != benchmark_target:
+                        raise ValueError("search candidate changed frozen benchmark target")
                     candidate_id = proposal.manifest.candidate_id
                     if candidate_id in seen:
                         raise ValueError("search repeated a candidate id")

@@ -26,6 +26,12 @@ class WorkClass(str, Enum):
         return self.value
 
 
+class BusyPolicy(str, Enum):
+    APPEND = "append"
+    INJECT = "inject"
+    INTERRUPT = "interrupt"
+
+
 TERMINAL_TURN_STATES = frozenset(
     {TurnState.COMPLETED, TurnState.FAILED, TurnState.CANCELLED}
 )
@@ -55,6 +61,10 @@ class TurnRequest:
     trace_context: TraceContext = field(
         default_factory=lambda: TraceContext.create(stage="scheduler")
     )
+    busy: BusyPolicy = BusyPolicy.APPEND
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "busy", BusyPolicy(self.busy))
 
     @classmethod
     def create(
@@ -66,6 +76,7 @@ class TurnRequest:
         request_id: RequestId | None = None,
         work_class: WorkClass = WorkClass.FOREGROUND,
         trace_context: TraceContext | None = None,
+        busy: BusyPolicy = BusyPolicy.APPEND,
     ) -> "TurnRequest":
         return cls(
             turn_id=turn_id or new_turn_id(),
@@ -74,6 +85,7 @@ class TurnRequest:
             text=str(text),
             work_class=work_class,
             trace_context=trace_context or TraceContext.create(stage="scheduler"),
+            busy=busy,
         )
 
 

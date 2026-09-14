@@ -47,6 +47,7 @@ class AgentTurnRunner:
         event_loop = asyncio.get_running_loop()
         cancellation_token = CancellationToken()
         streamed_text = []
+        injected_requests = []
         from .stream_redaction import SecretTextStream
 
         text_filter = SecretTextStream(value for _, value in self._agent.detected_secret_env_items())
@@ -122,6 +123,16 @@ class AgentTurnRunner:
             )
             future.result()
 
+        async def collect_injected():
+            requests = drain()
+            injected_requests.extend(requests)
+            return requests
+
+        def drain_messages():
+            # Scheduler mailbox ownership stays on its event loop, not this worker.
+            cancellation_token.raise_if_cancelled()
+            return asyncio.run_coroutine_threadsafe(collect_injected(), event_loop).result()
+
         worker = asyncio.create_task(
             asyncio.to_thread(
                 self._loop.run,
@@ -129,6 +140,7 @@ class AgentTurnRunner:
                 turn_request=request,
                 model_text_sink=emit_model_text,
                 cancellation_token=cancellation_token,
+                drain_messages=drain_messages,
             )
         )
         try:
@@ -202,6 +214,12 @@ class AgentTurnRunner:
             [
                 {"role": "user", "content": request.text,
                  "metadata": {"session_id": str(request.session_id), "turn_id": str(request.turn_id)}},
+                *[
+                    {"role": "user", "content": item.text,
+                     "metadata": {"session_id": str(item.session_id), "turn_id": str(item.turn_id),
+                                  "host_turn_id": str(request.turn_id)}}
+                    for item in injected_requests
+                ],
                 {"role": "assistant", "content": final_answer,
                  "metadata": {"session_id": str(request.session_id), "turn_id": str(request.turn_id)}},
             ]
