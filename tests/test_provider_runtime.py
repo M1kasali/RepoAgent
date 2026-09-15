@@ -1567,7 +1567,7 @@ def test_openai_reasoning_only_response_recovers_with_opaque_item_replay(tmp_pat
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": "<final>Recovered.</final>",
+                                "text": "Recovered.",
                             }
                         ],
                     }

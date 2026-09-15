@@ -548,7 +548,7 @@ def build_arg_parser():
     parser.add_argument(
         "--context-token-budget",
         type=int,
-        default=3000,
+        default=None,
         help="Maximum pre-request prompt tokens before output reservation.",
     )
     parser.add_argument(

@@ -177,6 +177,7 @@ class _TypedModelClient:
                 timeout=request.timeout_seconds,
                 tools=request.tools,
                 cancellation_token=request.cancellation_token,
+                **({"messages": request.messages} if getattr(self, "supports_structured_messages", False) else {}),
             )
         except TimeoutError as exc:
             raise ProviderTimeoutError(
@@ -708,6 +709,7 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         timeout=None,
         tools=(),
         cancellation_token=None,
+        messages=(),
     ):
         """向 OpenAI-compatible `/responses` 接口发起一次模型调用。
 
@@ -733,17 +735,9 @@ class OpenAICompatibleModelClient(_TypedModelClient):
         _raise_if_cancelled(cancellation_token, type(self).__name__)
         payload = {
             "model": self.model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": prompt,
-                        }
-                    ],
-                }
-            ],
+            "input": _openai_response_input(ModelRequest(
+                prompt=prompt, max_output_tokens=max_new_tokens, messages=messages,
+            )),
             "max_output_tokens": max_new_tokens,
             "stream": False,
         }
@@ -1126,6 +1120,7 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         timeout=None,
         tools=(),
         cancellation_token=None,
+        messages=(),
     ):
         # 为了保持统一接口，runtime 仍然会传缓存参数进来；
         # 这里只是显式丢弃，因为当前 Anthropic-compatible 路径没有接缓存复用。
@@ -1136,17 +1131,9 @@ class AnthropicCompatibleModelClient(_TypedModelClient):
         _raise_if_cancelled(cancellation_token, type(self).__name__)
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": prompt,
-                        }
-                    ],
-                }
-            ],
+            "messages": _anthropic_messages(ModelRequest(
+                prompt=prompt, max_output_tokens=max_new_tokens, messages=messages,
+            )),
             "max_tokens": max_new_tokens,
             "stream": False,
         }
