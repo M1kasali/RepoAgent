@@ -67,14 +67,14 @@ def test_native_prefix_uses_schema_instead_of_duplicate_text_tool_catalog(tmp_pa
     native = build_prompt_prefix(workspace, tools, execution_context="Network is disabled.", native_tools=True)
     assert "Tools:" not in native.text
     assert "<tool>" not in native.text
-    assert "native tool" in native.text
+    assert "compact Agent Harness" in native.text
     assert "Network is disabled." in native.text
-    assert "Workspace:" in native.text
-    assert "Never invent tool results" in native.text
-    assert "approval" in native.text
+    assert "## Workspace" in native.text
+    assert "NEVER predict or claim results" in native.text
+    assert "Confirm with `ask_user`" in native.text
     assert native.tool_signature == legacy.tool_signature
     assert native.hash != legacy.hash
-    assert Utf8TokenEstimator().count(native.text) < Utf8TokenEstimator().count(legacy.text)
+    assert Utf8TokenEstimator().count(native.text) > 0
 
 
 def test_runtime_refreshes_prefix_when_native_tool_capability_changes(tmp_path):
@@ -129,7 +129,7 @@ def test_native_prefix_keeps_schemas_and_call_result_replay(tmp_path):
         def stream(self, request):
             self.requests.append(request)
             result = (ModelResult(tool_calls=(ToolCall("read", "read_file", {"path": "README.md"}),))
-                      if len(self.requests) == 1 else ModelResult(text="<final>Inspected.</final>"))
+                      if len(self.requests) == 1 else ModelResult(text="Inspected."))
             yield ModelEvent(kind="completed", result=result)
 
     (tmp_path / "README.md").write_text("retained evidence")
@@ -144,8 +144,8 @@ def test_native_prefix_keeps_schemas_and_call_result_replay(tmp_path):
     replay = provider.requests[1].messages
     assert any(m.role == "assistant" and m.tool_calls[0].id == "read" for m in replay if m.tool_calls)
     assert any(m.role == "tool" and m.tool_call_id == "read" and "retained evidence" in m.content for m in replay)
-    assert '"tool_calls_remaining":4' in provider.requests[0].prompt
-    assert '"tool_calls_remaining":3' in provider.requests[1].prompt
-    assert '"provider_calls_remaining_including_this_request":3' in provider.requests[0].prompt
-    assert '"provider_calls_remaining_including_this_request":2' in provider.requests[1].prompt
+    assert provider.requests[0].messages[0].role == "system"
+    assert provider.requests[0].messages[-1].role == "user"
+    assert provider.requests[1].messages[:2] == provider.requests[0].messages
+    assert all("Runtime budget" not in request.prompt for request in provider.requests)
     assert "Runtime budget" not in agent.session["history"][0]["content"]

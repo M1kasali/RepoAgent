@@ -42,7 +42,7 @@ def middle(text, limit):
 
 
 class WorkspaceContext:
-    def __init__(self, cwd, repo_root, branch, default_branch, status, recent_commits, project_docs):
+    def __init__(self, cwd, repo_root, branch, default_branch, status, recent_commits, project_docs, *, repo_root_override=None):
         self.cwd = cwd
         self.repo_root = repo_root
         self.branch = branch
@@ -50,12 +50,16 @@ class WorkspaceContext:
         self.status = status
         self.recent_commits = recent_commits
         self.project_docs = project_docs
+        self.repo_root_override = repo_root_override
 
     @classmethod
     def build(cls, cwd, repo_root_override=None):
         cwd = Path(cwd).resolve()
+        git_metadata_allowed = True
 
         def git(args, fallback=""):
+            if not git_metadata_allowed:
+                return fallback
             try:
                 result = subprocess.run(
                     ["git", *args],
@@ -69,11 +73,14 @@ class WorkspaceContext:
             except Exception:
                 return fallback
 
+        discovered_root = Path(git(["rev-parse", "--show-toplevel"], str(cwd))).resolve()
         repo_root = (
             Path(repo_root_override).resolve()
             if repo_root_override is not None
-            else Path(git(["rev-parse", "--show-toplevel"], str(cwd))).resolve()
+            else discovered_root
         )
+        # An explicit task boundary must not inherit metadata from a parent repo.
+        git_metadata_allowed = discovered_root == repo_root
         docs = {}
         # 同时扫描 repo_root 和 cwd，这样在子目录启动时也能看到本地文档；
         # 但用相对路径做 key，避免同一份文档被重复收集。
@@ -97,6 +104,7 @@ class WorkspaceContext:
             status=clip(git(["status", "--short"], "clean") or "clean", 1500),
             recent_commits=[line for line in git(["log", "--oneline", "-5"]).splitlines() if line],
             project_docs=docs,
+            repo_root_override=str(repo_root) if repo_root_override is not None else None,
         )
 
     def text(self):

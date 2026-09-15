@@ -7030,6 +7030,84 @@ Targeted budget/search/finalization regression: 74 passed. Production code did
 not change in this run; the preceding full regression remains 1,511 passed /
 52 conditional skips. Earlier blocked/replay receipts are preserved unchanged.
 
+### TECH-176: Native completion and request-boundary corrections (2026-09-15)
+
+The native-tool loop no longer interprets legacy `<final>` / `<tool>` text as
+control syntax. Native no-tool completions retain their visible body after
+paired think-block removal, including literal final/tool markup. Exhaustion
+synthesis follows the same rule. The native prefix no longer asks for final
+tags. Legacy text-tool clients retain the existing parser. This corrects the
+answer protocol only; it does not certify full system-prompt/context parity.
+
+Native output events deliver the cleaned completed no-tool answer, avoiding
+reasoning or tool-call preambles being emitted as final text. This is buffered
+final-answer delivery, not a claim of token-level native streaming parity.
+Legacy tagged streaming is unchanged.
+
+WorkspaceContext retains whether its repository root was explicitly overridden.
+Runtime refresh preserves that policy, while default discovery continues to find
+the parent Git repository. If Git discovery falls outside an explicit boundary,
+parent branch/status/log metadata is excluded as well. This is prompt/context
+isolation, not an OS sandbox security guarantee.
+
+Typed synchronous provider generation now forwards structured messages to
+capable clients. OpenAI-compatible and Anthropic-compatible complete paths use
+the same message projection functions as their streaming paths; native call IDs,
+tool results and available reasoning blocks therefore retain the same projection.
+Prompt-only clients remain supported. Mock HTTP tests verify the actual payload,
+not only a method signature.
+
+Regression source: `tests/test_alignment_contracts.py`, covering real native
+turns, explicit/default workspace refresh, synchronous HTTP payloads, exhaustion
+synthesis, output events and legacy compatibility. The initial eight-case run
+had seven failures and one passing default-root control before the fixes; the
+expanded eleven-case run passes after the fixes. Full-suite evidence is recorded
+in the local alignment audit report. No live model calls or cost improvement
+claims are part of this change.
+
+### TECH-177: Native context assembly and protocol verification
+
+Native structured clients now use `repoagent/context_engine/` for one assembly
+per Turn: identity, bootstrap, query-selected host memory and recall, always-on
+Skills, resolved Skills, then Curator-selected history and working state. The
+fixed system prefix and current user message are not regenerated after each
+tool call. Tool results use nonce-tagged data boundaries and retain their
+provider representation for later history replay. Legacy text clients retain
+their existing prompt and answer protocol.
+
+The two-phase assembler supplies Curator with the exact system/user/tool prefix.
+The context budget reserves output, tools and all fixed system contributors;
+`tiktoken` supplies the token estimate. Curator supports a fast path, bounded
+internal tool loop, deterministic fallback, paired-history trimming, archives
+and working-state persistence. Archive retrieval rejects paths outside its
+archive root. Provider overflow can elide older tool results; exhaustion
+synthesis does not invoke the legacy arbitrary message-drop policy.
+
+`native_context_config` controls Curator. An optional `curator_model_client`
+provides a separately configured model; a missing matching model fails into
+deterministic fallback rather than silently changing the requested model.
+Curator calls consume the Turn's provider budget and are included in usage and
+cost accounting, using the actual client's pricing. Timeout cancellation joins
+the provider worker before fallback starts. Checkpoint recovery is consumed
+once in the next Turn, rather than being added to every tool iteration.
+
+Verification: 1,583 tests passed, 54 skipped, with six existing datetime
+deprecation warnings. Focused native tests cover assembly order, history-pair
+closure, protected overflow, Curator failure/timeout, archive containment,
+cancellation joining, accounting, one-shot recovery, memory selection and Skill
+rendering. Sixteen source-reference differential cases passed. The local cost
+protocol gate matched all 24 task/policy pairs and 168 requests per runtime;
+responses were scripted, so these results are not real-model quality or cache
+performance measurements. The gate checks source identity before a paid run
+and requires the live cache preflight to pass. No historical measurements were
+overwritten and no paid model was called for this change.
+
+Integration boundaries remain explicit: typed provider conversion, local Skill
+catalog/router and path admission, local persistence redaction, text-only media,
+and truthful shell execution constraints. This entry is not a whole-project
+equivalence claim. Native `ask` uses the assembler; the existing `prompt()` text
+helper remains a legacy preview, not the native provider payload.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

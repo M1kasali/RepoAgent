@@ -135,10 +135,27 @@ class RepoAgent:
         checkpoint_policy="interactive",
         interactive=False,
         enable_questions=False,
+        native_context_config=None,
+        curator_model_client=None,
+        context_state_root=None,
+        context_now_fn=None,
+        context_channel=None,
+        context_chat_id=None,
     ):
         self.model_client = model_client
         self.workspace = workspace
         self.root = Path(workspace.repo_root)
+        from datetime import datetime
+        from .context_engine.config import ContextConfig
+
+        self.native_context_config = native_context_config or ContextConfig()
+        self.curator_model_client = curator_model_client
+        if not isinstance(self.native_context_config, ContextConfig):
+            raise TypeError("native_context_config must be ContextConfig")
+        self.context_state_root = Path(context_state_root or workspace_state_root(self.root)).resolve()
+        self.context_now_fn = context_now_fn or datetime.now
+        self.context_channel = context_channel
+        self.context_chat_id = context_chat_id
         self.session_store = session_store
         self.approval_policy = approval_policy
         self.max_steps = max_steps
@@ -323,6 +340,8 @@ class RepoAgent:
         configured_input = (
             context_token_budget
             if context_token_budget is not None
+            else max(1, configured_window - self.max_new_tokens)
+            if getattr(self.model_client, "supports_native_tools", False)
             else DEFAULT_TOTAL_TOKEN_BUDGET
         )
         configured_window_source = context_window_source or (
@@ -454,6 +473,7 @@ class RepoAgent:
             workspace=self.workspace,
             tools=self.tools,
             native_tools=bool(getattr(self.model_client, "supports_native_tools", False)),
+            state_root=self.context_state_root,
             execution_context=(
                 describe(cwd=self.root)
                 if "run_shell" in self.tools and callable(describe)
@@ -473,7 +493,9 @@ class RepoAgent:
 
         # 工作区事实相对稳定，所以这里按整体刷新；
         # 只有这些事实真的变化了，才重建完整 prefix。
-        refreshed_workspace = WorkspaceContext.build(self.root)
+        refreshed_workspace = WorkspaceContext.build(
+            self.root, repo_root_override=self.workspace.repo_root_override
+        )
         refreshed_workspace_fingerprint = refreshed_workspace.fingerprint()
         workspace_changed = (
             force or refreshed_workspace_fingerprint != previous_workspace_fingerprint

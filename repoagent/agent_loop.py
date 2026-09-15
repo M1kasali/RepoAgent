@@ -1,6 +1,7 @@
 """Agent control loop extracted from the runtime facade."""
 
 import time
+import json
 from dataclasses import replace
 
 from .call_efficiency import CallEfficiencyEntry, CallEfficiencySummary
@@ -21,6 +22,7 @@ from .empty_recovery import (
 from .context_overflow import (
     OVERFLOW_MAX_COMPRESS_RETRIES,
     emergency_shrink_history,
+    emergency_shrink_messages,
     fit_messages_to_token_budget,
 )
 from .conversation import (
@@ -32,6 +34,7 @@ from .providers.base import (
     CancellationToken,
     ModelMessage,
     ModelRequest,
+    ModelTool,
     ModelUsage,
     ModelUsageAggregate,
     ProviderCancelledError,
@@ -169,6 +172,11 @@ class AgentLoop:
         use_structured_history = bool(
             getattr(agent.model_client, "supports_structured_messages", False)
         )
+        native_context = use_structured_history and bool(
+            getattr(agent.model_client, "supports_native_tools", False)
+        )
+        native_prompt = None
+        native_metadata = None
         history_selection_metadata = {
             "mode": "structured-provider-messages",
             "token_count": 0,
@@ -197,6 +205,7 @@ class AgentLoop:
             usage=None,
             finish_reason="",
             error_category="",
+            pricing_client=None,
         ):
             parent_trace = current_trace_context()
             provider_trace = (
@@ -218,7 +227,7 @@ class AgentLoop:
                 duration_ms=max(0, int(duration_ms)),
                 usage=usage or ModelUsage(),
                 pricing=_pricing_for_client(
-                    agent.model_client, str(provider), str(model)
+                    pricing_client or agent.model_client, str(provider), str(model)
                 ),
                 finish_reason=finish_reason,
                 error_category=error_category,
@@ -337,7 +346,7 @@ class AgentLoop:
             return completion_metadata, usage_aggregate
 
         def synthesize_final_on_exhaustion():
-            prompt, prompt_metadata = agent._build_prompt_and_metadata(
+            prompt, prompt_metadata = (native_prompt, dict(native_metadata)) if native_context else agent._build_prompt_and_metadata(
                 user_message,
                 include_history=not use_structured_history,
                 history_override=prompt_history_override,
@@ -352,7 +361,7 @@ class AgentLoop:
                 if deadline is not None
                 else None
             )
-            if use_structured_history and current_prompt_index is not None:
+            if use_structured_history and not native_context and current_prompt_index is not None:
                 provider_messages[current_prompt_index] = ModelMessage(role="user", content=prompt)
             synthesis_messages = tuple(provider_messages) + (
                 ModelMessage(role="user", content=_MAX_STEP_SYNTHESIS_PROMPT),
@@ -361,11 +370,17 @@ class AgentLoop:
                 synthesis_tokens = model_messages_token_count(
                     synthesis_messages, agent.context_manager.token_counter
                 )
-                synthesis_messages, reduction = fit_messages_to_token_budget(
-                    synthesis_messages,
-                    agent.context_manager.token_counter,
-                    agent.context_manager.total_token_budget,
-                )
+                if native_context:
+                    from .context_engine.helpers import estimate_prompt_tokens
+                    from .context_engine.runtime import message_dict
+                    synthesis_tokens = estimate_prompt_tokens([message_dict(m) for m in synthesis_messages])
+                    reduction = {"before_tokens": synthesis_tokens, "after_tokens": synthesis_tokens}
+                else:
+                    synthesis_messages, reduction = fit_messages_to_token_budget(
+                        synthesis_messages,
+                        agent.context_manager.token_counter,
+                        agent.context_manager.total_token_budget,
+                    )
                 synthesis_tokens = int(reduction["after_tokens"])
                 if reduction["after_tokens"] < reduction["before_tokens"]:
                     agent.emit_trace(
@@ -467,7 +482,9 @@ class AgentLoop:
             kind, payload = (
                 ("tools", None)
                 if model_result.tool_calls
-                else agent.parse(model_result.text)
+                else (("final", visible_text(model_result.text))
+                      if getattr(agent.model_client, "supports_native_tools", False)
+                      else agent.parse(model_result.text))
             )
             final = (
                 str(payload).strip()
@@ -560,6 +577,46 @@ class AgentLoop:
                 ),
             }
 
+        def invoke_curator(*, messages, tools, model, max_tokens, temperature, context_cancellation_token):
+            import copy
+            from .context_engine.runtime import typed_message
+
+            if agent.max_provider_calls is not None and len(call_entries) >= agent.max_provider_calls - 1:
+                raise RuntimeError("Curator budget exhausted; reserve one main-agent call")
+            client = copy.copy(agent.curator_model_client or agent.model_client)
+            if model and model != str(getattr(client, "model", "")):
+                raise ValueError("Curator model is not configured on this provider; using deterministic fallback")
+            if hasattr(client, "temperature"):
+                client.temperature = temperature
+            request = ModelRequest(
+                prompt=json.dumps(messages, ensure_ascii=False), max_output_tokens=max_tokens,
+                messages=tuple(typed_message(row) for row in messages),
+                tools=tuple(ModelTool(item["function"]["name"], item["function"]["description"],
+                                      item["function"]["parameters"]) for item in tools),
+                call_kind="compaction", session_id=str(agent.session["id"]),
+                request_id=task_state.task_id + ":curator", turn_id=task_state.task_id,
+                attempt=len(call_entries) + 1, cancellation_token=context_cancellation_token,
+                timeout_seconds=min(agent.native_context_config.curator_timeout_seconds,
+                                    max(0.001, deadline - time.monotonic()) if deadline else 30),
+            )
+            started = time.monotonic()
+            remove_cancel = cancellation_token.add_callback(context_cancellation_token.cancel) if cancellation_token else lambda: None
+            try:
+                result = stream_model(client, request)
+            except Exception as exc:
+                record_model_call(request, provider_attempt=0, provider=type(client).__name__, model=model,
+                                  status="failed", duration_ms=int((time.monotonic() - started) * 1000),
+                                  error_category=getattr(exc, "category", "unexpected"), pricing_client=client)
+                usage_rows.append(ModelUsage())
+                raise
+            finally:
+                remove_cancel()
+            record_model_call(request, provider_attempt=0, provider=result.provider, model=result.model,
+                              status="completed", duration_ms=int((time.monotonic() - started) * 1000),
+                              usage=result.usage, finish_reason=result.finish_reason, pricing_client=client)
+            usage_rows.append(result.usage)
+            return result
+
         while (
             tool_steps < agent.max_steps
             and attempts < max_attempts
@@ -590,7 +647,19 @@ class AgentLoop:
                 prompt_history_override, _ = emergency_shrink_history(
                     agent.session["history"]
                 )
-            prompt, prompt_metadata = agent._build_prompt_and_metadata(
+            if native_context:
+                from .context_engine.runtime import assemble, message_dict
+                if native_prompt is None:
+                    assembled, native_metadata = assemble(
+                        agent, user_message, list(agent.session["history"][:-1]),
+                        turn_request=turn_request, invoke_curator=invoke_curator,
+                    )
+                    provider_messages.extend(assembled)
+                    current_prompt_index = len(provider_messages) - 1
+                    native_prompt = json.dumps([message_dict(m) for m in assembled], ensure_ascii=False)
+                prompt, prompt_metadata = native_prompt, dict(native_metadata)
+            else:
+                prompt, prompt_metadata = agent._build_prompt_and_metadata(
                 user_message,
                 include_history=not use_structured_history,
                 history_override=prompt_history_override,
@@ -616,11 +685,18 @@ class AgentLoop:
                     history_selection_metadata = structured_history.to_metadata()
                 current_prompt_index = len(provider_messages)
                 provider_messages.append(current_message)
-            elif use_structured_history:
+            elif use_structured_history and not native_context:
                 # Refresh this Turn's context, not older user messages or signed replay.
                 provider_messages[current_prompt_index] = ModelMessage(role="user", content=prompt)
             request_messages = tuple(provider_messages)
-            if use_structured_history:
+            if native_context:
+                from .context_engine.helpers import estimate_prompt_tokens
+                from .context_engine.runtime import definitions
+                tokens = estimate_prompt_tokens([message_dict(m) for m in request_messages], definitions(agent))
+                admission = agent.context_window_budget.admit(tokens)
+                prompt_metadata.update(prompt_tokens=tokens, context_window_admitted=admission.admitted,
+                                       context_window=admission.to_dict(), provider_message_count=len(request_messages))
+            elif use_structured_history:
                 projected_tokens = model_messages_token_count(
                     provider_messages, agent.context_manager.token_counter
                 )
@@ -757,7 +833,7 @@ class AgentLoop:
             stream_stats = {"events": 0, "text_deltas": 0, "tool_calls": 0}
             final_stream = (
                 _FinalTextStream(model_text_sink)
-                if model_text_sink is not None
+                if model_text_sink is not None and not getattr(agent.model_client, "supports_native_tools", False)
                 else None
             )
 
@@ -835,7 +911,7 @@ class AgentLoop:
                     and overflow_compress_retries < OVERFLOW_MAX_COMPRESS_RETRIES
                 ):
                     if use_structured_history:
-                        shrunk, elided = request_messages, 0
+                        shrunk, elided = emergency_shrink_messages(request_messages) if native_context else (request_messages, 0)
                     else:
                         current_history = (
                             agent.session["history"]
@@ -850,6 +926,8 @@ class AgentLoop:
                         if target_history_tokens >= history_tokens:
                             elided = 0
                     if elided:
+                        if native_context:
+                            provider_messages[:] = shrunk
                         if not use_structured_history:
                             prompt_history_override = shrunk
                             prompt_segment_budget_overrides = {
@@ -1008,7 +1086,15 @@ class AgentLoop:
                     ],
                 )
             else:
-                kind, payload = agent.parse(raw)
+                kind, payload = (
+                    ("final", visible)
+                    if getattr(agent.model_client, "supports_native_tools", False)
+                    else agent.parse(raw)
+                )
+                # Native deltas can include thinking or accompany tool calls.
+                # Deliver only the cleaned, completed no-tool answer to this sink.
+                if model_text_sink is not None and getattr(agent.model_client, "supports_native_tools", False):
+                    model_text_sink(visible)
             agent.emit_trace(
                 task_state,
                 "model_parsed",
@@ -1131,10 +1217,13 @@ class AgentLoop:
                                 task_state.observed_changed_files
                             ).union(tool_result.affected_paths))
                         if tool_call_id in native_call_ids:
+                            from .context_engine.trust import wrap_untrusted
+                            provider_content = (wrap_untrusted(result, source=name) if native_context
+                                                else wrap_untrusted_tool_result(name, result))
                             provider_messages.append(
                                 ModelMessage(
                                     role="tool",
-                                    content=wrap_untrusted_tool_result(name, result),
+                                    content=provider_content,
                                     tool_call_id=tool_call_id,
                                     name=name,
                                 )
@@ -1154,6 +1243,7 @@ class AgentLoop:
                                 "name": name,
                                 "args": args,
                                 "content": result,
+                                **({"provider_content": provider_content} if tool_call_id in native_call_ids else {}),
                                 "created_at": now(),
                                 "tool_call_id": tool_call_id,
                             }
@@ -1273,6 +1363,9 @@ class AgentLoop:
                 continue
 
             final = (payload or raw).strip()
+            if native_context:
+                from .context_engine.runtime import after_turn
+                after_turn(agent, final, provider_messages, usage_aggregate.to_metadata())
             if cancellation_token is not None:
                 cancellation_token.raise_if_cancelled(
                     provider=type(agent.model_client).__name__
@@ -1357,6 +1450,9 @@ class AgentLoop:
             if model_text_sink is not None:
                 model_text_sink(final)
         agent.record({"role": "assistant", "content": final, "created_at": now()})
+        if native_context:
+            from .context_engine.runtime import after_turn
+            after_turn(agent, final, provider_messages, usage_aggregate.to_metadata())
         agent.last_call_efficiency_summary = CallEfficiencySummary.from_entries(
             call_entries, turn_succeeded=False
         ).to_dict()
@@ -1364,6 +1460,9 @@ class AgentLoop:
         workspace_checkpoint = agent.snapshot_workspace(
             task_state, task_state.stop_reason or "run_stopped"
         )
+        if native_context:
+            from .context_engine.runtime import stash_recovery
+            stash_recovery(agent, task_state)
         if workspace_checkpoint is not None:
             agent.run_store.write_task_state(task_state)
             agent.emit_trace(

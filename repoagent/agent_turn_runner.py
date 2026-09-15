@@ -64,7 +64,7 @@ class AgentTurnRunner:
             hits = await backend.recall(
                 self._agent.redact_text(request.text),
                 user_id=self._agent.memory_track_id,
-                top_k=3,
+                top_k=5 if getattr(self._agent.model_client, "supports_native_tools", False) else 3,
             )
             safe_hits = []
             rejected_secret_hits = 0
@@ -166,6 +166,9 @@ class AgentTurnRunner:
                     {"reason": "turn_cancelled", "status": "cancelled"},
                 )
             self._agent.backend_memory_hits = []
+            if task_state is not None:
+                from .context_engine.runtime import stash_recovery
+                stash_recovery(self._agent, task_state)
             raise
         except Exception as exc:
             text_filter.finish()
