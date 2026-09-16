@@ -116,6 +116,34 @@ def test_wrapped_budget_failure_retains_reason_and_cost(case):
     assert state["runs"][-1]["model_evidence"]["known_estimated_cost_usd"] == 0.12
 
 
+@pytest.mark.parametrize("reason", ["reported_tokens_exceed_limit", "invalid_or_nonactual_usage",
+                                   "model_identity_mismatch"])
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_invalid_model_response_is_not_resource_exhaustion(case, reason, wrapped):
+    from repoagent.evolver.model_budget import EvaluationBudgetError
+    from repoagent.evolver.model_proxy import ModelProxyError
+
+    run(case)
+
+    def rejected(*args):
+        if wrapped:
+            try:
+                raise EvaluationBudgetError(reason)
+            except EvaluationBudgetError as exc:
+                raise ModelProxyError("model_call_failed") from exc
+        return {"worker": {"agent_status": "failed", "budget_reason": reason}, "changes": {}}
+
+    if wrapped:
+        with pytest.raises(ModelProxyError):
+            run(case, "fix", agent_runner=rejected)
+    else:
+        run(case, "fix", agent_runner=rejected)
+    state = case[0].load(case[1])
+    assert state["status"] == "execution_failed"
+    assert state["runs"][-1]["budget_reason"] == reason
+    assert "candidate" not in state["runs"][-1]["verification"]
+
+
 def run(case, phase="investigate", **kwargs):
     store, cid, config = case
     return execute_case(
@@ -233,6 +261,16 @@ def test_stopped_agent_is_not_a_completed_investigation(case):
         }
 
     assert run(case, agent_runner=stopped)["status"] == "investigation_incomplete"
+
+
+def test_incomplete_repair_is_not_a_failed_verification(case):
+    run(case)
+    def stopped(*args):
+        return {"worker": {"agent_status": "stopped", "stop_reason": "retry_limit_reached"},
+                "changes": {}}
+    state = run(case, "fix", agent_runner=stopped)
+    assert state["status"] == "repair_incomplete"
+    assert "candidate" not in state["runs"][-1]["verification"]
 
 
 @pytest.mark.parametrize("phase", ["investigate", "fix"])

@@ -22,7 +22,7 @@ def main():
     with contextlib.redirect_stdout(sys.stderr):
         from repoagent.evolver.model_channel_guest import StdioModelClient
         from repoagent.issue_agent.admission import fit_issue_request
-        from repoagent.issue_agent.execution_policy import budgeted_request
+        from repoagent.issue_agent.execution_policy import budgeted_request, validate_closeout_result
         from repoagent.runtime import RepoAgent
         from repoagent.session_store import SessionStore
         from repoagent.workspace import WorkspaceContext
@@ -41,7 +41,8 @@ def main():
                 )
                 if reduction is not None:
                     reductions.append(reduction)
-                return super().generate(fitted)
+                result = super().generate(fitted)
+                return validate_closeout_result(request, result, remaining=remaining)
 
         reductions = []
         closeout_calls = []

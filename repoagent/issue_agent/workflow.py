@@ -14,6 +14,13 @@ from .feedback import diagnose
 from .execution import export_revision, make_patch, run_agent, validate_config, verify
 
 
+def budget_failure_status(reason):
+    # The budget client also rejects invalid responses, not just exhausted resources.
+    if reason in {"call_limit", "cost_limit", "input_limit", "output_limit"}:
+        return "budget_exhausted"
+    return "execution_failed"
+
+
 class StructuredModelClient:
     """Keep full native tool history on the provider's streaming request path."""
 
@@ -164,10 +171,10 @@ def execute_case(
                         budget_reason = agent["worker"].get("budget_reason")
                         if agent["worker"].get("stop_reason") == "step_limit_reached":
                             budget_reason = budget_reason or "call_limit"
-                        state["status"] = "budget_exhausted" if budget_reason else (
+                        state["status"] = budget_failure_status(budget_reason) if budget_reason else (
                             "investigation_incomplete"
                             if phase == "investigate"
-                            else "verification_failed"
+                            else "repair_incomplete"
                         )
                         if budget_reason:
                             run["budget_reason"] = budget_reason
@@ -210,7 +217,7 @@ def execute_case(
             while cause is not None and id(cause) not in seen:
                 seen.add(id(cause))
                 if isinstance(cause, EvaluationBudgetError):
-                    state["status"] = "budget_exhausted"
+                    state["status"] = budget_failure_status(cause.reason)
                     run["budget_reason"] = cause.reason
                     break
                 cause = cause.__cause__

@@ -30,6 +30,38 @@ def test_budget_policy_does_not_change_compaction():
     assert budgeted_request(original, remaining=1) is original
 
 
+def test_report_only_response_cannot_execute_unadvertised_tool(tmp_path):
+    import asyncio
+    import pytest
+    from repoagent import RepoAgent, SessionStore, WorkspaceContext
+    from repoagent.issue_agent.execution_policy import validate_closeout_result
+    from repoagent.providers.base import ModelEvent, ModelResult, ToolCall
+
+    class Provider:
+        model = "fixture"
+        supports_native_tools = supports_structured_messages = True
+
+        def stream(self, original):
+            prepared = budgeted_request(original, remaining=1)
+            assert not prepared.tools
+            result = ModelResult(tool_calls=(ToolCall(
+                id="unexpected", name="write_file",
+                arguments={"path": "must-not-exist.py", "content": "bad"}),))
+            validate_closeout_result(original, result, remaining=1)
+            yield ModelEvent(kind="completed", result=result)
+
+    agent = RepoAgent(model_client=Provider(), workspace=WorkspaceContext.build(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"), max_provider_calls=1,
+        approval_policy="auto", allowed_tools=["write_file"],
+        feature_flags={"skills": False, "memory": False})
+    try:
+        with pytest.raises(RuntimeError, match="report-only"):
+            agent.ask("Report unfinished work.")
+        assert not (tmp_path / "must-not-exist.py").exists()
+    finally:
+        asyncio.run(agent.aclose())
+
+
 def test_native_loop_can_finish_with_truthful_incomplete_report(tmp_path):
     import asyncio
     from repoagent import RepoAgent, SessionStore, WorkspaceContext

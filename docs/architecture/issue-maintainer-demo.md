@@ -166,3 +166,167 @@ verification_failed result. No automatic retry, publication or evolution occurs.
 The closeout policy is Issue workflow engineering, not a measured Evolver gain.
 Public historical fixtures remain development cases; their outcomes cannot be
 reported as clean held-out performance.
+
+## IM-008: Issue Strategy Evaluation Adapter
+
+`IssueRepairEvaluator` implements the existing Evolver deterministic and paired
+evaluator interfaces. It validates a Skill-only Git diff and reuses
+`execute_case(..., "fix")`, including actual Docker workers, closeout policy and
+independent patch verification. Control and treatment share a frozen investigation
+report and target revision, but have separate case stores/workspaces. The source
+seed excludes previous repair patches and answers. Trial receipts bind the live
+implementation, model gateway, shared seed and verification evidence.
+
+Trials score only completed independent verifications with valid actual cost
+evidence. Budget/infrastructure failures remain unscored. Repeating a used trial
+directory is refused, and existing Evolver run reservations/statistical gates
+remain in force. Shared investigation cost is explicitly excluded from marginal
+repair comparisons. Deterministic Skill shape validation is not a quality gate.
+
+The first additional live training case passed without a strategy intervention;
+it supplies maintenance evidence but no eligible failure for candidate generation.
+Holdout cases remain closed. No self-evolution improvement or automatic strategy
+activation is claimed. Full regression: 1,649 passed, 54 skipped, six existing
+datetime deprecation warnings.
+
+## IM-009: Frozen Training Batches and Closeout Enforcement
+
+Training batches validate every Issue/source/config before any model call, retain
+a shared model/implementation descriptor, exclude declared held-out URLs and
+record prior exposure. Every declared task appears in the summary; exceptions
+retain call/cost evidence and do not cause silent retries. Incomplete runs do not
+become quality-failure training examples.
+
+The first seven-case batch completed with five accepted candidates and two
+incomplete repairs (empty-response recovery exhaustion and call exhaustion).
+No strategy candidate or holdout execution followed. Its raw evidence is retained
+under `artifacts/issue-strategy-training-batch-20260916`.
+
+The batch demonstrated that removing tool declarations does not guarantee a model
+will stop returning tool invocations. The Issue worker now validates the final
+report-only response before delivering it to the native loop; unexpected tool
+calls are rejected, not executed or silently converted into a successful answer.
+Generic unfinished repair is reported as repair_incomplete, distinct from a
+candidate actually rejected by the host verifier. These guard changes happened
+after the frozen batch and do not retroactively improve its 5/7 result.
+
+Validation: 1,654 tests passed, 54 skipped, six pre-existing warnings. A separate
+real Docker/RPC fixture smoke test returned an unauthorized final write request
+and verified no file was created, one call remained accounted for, and the worker
+failed closed. It used zero paid model calls; artifacts are under
+`artifacts/issue-closeout-guard-docker-20260916-v2`.
+
+## IM-010: Separate Admission Exhaustion From Invalid Model Responses
+
+The output-cap diagnostic reproduced more-itertools-719's empty-response stop:
+six reasoning-only responses ended at `max_tokens` under the 4096-token cap.
+The native recovery loop did run (two prefills and three retries); recovery was
+exhausted rather than skipped. This establishes truncation, not a provider or
+reasoning root cause. Boltons-337 passed its independent verifier under both
+4096 and 8192 caps in this diagnostic, so its earlier call exhaustion is not a
+deterministic inability to repair that case.
+
+Another 8192-token request returned reported output usage of 8193. The existing
+budget client correctly rejected the response and retained its priced usage.
+However, Issue orchestration classified every EvaluationBudgetError as resource
+exhaustion, including invalid usage and model identity errors. Only call, cost,
+input and output admission limits now map to budget_exhausted. Other budget-client
+errors map to execution_failed with the original budget_reason retained. Both
+wrapped RPC exceptions and worker-result paths follow the same classification.
+Six regression cases failed before this change and passed after it.
+
+No provider token count is clamped, no over-limit response is accepted, and no
+native Harness recovery behavior or default model budget changed. Frozen
+historical receipts retain their original labels. Diagnostic reruns are not
+combined with the seven-case batch, are not held-out evaluation, and do not
+establish self-evolution gains. See the local roadmap for exact run artifacts.
+
+## IM-011: Measured Skill Efficiency Pilot
+
+Added a descriptive paired-efficiency summary, separate from deployment gates.
+It validates the frozen task/repetition/arm matrix, retains known calls and cost
+even for inconclusive outcomes, and refuses a savings claim when measurements
+or paired acceptance are incomplete. Missing, duplicate, invalid or failed
+trials cannot disappear from the denominator. The predeclared primary metric is
+model calls; cheaper estimates alone cannot qualify a candidate.
+
+An operator-initiated real pilot used ModelCandidateProposer to generate one
+generic Skill from aggregate training observations, ControlledEvolver to bind
+its content to an isolated Git candidate, and IssueRepairEvaluator to run twelve
+real repair trials. No implementation-specific answer or verifier code was
+supplied to the proposer. Both arms shared frozen investigations and equal model
+budgets; AB/BA order balanced two repetitions per task. All six treatment runs
+loaded workspace/issue-repair, and all six controls had no active Skill.
+
+Observed training outcomes: control 4/6 accepted, treatment 6/6; the control had
+one incomplete run and one independently rejected repair. However, treatment
+used 102 calls versus 86 and cost more in total. The efficiency qualification
+failed, held-out cases remained unopened, and no approval/activation occurred.
+This is an exploratory positive completion signal on three training tasks,
+not proof of general improvement or a passing efficiency promotion gate.
+
+The newly observed independently rejected repair now supplies a legitimate
+known_failure_persists training observation through the existing evidence
+exporter. Export is not approval or candidate generation. Infrastructure and
+input-limit failures still cannot be relabelled as verified wrong patches.
+
+## IM-012: Failure-Driven Reliability Experiment
+
+The next experiment consumes that digest-bound verified failure through the
+existing reviewed_failure adapter. A host-side assistant/operator review under
+user delegation authorizes training only, not human deployment approval. The
+existing proposer receives the prior Skill, training observations and the
+redacted symptom: repair terminated with a future intention and no source edit,
+while independent acceptance still failed. It produces one immutable new Skill;
+the candidate cannot alter the runtime, tools, target source or verifier.
+
+Added a separate end-to-end reliability summary instead of reinterpreting the
+efficiency gate. Every planned trial stays in the denominator. Accepted repairs,
+verified failed repairs, measured unfinished runs and invalid measurements are
+counted separately. Infrastructure/invalid-usage outcomes block qualification;
+unfinished runs are not reported as proven wrong patches. A strict aggregate
+acceptance improvement also requires a minimum candidate acceptance count and
+no per-task regression. Missing/duplicate trials or ties cannot qualify.
+
+The new frozen pilot uses three repetitions per arm on three training tasks.
+At least 8/9 candidate acceptance, strict improvement and no per-task regression
+are prerequisites to opening two hash-frozen held-out cases. Candidate generation
+finishes before any held-out text is read, and no subsequent candidate revision
+is permitted. Both arms share one unskilled investigation per held-out case.
+The native promotion and human activation gates remain unchanged; a small pilot
+signal does not imply statistical proof or automatic rollout.
+
+Validation before the full experiment: 1678 tests passed, 54 skipped, six existing
+warnings. Scoped Ruff and whitespace checks passed. Per-run outcomes and budget
+evidence are retained under artifacts/issue-skill-reliability-pilot-20260916.
+
+Observed outcome: training accepted 8/9 control versus 9/9 candidate, meeting the
+exploratory training threshold. Held-out evaluation accepted 4/4 in both arms,
+so strict held-out acceptance improvement did not qualify. Candidate calls were
+50 versus 53 and estimated cost was about 6.1% lower on those held-out runs, but
+these small secondary observations do not justify changing the primary goal or
+activating the strategy. All 26 repair receipts confirmed the expected Skill
+exposure. This closes a real failure-to-candidate-to-heldout-evaluation loop
+while explicitly retaining non-promotion when improvement is unproven.
+
+## IM-013: Pre-Commit Evidence Integrity Review
+
+The paired adapter now retains known paid usage separately from scoreable cost:
+invalid or incomplete measurements still block qualification, but their known
+charges remain in both summaries. Efficiency checks reject boolean/float
+repetition identifiers and accept an exact 10% call reduction without subtraction
+roundoff. These accounting fixes do not change the recorded pilot conclusions.
+
+Training batches reject excluded Issue URLs before opening snapshots. Summaries
+are atomically persisted with a row for every planned task, including not-started
+tasks. Model setup or implementation drift after a paid phase preserves partial
+accounting before aborting; replay remains forbidden. Fault-injection tests cover
+client creation, gateway drift, source drift and progress callback failure.
+
+No candidate Skill is installed by default, no strategy is activated, and no
+native Harness budget or recovery behavior is changed. Experimental candidates
+remain isolated. The evaluated holdouts are now exposed evaluation data and must
+not be reused as fresh sealed tests for subsequent adaptive search.
+
+Final regression after review fixes: 1,688 passed, 54 skipped, six existing
+datetime deprecation warnings. Scoped Ruff and git whitespace checks passed.

@@ -5,6 +5,12 @@ from dataclasses import replace
 from ..providers.base import ModelMessage
 
 
+def validate_closeout_result(request, result, *, remaining):
+    if request.call_kind == "agent" and remaining == 1 and result.tool_calls:
+        raise RuntimeError("Issue report-only call returned a tool invocation")
+    return result
+
+
 def budgeted_request(request, *, remaining):
     if request.call_kind != "agent" or remaining > 6:
         return request

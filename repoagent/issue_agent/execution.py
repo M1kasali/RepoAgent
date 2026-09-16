@@ -57,7 +57,9 @@ def validate_config(data):
         or len(set(paths)) != len(paths)
     ):
         raise ValueError("declare 1-20 unique mutable files")
-    for name in [data["pythonpath"], *paths]:
+    # A flat-layout import root is valid; mutable files must still name a file.
+    source_roots = [] if data["pythonpath"] == "." else [data["pythonpath"]]
+    for name in [*source_roots, *paths]:
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", name):
             raise ValueError("unsafe source path")
         if name.startswith("/") or any(
