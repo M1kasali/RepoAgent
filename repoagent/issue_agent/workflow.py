@@ -6,11 +6,11 @@ from pathlib import Path
 from ..atomic_io import atomic_replace_unlocked
 from ..evolver.model_budget import (
     BudgetedEvaluationClient,
-    EvaluationModelLimits,
-    _json_default,
+    EvaluationBudgetError,
 )
 from ..pricing import ModelPricing
 from .cases import digest
+from .feedback import diagnose
 from .execution import export_revision, make_patch, run_agent, validate_config, verify
 
 
@@ -30,6 +30,8 @@ class StructuredModelClient:
 def make_client():
     from ..cli import _build_model_client, build_arg_parser
     from ..config import load_project_env
+    from ..providers.clients import AnthropicCompatibleModelClient
+    from .admission import count_anthropic_request, issue_limits
 
     load_project_env(Path.cwd())
     leaf = _build_model_client(
@@ -37,6 +39,8 @@ def make_client():
             ["--profile", "deepseek", "--model", "deepseek-flash"]
         )
     )
+    if not isinstance(leaf, AnthropicCompatibleModelClient):
+        raise ValueError("Issue admission currently requires the configured Anthropic-compatible transport")
     pricing = ModelPricing(
         0.3,
         1.2,
@@ -46,29 +50,17 @@ def make_client():
     )
 
     def count(request):
-        values = {
-            "prompt": request.prompt,
-            "messages": request.messages,
-            "tools": request.tools,
-        }
-        return (
-            len(json.dumps(values, ensure_ascii=True, default=_json_default).encode())
-            + 512
-        )
+        return count_anthropic_request(request, model=leaf.model, temperature=leaf.temperature)
 
-    return BudgetedEvaluationClient(
+    client = BudgetedEvaluationClient(
         StructuredModelClient(leaf),
-        limits=EvaluationModelLimits(
-            max_calls=24,
-            max_input_tokens=128000,
-            max_output_tokens=4096,
-            max_estimated_cost_usd=1,
-            timeout_seconds=90,
-        ),
+        limits=issue_limits(),
         pricing=pricing,
         request_token_counter=count,
-        counter_identity="full-prompt-messages-tools-json-bytes-plus512/v1",
+        counter_identity="anthropic-wire-json-bytes-plus512/v2",
     )
+    client.counter_temperature = leaf.temperature
+    return client
 
 
 def write_report(store, state):
@@ -82,6 +74,7 @@ def write_report(store, state):
         "repository": state["repository"],
         "latest_run": latest,
         "automatic_publication": False,
+        "feedback": diagnose(state),
     }
     atomic_replace_unlocked(
         directory / "report.json", json.dumps(report, indent=2) + "\n"
@@ -112,7 +105,12 @@ def execute_case(
     client_factory=make_client,
     agent_runner=run_agent,
     verifier=verify,
+    on_progress=None,
 ):
+    def progress(stage):
+        if on_progress is not None:
+            on_progress(stage)
+
     if phase not in {"investigate", "fix"}:
         raise ValueError("unsupported issue phase")
     with store.locked(case_id) as state:
@@ -147,6 +145,7 @@ def execute_case(
                     "Issue body is empty; provide observed and expected behavior."
                 )
             else:
+                progress("baseline")
                 baseline = verifier(directory / "baseline", state["repository"], config)
                 run["verification"] = {"baseline": baseline}
                 if not baseline["reproduced"]:
@@ -156,19 +155,26 @@ def execute_case(
                         else "environment_blocked"
                     )
                 else:
+                    progress("agent")
                     agent = agent_runner(
                         directory, state, config, client_factory(), phase
                     )
                     run["agent"] = agent
                     if agent["worker"].get("agent_status") != "completed":
-                        state["status"] = (
+                        budget_reason = agent["worker"].get("budget_reason")
+                        if agent["worker"].get("stop_reason") == "step_limit_reached":
+                            budget_reason = budget_reason or "call_limit"
+                        state["status"] = "budget_exhausted" if budget_reason else (
                             "investigation_incomplete"
                             if phase == "investigate"
                             else "verification_failed"
                         )
+                        if budget_reason:
+                            run["budget_reason"] = budget_reason
                     elif phase == "investigate":
                         state["status"] = "reproduced"
                     else:
+                        progress("candidate")
                         candidate = verifier(
                             directory / "candidate",
                             state["repository"],
@@ -199,9 +205,26 @@ def execute_case(
             run["status"] = "failed"
             run["error_type"] = type(exc).__name__
             state["status"] = "execution_failed"
+            cause = exc
+            seen = set()
+            while cause is not None and id(cause) not in seen:
+                seen.add(id(cause))
+                if isinstance(cause, EvaluationBudgetError):
+                    state["status"] = "budget_exhausted"
+                    run["budget_reason"] = cause.reason
+                    break
+                cause = cause.__cause__
+            budget_path = directory / "model-budget.json"
+            if budget_path.is_file():
+                try:
+                    run["model_evidence"] = json.loads(budget_path.read_text())
+                except (OSError, ValueError):
+                    run["model_evidence_unavailable"] = True
             store.save(state)
             write_report(store, state)
+            progress("failed")
             raise
         store.save(state)
         write_report(store, state)
+        progress("finished:" + state["status"])
         return state

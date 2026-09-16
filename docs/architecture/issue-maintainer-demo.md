@@ -118,3 +118,51 @@ check is separate from the curated historical end-to-end demo.
 
 All completion statements are limited to the planned CLI demo. No public writes,
 production deployment, main-branch merge, commit or push were performed.
+
+## IM-006: Terminal Presentation
+
+After the initial demo commit `be6a82a`, issue commands gained optional
+`--format text`. Default and explicit JSON preserve the existing case payload.
+Text output summarizes saved state, per-phase verification exits, Agent status,
+recorded call count and changed filenames, and links only to artifacts that
+exist. Untrusted terminal control characters are escaped and field lengths are
+bounded. Source contents, issue bodies and model narration are not printed.
+
+The workflow exposes an optional progress callback at baseline, Agent, candidate
+verification and final-state boundaries. The text CLI writes these to stderr;
+JSON mode has no callback and stdout stays parseable. This is phase-level progress,
+not token/tool streaming. A disconnected progress stream does not alter execution.
+Read-only inspection of the completed real case verified the summary format
+without a provider call. The affected presentation, workflow, execution and
+existing product CLI suite passed all 59 tests with Docker enabled. JUnit evidence
+is in `artifacts/issue-demo-live/presentation-regression.xml`; Ruff and diff checks
+passed. The full Harness suite was not rerun for this presentation-only change.
+
+## IM-007: Bounded Investigation and Repair Closeout
+
+The Issue layer owns phase instructions, not the native Harness system prompt.
+Investigation stops after a minimal executed reproduction and plausible source
+location; it must not prototype repairs or recreate missing test dependencies.
+Repair gets at most 12,000 characters of the latest completed investigation
+report, explicitly marked untrusted. Source is exported afresh, so investigation
+scripts and hidden host probes are not copied into repair.
+
+The native runtime already exposes remaining calls and asks for a final answer.
+The Issue model adapter adds an explicit closeout policy when six calls remain:
+finish existing targeted checks rather than expand the search. The final call
+advertises no tools and requests a truthful report, including unfinished work.
+Compaction requests are not rewritten. Closeout call indices are retained in
+worker evidence. Request fitting and host budget admission still apply after
+the policy is added; the call cap is not increased and no extra model call is
+reserved outside it.
+
+A completed model turn is not repair acceptance. The host still reapplies the
+patch to a fresh export and runs its frozen independent probe. An empty patch
+cannot be candidate_ready. A report-only final call cannot override a failing
+probe, and model claims of success are never acceptance evidence. If the runtime
+still reaches its call cap, the case is budget_exhausted rather than a fabricated
+verification_failed result. No automatic retry, publication or evolution occurs.
+
+The closeout policy is Issue workflow engineering, not a measured Evolver gain.
+Public historical fixtures remain development cases; their outcomes cannot be
+reported as clean held-out performance.

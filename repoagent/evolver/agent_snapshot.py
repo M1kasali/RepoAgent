@@ -70,8 +70,13 @@ class AgentSnapshotTask:
     enable_tests: bool = False
     behavior_checks: tuple[BehaviorCheck, ...] = ()
     behavior_files: tuple[str, ...] = ()
+    native_tools: bool = False
 
     def __post_init__(self):
+        if type(self.native_tools) is not bool:
+            raise ValueError("native_tools must be boolean")
+        if self.native_tools and self.model_mode != "host":
+            raise ValueError("native tools require the host model channel")
         if type(self.enable_skills) is not bool:
             raise ValueError("enable_skills must be boolean")
         if type(self.enable_tests) is not bool:
@@ -132,6 +137,7 @@ class AgentSnapshotTask:
             "max_output_tokens": self.max_output_tokens,
             "enable_skills": self.enable_skills,
             **({"enable_tests": True} if self.enable_tests else {}),
+            **({"native_tools": True} if self.native_tools else {}),
         }
 
     def descriptor(self):

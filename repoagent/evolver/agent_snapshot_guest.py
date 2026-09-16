@@ -63,6 +63,7 @@ def main():
             client = namespace["StdioModelClient"](
                 config["model"], reader=channel_reader, writer=channel_writer
             )
+            client.supports_native_tools = config.get("native_tools", False)
         else:
             client = ScriptedProvider()
         agent = RepoAgent(

@@ -1,0 +1,7 @@
+{
+  "image": "python@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17",
+  "pythonpath": "src",
+  "mutable_paths": ["src/packaging/specifiers.py"],
+  "failure_marker": "ISSUE_683_EPOCH_PREFIX_MISMATCH",
+  "probe": "from packaging.specifiers import Specifier\ncases = [('==2!1.0.0.0.*', '2!1.0.0', True), ('==1.0.0.*', '2!1.0', False), ('==2!1.0.0.*', '1.0', False), ('==1.0.0.*', '1.0', True), ('~=2!1.0', '2!1.5', True), ('~=2!1.0', '3!1.5', False)]\nresults = [(s, v, expected, Specifier(s).contains(v)) for s, v, expected in cases]\nfor result in results:\n    print(result)\nassert all(actual == expected for s, v, expected, actual in results), 'ISSUE_683_EPOCH_PREFIX_MISMATCH'\nprint('All six maintainer checks passed')\n"
+}

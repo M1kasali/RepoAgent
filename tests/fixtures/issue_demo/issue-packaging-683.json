@@ -1,0 +1,5 @@
+{
+  "html_url": "https://github.com/pypa/packaging/issues/683",
+  "title": "Epoch-aware wildcard version matching disagrees with zero padding",
+  "body": "Curated behavior-only historical report: Specifier('==2!1.0.0.0.*').contains('2!1.0.0') returns False although the epoch matches and the release components differ only by trailing zeros. Investigate and repair prefix matching while preserving unequal-epoch rejection, ordinary prefix matching and compatible-release behavior. Source imports are available through PYTHONPATH=src."
+}

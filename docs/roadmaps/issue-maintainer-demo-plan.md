@@ -78,3 +78,18 @@ and model evidence are not product Git files. Do not claim a stage complete only
 because APIs exist. Investigate ordinary failures autonomously; ask the user for
 new sensitive access, public writes, major scope changes or essential ambiguity.
 No commit/push/merge unless subsequently requested.
+
+## Follow-up: Terminal Demonstration (2026-09-14)
+
+The initial demo was committed/pushed as `be6a82a` at the user's request.
+This follow-up changes presentation only, not verification or model strategy.
+
+- [x] Keep default JSON output compatible and add opt-in text summaries.
+- [x] Add actual phase progress on stderr, without exposing model/source bodies.
+- [x] Inspect the completed local case without additional model calls.
+- [x] Document commands for saved-result inspection and new execution.
+- [x] Run presentation, workflow and existing CLI regressions including Docker.
+
+Follow-up verification: 59 passed, including real Docker; Ruff and diff checks
+passed. JUnit: `artifacts/issue-demo-live/presentation-regression.xml`.
+The full Harness suite was not rerun for this presentation-only follow-up.

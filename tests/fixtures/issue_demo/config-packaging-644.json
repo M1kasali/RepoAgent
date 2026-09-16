@@ -1,0 +1,7 @@
+{
+  "image": "python@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17",
+  "pythonpath": "src",
+  "mutable_paths": ["src/packaging/requirements.py"],
+  "failure_marker": "ISSUE_644_REQUIREMENT_IDENTITY",
+  "probe": "from packaging.requirements import Requirement\na = Requirement('scikit-learn==1.0.1')\nb = Requirement('scikit_learn==1.0.1')\nc = Requirement('Scikit.Learn==1.0.1')\nchecks = [a == b, hash(a) == hash(b), str(a) != str(b), a == c, len({a, b, c}) == 1, a != Requirement('scikit-learn==2.0'), a != Requirement('other==1.0.1')]\nprint(checks)\nassert all(checks), 'ISSUE_644_REQUIREMENT_IDENTITY'\nprint('All seven maintainer checks passed')\n"
+}

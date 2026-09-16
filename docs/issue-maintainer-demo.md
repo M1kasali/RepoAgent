@@ -14,6 +14,23 @@ The original Harness remains on `main` at `cc7bc63`.
 
 ## Run the Historical Example
 
+### Inspect the Saved Demo Without Model Calls
+
+On the development machine, this reads the completed case without starting any
+Agent, container or provider request:
+
+```bash
+.venv/bin/python -m repoagent issue show issue_c955ff15d3f244d488b1ae7a \
+  --store artifacts/issue-demo-live/cases --format text
+```
+
+The text summary shows phase states, baseline/candidate exit codes, recorded model
+calls, changed filenames and existing report/patch paths, not full source or issue
+body. It displays recorded evidence, not a newly rerun verification. Local case
+artifacts are not included in Git; a fresh clone must run the example below.
+
+### Execute a New Case
+
 Prerequisites: installed RepoAgent dependencies, host Python 3.12+, Git, working
 Linux Docker, and a configured `REPOAGENT_DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY`.
 Run from this RepoAgent checkout, not from the untrusted target repository.
@@ -44,20 +61,27 @@ a bounded public GitHub API read of the issue title/body, without comments.
 
 ```bash
 .venv/bin/python -m repoagent issue investigate CASE_ID \
-  --config tests/fixtures/issue_demo/config-360.json --store artifacts/issue-demo/cases
-.venv/bin/python -m repoagent issue show CASE_ID --store artifacts/issue-demo/cases
+  --config tests/fixtures/issue_demo/config-360.json --store artifacts/issue-demo/cases --format text
+.venv/bin/python -m repoagent issue show CASE_ID --store artifacts/issue-demo/cases --format text
 ```
 
 Review the report first. Then explicitly request a repair:
 
 ```bash
-.venv/bin/python -m repoagent issue fix CASE_ID --store artifacts/issue-demo/cases
+.venv/bin/python -m repoagent issue fix CASE_ID --store artifacts/issue-demo/cases --format text
 ```
 
 The case directory contains `case.json`, `report.md`, `report.json`, model
 budgets and journals, isolated Agent sessions, baseline/candidate command
 outcomes, and `fix/candidate.patch`. Nothing is commented, pushed, merged or
 closed externally. The target checkout remains unchanged.
+
+`--format text` is available on all four issue commands. During execution it sends
+phase progress to stderr and the final summary to stdout. It reports actual phase
+boundaries, not per-tool streaming or estimated percentages. The default remains
+JSON with no progress lines; explicit `--format json` has the same behavior, so
+existing scripts can continue parsing stdout unchanged. A stopped Agent remains
+visible even if an old case has an incorrectly recorded reproduced status.
 
 Each phase allows at most 24 model calls, 4096 output tokens per call,
 128000 conservatively counted input units per call, a $1 estimated budget,

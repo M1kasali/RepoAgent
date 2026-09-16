@@ -1,0 +1,5 @@
+{
+  "html_url": "https://github.com/pypa/packaging/issues/644",
+  "title": "Equivalent requirement names disagree in equality and hashing",
+  "body": "Curated behavior-only subset of the historical normalization report: Requirement('scikit-learn==1.0.1') and Requirement('scikit_learn==1.0.1') should compare equal and have equal hashes. Equivalent case and separator spellings should deduplicate in sets. Preserve the original string spelling and keep genuinely different projects or version requirements distinct. Investigate and repair equality/hash semantics. Source imports are available through PYTHONPATH=src."
+}

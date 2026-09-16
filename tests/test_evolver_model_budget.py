@@ -113,6 +113,10 @@ def test_budget_denials_happen_before_backend_and_exact_cost_boundary_is_allowed
     with pytest.raises(EvaluationBudgetError, match="cost_limit"):
         client.generate(_request())
     assert len(leaf.requests) == 1
+    denial = client.evidence()["admission_denials"][-1]
+    assert denial["reason"] == "cost_limit"
+    assert denial["calls_reserved"] == 1
+    assert denial["proposed_reservation_usd"] == "0.00012"
 
 
 @pytest.mark.parametrize(

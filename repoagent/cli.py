@@ -820,7 +820,11 @@ def run_product_command(argv):
     except (OSError, ValueError, LedgerIntegrityError, GatewayAlreadyRunningError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    print_json(payload)
+    if args.command == "issue" and args.output_format == "text":
+        from .issue_agent.cli import format_summary
+        print(format_summary(payload, args.store))
+    else:
+        print_json(payload)
     if args.command == "sandbox" and args.sandbox_command == "reconcile" and payload["status"] != "pass":
         return 2
     if args.command == "mcp" and payload["status"] != "pass":

@@ -90,6 +90,32 @@ def fake_verifier(directory, repository, config, changes=None):
     return {"passed": bool(changes), "reproduced": not bool(changes)}
 
 
+def test_wrapped_budget_failure_retains_reason_and_cost(case):
+    import json
+    from repoagent.evolver.model_budget import EvaluationBudgetError
+    from repoagent.evolver.model_proxy import ModelProxyError
+
+    def exhausted(directory, state, config, client, phase):
+        (directory / "model-budget.json").write_text(json.dumps({
+            "calls_reserved": 3, "known_estimated_cost_usd": 0.12,
+            "cost_complete": True,
+        }))
+        try:
+            raise EvaluationBudgetError("input_limit")
+        except EvaluationBudgetError as exc:
+            raise ModelProxyError("model_call_failed") from exc
+
+    store, cid, config = case
+    with pytest.raises(ModelProxyError):
+        execute_case(store, cid, "investigate", config=config,
+                     client_factory=lambda: None, agent_runner=exhausted,
+                     verifier=fake_verifier)
+    state = store.load(cid)
+    assert state["status"] == "budget_exhausted"
+    assert state["runs"][-1]["budget_reason"] == "input_limit"
+    assert state["runs"][-1]["model_evidence"]["known_estimated_cost_usd"] == 0.12
+
+
 def run(case, phase="investigate", **kwargs):
     store, cid, config = case
     return execute_case(
@@ -178,6 +204,27 @@ def test_failed_fix_not_ready(case):
     assert state["status"] == "verification_failed"
 
 
+@pytest.mark.parametrize("empty_patch", [True, False])
+def test_closeout_report_cannot_override_patch_acceptance(case, empty_patch):
+    run(case)
+
+    def closed_out(*args):
+        changes = {} if empty_patch else {"main.py": "still broken\n"}
+        return {
+            "worker": {"answer": "Everything is fixed!", "agent_status": "completed",
+                       "closeout_calls": [{"index": 22, "remaining": 1, "tools_enabled": False}]},
+            "changes": changes, "changes_digest": digest(changes),
+        }
+
+    def verifier(directory, repository, config, changes=None):
+        return {"passed": changes is not None and empty_patch,
+                "reproduced": changes is None or not empty_patch}
+
+    state = run(case, "fix", agent_runner=closed_out, verifier=verifier)
+    assert state["status"] == "verification_failed"
+    assert "candidate" in state["runs"][-1]["verification"]
+
+
 def test_stopped_agent_is_not_a_completed_investigation(case):
     def stopped(*args):
         return {
@@ -186,6 +233,42 @@ def test_stopped_agent_is_not_a_completed_investigation(case):
         }
 
     assert run(case, agent_runner=stopped)["status"] == "investigation_incomplete"
+
+
+@pytest.mark.parametrize("phase", ["investigate", "fix"])
+def test_provider_step_limit_is_budget_exhaustion_not_verification_failure(case, phase):
+    if phase == "fix":
+        run(case)
+
+    def stopped(*args):
+        return {
+            "worker": {"agent_status": "stopped", "stop_reason": "step_limit_reached"},
+            "changes": {"main.py": "after\n"},
+        }
+
+    state = run(case, phase, agent_runner=stopped)
+    assert state["status"] == "budget_exhausted"
+    assert state["runs"][-1]["budget_reason"] == "call_limit"
+    assert "candidate" not in state["runs"][-1]["verification"]
+
+
+def test_progress_tracks_actual_stages(case):
+    events = []
+    run(case, on_progress=events.append)
+    assert events == ["baseline", "agent", "finished:reproduced"]
+    events.clear()
+    run(case, "fix", on_progress=events.append)
+    assert events == ["baseline", "agent", "candidate", "finished:candidate_ready"]
+
+
+def test_blocked_baseline_never_announces_agent_execution(case):
+    events = []
+    run(
+        case,
+        on_progress=events.append,
+        verifier=lambda *args: {"passed": False, "reproduced": False},
+    )
+    assert events == ["baseline", "finished:environment_blocked"]
 
 
 def test_frozen_config_tampering_blocks_repair(case):
@@ -232,11 +315,19 @@ def test_budget_counter_accepts_native_immutable_tool_schema(monkeypatch):
     from repoagent.issue_agent.workflow import make_client
     from repoagent.providers.base import ModelRequest, ModelTool
     from test_evolver_model_budget import LeafClient
+    from repoagent.providers.clients import AnthropicCompatibleModelClient
     import repoagent.cli
     import repoagent.config
 
     monkeypatch.setattr(repoagent.config, "load_project_env", lambda path: None)
-    monkeypatch.setattr(repoagent.cli, "_build_model_client", lambda args: LeafClient())
+    class FixtureAnthropic(LeafClient, AnthropicCompatibleModelClient):
+        temperature = None
+
+        def stream(self, request):
+            from repoagent.providers.base import ModelEvent
+            yield ModelEvent(kind="completed", result=self.generate(request))
+
+    monkeypatch.setattr(repoagent.cli, "_build_model_client", lambda args: FixtureAnthropic())
     client = make_client()
     result = client.generate(
         ModelRequest(

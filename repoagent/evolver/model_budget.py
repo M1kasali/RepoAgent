@@ -130,6 +130,7 @@ class BudgetedEvaluationClient:
         self._entries = []
         self._reserved_cost = Decimal(0)
         self._blocked_reason = None
+        self._admission_denials = []
 
     def descriptor(self):
         return {
@@ -161,12 +162,21 @@ class BudgetedEvaluationClient:
                     sum((Decimal(str(cost)) for cost in costs), Decimal(0))
                 ),
                 "entries": json.loads(json.dumps(self._entries, allow_nan=False)),
+                "admission_denials": json.loads(json.dumps(self._admission_denials)),
             }
 
     def generate(self, request):
         if not isinstance(request, ModelRequest):
             raise TypeError("evaluation client requires ModelRequest")
         with self._lock:
+            def deny(reason, *, counted=None, proposed_reservation=None):
+                self._admission_denials.append({
+                    "reason": reason, "calls_reserved": len(self._entries),
+                    "counted_input_tokens": counted,
+                    "reserved_cost_usd": str(self._reserved_cost),
+                    "proposed_reservation_usd": str(proposed_reservation) if proposed_reservation is not None else None,
+                })
+                raise EvaluationBudgetError(reason)
             if request.cancellation_token is not None:
                 request.cancellation_token.raise_if_cancelled(provider=self.model)
             if self._blocked_reason:
@@ -174,7 +184,7 @@ class BudgetedEvaluationClient:
             if str(getattr(self._client, "model", "")) != self.model:
                 raise EvaluationBudgetError("model_configuration_changed")
             if len(self._entries) >= self.limits.max_calls:
-                raise EvaluationBudgetError("call_limit")
+                deny("call_limit")
             if (
                 type(request.max_output_tokens) is not int
                 or not 0 < request.max_output_tokens <= self.limits.max_output_tokens
@@ -199,7 +209,7 @@ class BudgetedEvaluationClient:
             if type(counted) is not int or counted < 0:
                 raise EvaluationBudgetError("invalid_input_count")
             if counted > self.limits.max_input_tokens:
-                raise EvaluationBudgetError("input_limit")
+                deny("input_limit", counted=counted)
             input_rate = max(
                 self.pricing.input_per_1m_usd,
                 self.pricing.cache_read_per_1m_usd,
@@ -213,7 +223,7 @@ class BudgetedEvaluationClient:
             if self._reserved_cost + reserved > Decimal(
                 str(self.limits.max_estimated_cost_usd)
             ):
-                raise EvaluationBudgetError("cost_limit")
+                deny("cost_limit", counted=counted, proposed_reservation=reserved)
             entry = {
                 "index": len(self._entries),
                 "request_digest": _request_digest(effective),
