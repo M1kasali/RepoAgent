@@ -129,9 +129,9 @@ def test_session_dialog_rename_export_and_confirmed_delete(tmp_path, size):
             await pilot.pause()
             await click(pilot, screen, "#delete-session")
             assert screen.delete_revision is not None
-            assert (app.server.agent.session_store.root / f"{old_id}.json").exists()
+            assert app.server.agent.session_store.path(old_id).exists()
             await click(pilot, screen, "#delete-session")
-            assert not (app.server.agent.session_store.root / f"{old_id}.json").exists()
+            assert not app.server.agent.session_store.path(old_id).exists()
             await pilot.press("escape")
             await pilot.pause()
             assert len(app.server._subscriptions) == 1

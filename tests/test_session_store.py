@@ -15,7 +15,12 @@ def test_session_store_saves_loads_and_finds_latest_session(tmp_path):
     second_path = store.save(second)
 
     assert first_path == store.path("session_001")
-    assert json.loads(first_path.read_text(encoding="utf-8"))["id"] == "session_001"
+    assert (
+        json.loads(first_path.read_text(encoding="utf-8").splitlines()[0])["metadata"][
+            "repoagent"
+        ]["id"]
+        == "session_001"
+    )
     assert store.load("session_002") == second
     assert store.latest() == second_path.stem
 
@@ -31,7 +36,9 @@ def test_session_store_persists_version_and_revision_metadata(tmp_path):
     session = {"id": "session_001", "history": []}
 
     path = store.save(session)
-    persisted = json.loads(path.read_text(encoding="utf-8"))
+    persisted = json.loads(path.read_text(encoding="utf-8").splitlines()[0])[
+        "metadata"
+    ]["repoagent"]
 
     assert persisted["_schema_version"] == 1
     assert persisted["_revision"] == 1
@@ -41,14 +48,14 @@ def test_session_store_persists_version_and_revision_metadata(tmp_path):
 def test_session_store_loads_legacy_unversioned_session(tmp_path):
     store = SessionStore(tmp_path / "sessions")
     session = {"id": "legacy", "history": []}
-    store.path("legacy").write_text(json.dumps(session), encoding="utf-8")
+    (store.root / "legacy.json").write_text(json.dumps(session), encoding="utf-8")
 
     assert store.load("legacy") == session
 
 
 def test_session_store_rejects_unsupported_schema_on_load_and_save(tmp_path):
     store = SessionStore(tmp_path / "sessions")
-    path = store.path("future")
+    path = store.root / "future.json"
     path.write_text(
         json.dumps({"id": "future", "_schema_version": 99, "_revision": 1}),
         encoding="utf-8",

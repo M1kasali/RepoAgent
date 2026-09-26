@@ -324,20 +324,18 @@ class TUIRPCServer:
         if method == "session.list":
             offset, limit = self._page(params)
             sessions = []
-            for path in sorted(
-                self.agent.session_store.root.glob("*.json"), reverse=True
-            ):
+            for sid in reversed(self.agent.session_store.ids()):
                 try:
-                    payload = self._session(path.stem)
+                    payload = self._session(sid)
                 except RpcError:
                     continue
                 sessions.append(
                     {
-                        "session_id": path.stem,
+                        "session_id": sid,
                         "created_at": payload.get("created_at", ""),
                         "history_count": len(payload["history"]),
                         "title": payload.get("title", ""),
-                        "current": path.stem == self.session_id,
+                        "current": sid == self.session_id,
                     }
                 )
             return {

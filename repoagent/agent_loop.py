@@ -164,6 +164,9 @@ class AgentLoop:
             cancellation_token.raise_if_cancelled(
                 provider=type(agent.model_client).__name__
             )
+        start_sandbox = getattr(agent.sandbox_adapter, "start_runtime", None)
+        if start_sandbox is not None:
+            start_sandbox()
         run_started_at = time.monotonic()
         usage_rows = []
         call_entries = []

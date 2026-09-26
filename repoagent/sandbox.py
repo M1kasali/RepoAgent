@@ -384,10 +384,22 @@ def build_sandbox_adapter(
     docker_pids_limit=256,
     docker_workspace_path_converter=None,
     verify=False,
+    boxlite_config=None,
 ):
     backend = str(backend or "direct").strip().lower()
-    if backend == "direct":
+    if backend in {"direct", "none"}:
         return DirectSandboxAdapter()
+    if backend in {"auto", "boxlite"}:
+        from .boxlite_adapter import BoxliteSandboxAdapter, load_boxlite_config
+
+        try:
+            config = boxlite_config or load_boxlite_config(backend=backend)
+            adapter = BoxliteSandboxAdapter(workspace, config=config)
+            if verify:
+                adapter.verify_available()
+            return adapter
+        except (ImportError, RuntimeError) as exc:
+            raise SandboxConfigurationError(f"BoxLite sandbox unavailable: {exc}") from exc
     if backend in {"docker", "docker-persistent"}:
         adapter_type = DockerSandboxAdapter
         if backend == "docker-persistent":

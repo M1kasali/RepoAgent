@@ -42,6 +42,7 @@ def test_session_store_rejects_symlink_and_mismatched_payload(tmp_path):
     (store.root / "link.json").symlink_to(target)
     with pytest.raises(ValueError):
         store.load("link")
+    store.path("one").parent.mkdir(parents=True, exist_ok=True)
     store.path("one").write_text('{"id":"other"}')
     with pytest.raises(StorageCorruptionError):
         store.load("one")

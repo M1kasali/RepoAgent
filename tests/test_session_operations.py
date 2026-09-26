@@ -69,7 +69,7 @@ def test_session_title_export_delete_and_stale_writer_fencing(tmp_path):
             ) == {"deleted": old_id}
             with pytest.raises(ValueError, match="deleted"):
                 stale.save(stale_payload)
-            assert not (stale.root / f"{old_id}.json").exists()
+            assert not stale.path(old_id).exists()
             assert all(
                 row["session_id"] != old_id
                 for row in (await server.dispatch("session.list", {}))["sessions"]

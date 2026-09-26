@@ -15,3 +15,18 @@ Pico's runtime also incorporates nanobot code:
 
 These notices apply to the incorporated source; they do not relicense unrelated
 RepoAgent code or imply endorsement by the original authors.
+
+## BoxLite and Session migration
+
+`repoagent/boxlite_sandbox/` and `repoagent/session/` also incorporate Pico
+Apache-2.0 source from commit `c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3`.
+The executor, configuration, runtime cache, debug server, session manager,
+epoch I/O and portable locks retain the reference algorithms. Import namespaces
+and installation instructions are renamed. The reference's obsolete network
+keywords are mapped to BoxLite 0.9.5 NetworkSpec (same policy); this patch is
+recorded explicitly in the source manifest. `paths.py` maps the product data
+location and `helpers.py` contains the two original session path helpers.
+`pico-boxlite-session-source.json` records source hashes and exact replacements.
+The corresponding `test_pico_session_*` and `test_pico_boxlite_*` tests are adapted
+from the same reference (namespace changes and explicit pytest asyncio markers).
+RepoAgent's dictionary and synchronous tool adapters are separate integration code.

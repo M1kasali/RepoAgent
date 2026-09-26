@@ -508,15 +508,16 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--sandbox-backend",
-        choices=("direct", "docker", "docker-persistent"),
+        choices=("direct", "none", "auto", "boxlite", "docker", "docker-persistent"),
         default="direct",
-        help="Execution backend; docker-persistent shares shell/MCP state until shutdown.",
+        help="Execution backend; auto and boxlite require a working BoxLite microVM.",
     )
     parser.add_argument(
         "--sandbox-image",
-        default="python:3.12-slim",
-        help="OCI image used by the Docker Agent sandbox.",
+        default=None,
+        help="OCI image (BoxLite: ubuntu:22.04; Docker: python:3.12-slim).",
     )
+    parser.add_argument("--sandbox-config", help="BoxLite JSON configuration matching Pico SandboxConfig.")
     parser.add_argument(
         "--sandbox-docker-executable",
         default="docker",
@@ -606,8 +607,9 @@ def build_product_parser():
     mcp_check = mcp_commands.add_parser("check", help="Connect, discover and close without calling a model.")
     mcp_check.add_argument("--config", required=True)
     mcp_check.add_argument("--cwd", default=".")
-    mcp_check.add_argument("--backend", choices=("direct", "docker", "docker-persistent"), default="direct")
-    mcp_check.add_argument("--image", default="python:3.12-slim")
+    mcp_check.add_argument("--backend", choices=("direct", "none", "auto", "boxlite", "docker", "docker-persistent"), default="direct")
+    mcp_check.add_argument("--image", default=None)
+    mcp_check.add_argument("--sandbox-config", help="BoxLite SandboxConfig JSON file.")
     mcp_check.add_argument("--docker-executable", default="docker")
     mcp_check.add_argument("--wsl-windows-path", action="store_true")
 
@@ -629,10 +631,11 @@ def build_product_parser():
     sandbox_commands = sandbox.add_subparsers(dest="sandbox_command", required=True)
     sandbox_status = sandbox_commands.add_parser("status", help="Show sandbox status.")
     sandbox_status.add_argument(
-        "--backend", choices=("direct", "docker", "docker-persistent"), default="direct"
+        "--backend", choices=("direct", "none", "auto", "boxlite", "docker", "docker-persistent"), default="direct"
     )
     sandbox_status.add_argument("--cwd", default=".")
-    sandbox_status.add_argument("--image", default="python:3.12-slim")
+    sandbox_status.add_argument("--image", default=None)
+    sandbox_status.add_argument("--sandbox-config", help="BoxLite SandboxConfig JSON file.")
     sandbox_status.add_argument("--require-isolation", action="store_true")
     sandbox_reconcile = sandbox_commands.add_parser(
         "reconcile", help="Reclaim inactive owned persistent sandboxes; retain uncertain creates."
@@ -709,6 +712,7 @@ def run_product_command(argv):
 
             payload = mcp_report(
                 args.config, args.cwd, backend=args.backend, image=args.image,
+                sandbox_config=args.sandbox_config,
                 docker_executable=args.docker_executable,
                 path_converter=wsl_windows_path if args.wsl_windows_path else None,
             )
@@ -727,6 +731,7 @@ def run_product_command(argv):
             else:
                 payload = sandbox_report(
                     backend=args.backend, cwd=args.cwd, image=args.image,
+                    sandbox_config=args.sandbox_config,
                     require_isolation=args.require_isolation,
                 )
         elif args.command == "gateway":

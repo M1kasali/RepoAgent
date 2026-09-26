@@ -10,7 +10,7 @@
 
 当前约定范围的实现已进入收尾：Runtime、模型与成本、工具与沙箱、上下文与本地记忆、Skills/MCP、追踪、Subagent、受控 Evolver，以及 CLI/TUI/RPC/目录 Gateway 均已有实现。具体范围和限制见[主线状态](docs/roadmaps/mainline-status.md)，不等于所有上游功能完全等价或已达到生产级可靠性。
 
-- 最新本地回归：1,423 项通过、52 项条件跳过；另有单独执行的 Docker 集成测试。测试通过不等于真实模型效果提升。
+- 最新本地全量回归：1,958 项通过、67 项条件跳过；离线演示 12/12 场景通过，新增真实 BoxLite 端到端用例单独运行通过。另有此前单独执行的 Docker 集成测试。测试通过不等于真实模型效果提升。
 - Myna 未接入；现有 SQLite 记忆不是 Myna 的替代实现。其他平台扩展、完整 Polyglot 和真实效果实验暂缓，不阻塞这一版使用。
 - 包版本仍为 `0.1.1`；当前源码包含旧 `v0.1.1` 标签之后的改动，并非新正式发布。
 - 原项目的性能、成本、记忆和自进化指标不能作为 RepoAgent 自己的实测结果。
@@ -89,6 +89,61 @@ uv run repoagent --cwd /path/to/other-repo --approval ask \
 ```
 
 审批不是沙箱；Docker 模式也不承诺多租户安全。建议在可回滚的工作区使用。
+
+### BoxLite microVM
+
+BoxLite 执行器、配置、共享 VM、MCP 流桥和清理逻辑迁自固定 Pico 参考版本，
+SDK 固定为 `boxlite==0.9.5`。安装并显式启用：
+
+```bash
+uv sync --extra sandbox --extra mcp
+uv run repoagent --sandbox-backend boxlite --require-isolation --cwd /path/to/repo
+```
+
+`auto` 与 `boxlite` 一样要求 BoxLite 可用；启动探测失败会报错，不回退到宿主机。
+默认仍在宿主机执行（`direct`，也接受 Pico 的 `none` 名称）。Docker 后端继续可选。
+BoxLite 默认镜像为 `ubuntu:22.04`，首次启动可能拉取镜像；Linux 需要当前账号可读写
+`/dev/kvm`。Shell 与 stdio MCP 共用同一 VM，子 Agent 使用独立 VM；关闭时回收。
+
+`--sandbox-config sandbox.json` 接受 Pico `SandboxConfig` 的字段，例如：
+
+```json
+{"cpus":2,"memoryMib":2048,"allowNet":false,"createTimeout":300,"verifyTimeout":30}
+```
+
+BoxLite 的网络默认值遵循 Pico：`allowNet: true`。`false` 禁止 VM 网络，非空域名列表
+表示白名单；空列表被拒绝。受限网络模式依照 Pico 先用临时 Box 拉取镜像。
+资源、额外挂载及调试 socket 可在同一配置文件设置；`--sandbox-image` 可覆盖镜像。
+
+```bash
+repoagent sandbox status --backend boxlite --sandbox-config sandbox.json
+repoagent mcp check --backend boxlite --config mcp.json --sandbox-config sandbox.json
+```
+
+2026-09-26 已完成真实 VM 基础测试，并扩展验证 MCP 共享与异常清理、网络策略、
+父子 VM 隔离和资源回收。**完整验收尚未通过**：超时后派生子进程仍可能运行，
+且观察到 SDK 偶发进程启动失败。同环境原版 Pico 对照已复现这两项；已修复
+RepoAgent 单条命令报错误关闭共享 VM 的迁移差异。当前 SDK 的白名单还不能
+隔离特殊网关上的宿主回环服务。详情见[实机验收记录](docs/boxlite-acceptance.md)。
+当前账号需能读写
+`/dev/kvm`；加入 `kvm` 组后，可在新登录终端或 `newgrp kvm` 后运行：
+
+```bash
+REPOAGENT_BOXLITE_LIVE=1 uv run --extra sandbox --extra mcp pytest tests/test_boxlite_live.py -v -s
+```
+
+普通 TCP 策略使用本机可控服务验证；公网域名/SNI 检查需额外设置
+`REPOAGENT_BOXLITE_PUBLIC_NETWORK=1`，单独报告外网基线波动。
+
+项目流程验收已通过：读取代码、修复失败用例、VM 内运行测试、MCP 交换状态、
+子 Agent 隔离读写，以及新进程恢复 JSONL 会话并继续追加。复现：
+
+```bash
+REPOAGENT_BOXLITE_LIVE=1 uv run --extra sandbox --extra mcp pytest tests/test_boxlite_e2e_live.py -v -s
+```
+
+该用例使用确定性模型响应，验证真实运行链路，不评估模型编码能力。
+最新全量回归为 1958 passed / 67 skipped；新增实机端到端用例另跑通过。
 
 无需模型密钥即可运行完整的本地 runtime-contract demo：
 
@@ -206,6 +261,17 @@ Manage 支持会话改名、导出和删除非当前会话。删除需二次确�
 `turn.text.delta` 携带 Turn ID、递增 `sequence` 和 `provisional:true`；客户端按序追加
 预览，收到 `turn.terminal` 后用最终回答替换预览，不要再追加一次最终回答。
 默认订阅仍只接收接收/终态事件，兼容已有客户端。
+
+### Session JSONL 持久化
+
+Session 使用迁自 Pico 的 `SessionManager`，存放于状态目录的
+`sessions/cli/<session_id>.jsonl`。RepoAgent 保留现有不含渠道的会话 ID，统一映射到
+存储键 `cli:<session_id>`。每次正常保存追加 metadata 和新增消息；历史缩短、修改或
+尾部残缺时执行原子重写，并使用文件锁、epoch 和内容校验拒绝陈旧写入。
+
+旧 `sessions/<session_id>.json` 首次恢复或保存时迁移，保留原文件作为备份，并写入原存储
+协议识别的删除标记，防止旧版本进程继续覆盖它。新运行只更新 JSONL；备份不随会话
+删除自动清除。不要让旧版本与新版同时管理同一状态目录。
 
 ### SQLite 跨会话记忆
 

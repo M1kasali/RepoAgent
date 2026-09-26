@@ -7108,6 +7108,78 @@ and truthful shell execution constraints. This entry is not a whole-project
 equivalence claim. Native `ask` uses the assembler; the existing `prompt()` text
 helper remains a legacy preview, not the native provider payload.
 
+### TECH-178: Pico BoxLite and JSONL Session migration (2026-09-26)
+
+Reference commit: `c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3`.
+Source hashes and exact transformations: `LICENSES/pico-boxlite-session-source.json`.
+
+The BoxLite executor, interfaces, configuration, runtime cache and debug service
+are migrated from the reference. SDK version is pinned to 0.9.5. The reference's
+old network keywords are incompatible with its pinned SDK; the explicit patch
+maps disabled/allowlisted networking to NetworkSpec without changing policy.
+RepoAgent wraps the executor with an owned asyncio thread, bridges synchronous
+tools and MCP SDK streams onto it, and stops the VM on runtime cancellation or
+shutdown. Subagents own distinct VMs and share the debug ownership registry.
+BoxLite startup failure never falls back to host execution. CLI, status and MCP
+check accept the backend and the reference's JSON configuration fields.
+
+SessionManager, epoch I/O and portalocker-based locking are migrated from Pico;
+portalocker is pinned to the reference lock's 3.2.0. The SessionStore dictionary
+facade maps history into message rows and remaining state into metadata. Normal
+saves append; history edits and partial-tail recovery use atomic rewrites.
+Epoch/content fences, existing RPC revision checks and deletion protections
+remain active. Legacy JSON resumes migrate under the old writer lock, preserve
+original bytes and fence old-format writers; inspection alone stays read-only.
+CLI/RPC listing and UI checks now use the storage facade instead of raw JSON.
+
+Validation includes the reference's own session, epoch, executor and debug-server
+tests, plus RepoAgent migration, UI, SDK handshake, shared-VM and cancellation
+integration tests. Initial real BoxLite startup failed closed on KVM permission.
+On 2026-09-26, activating the user's newly granted KVM group with `sg kvm`
+enabled the real VM smoke: 1 passed in 28.90 s. It verifies workspace writes,
+scratch reuse, timeout recovery and adapter cleanup. The test now uses a short
+temporary runtime directory to fit Unix socket paths and the product's 300 s
+creation / 30 s verification timeouts. Actual MCP sharing, network enforcement
+and parent/child VM isolation were subsequently exercised in expanded hardware
+tests; see the [acceptance record](../boxlite-acceptance.md). Full acceptance
+remains open: descendants survive execution timeout and intermittent SDK
+`spawn_failed` errors were observed. A real MCP crash revealed an adapter cleanup
+bug: killing an already-exited server raised and tore down the shared VM. The
+adapter now confirms exit after kill errors (bounded to 1 s), preserving the VM
+only when exit is confirmed. Related regressions: 64 executor/adapter tests and
+16 MCP transport tests passed; all 11 Pico source mappings remain unchanged.
+No provider calls or benchmark improvements are claimed.
+
+Subsequent comparison ran the unmodified reference executor, the port and the
+sync adapter on the same host/SDK/image. The original executor reproduced
+`spawn_failed` and timeout descendants; original ExecTool also returned timeout
+while its descendant later wrote a file. Fixed an adapter-only divergence:
+ordinary execution errors no longer close a started VM. Two actual spawn errors
+in the adapter comparison preserved its VM ID without retrying commands. Startup
+failure and cancellation cleanup remain intact. Focused regressions: 82 passed.
+Controlled host-interface TCP policy checks passed; public domain/SNI tests are
+now explicit opt-in. A separate probe found the special host-loopback gateway
+reachable under an unrelated allowlist; that limitation is recorded, not hidden.
+The reference source mappings and SDK pin remain unchanged.
+
+Latest full regression: 1,958 passed / 67 skipped / 13 warnings (317.39 s).
+Offline demo: 12/12 scenarios and evidence bundles passed. New separately run
+BoxLite E2E: 1 passed (72.99 s), covering actual AgentLoop repair, guest unittest,
+MCP scratch sharing, child read/write trace success and isolation, VM/PID cleanup,
+and JSONL resume in a different OS process (history 9 -> 13, byte prefix retained).
+The child implementer role cannot run shell; the fixture tests its authorized
+read/write tools and leaves test execution to the parent. Model outputs are
+scripted, so this is runtime acceptance, not coding-quality measurement. This
+new live case is not included in the earlier full-run count. SDK limits persist.
+
+Final validation: full suite 1,952 passed / 58 skipped (318.92 s); final bridge,
+SDK, session migration and product-command follow-up 78 passed (11.51 s).
+Ruff, diff whitespace and all 11 source-manifest mappings passed. Warnings include
+multiprocessing fork / datetime deprecations and the imported upstream direct
+executor timeout test's subprocess-transport cleanup warning. That direct executor
+is not the RepoAgent host backend. The separately enabled hardware smoke result
+above is not included in the passing offline counts.
+
 ## 5. Decision Index
 
 | Decision | State | Rationale |

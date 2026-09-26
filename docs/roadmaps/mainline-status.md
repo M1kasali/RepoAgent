@@ -54,8 +54,9 @@ future effect campaigns as prerequisites for delivering the application.
 This is an implementation closeout, not a declaration of complete upstream
 parity, production readiness or a new tagged release.
 
-Latest verification: 1,423 ordinary tests passed, 52 conditional skips and six
-existing warnings (TECH-164). Separately executed Docker integration covered a
+Latest verification: 1,958 tests passed, 67 conditional skips (TECH-178),
+plus 12/12 offline demo scenarios and one separately run real BoxLite E2E passed.
+Earlier Docker integration covered a
 48-trial hosted matrix with a fake provider; private corpus integration covered
 24 scripted tasks (TECH-163). These are mechanism checks, not model quality.
 Use README for installation/startup and the table below for feature boundaries.
@@ -66,7 +67,7 @@ Use README for installation/startup and the table below for feature boundaries.
 | --- | --- | --- |
 | Runtime and scheduling | Turn lifecycle, session ordering, concurrency quotas, cancellation and persistence | Own full paired live performance campaign remains pending |
 | Providers and cost | Native requests, usage/cost ledgers, retries and budget admission | Provider coverage and live cost improvements are not universally established |
-| Tools, MCP and sandbox | Typed gateway, bounded reads, three MCP transports, shared Docker lifecycle | Not complete BoxLite parity; MCP automatic OAuth is not claimed |
+| Tools, MCP and sandbox | Typed gateway, three MCP transports, shared Docker lifecycle and Pico BoxLite source migration (TECH-178); original Pico comparison, VM-preservation fixes and controlled network tests in [BoxLite acceptance](../boxlite-acceptance.md) | Fixed Pico reference also reproduces timeout descendants and sporadic spawn errors; special host-loopback gateway is not isolated by the tested allowlist; MCP automatic OAuth is not claimed |
 | Context and Skills | Budget assembly, compaction, retrieval/fusion/admission, lazy hydration | Skill live effectiveness remains unverified; TECH-109 |
 | Local memory | Existing local memory plus opt-in SQLite/FTS5, provenance and track isolation | SQLite is independent, not Myna; one controlled DeepSeek recall case passed |
 | Tracing and evaluation | Correlation, retained receipts, replay and paired evaluation infrastructure | Own mainline metric campaigns remain pending; no borrowed resume numbers |

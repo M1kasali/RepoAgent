@@ -25,6 +25,22 @@ class RuntimeAssembly:
     run_store: RunStore
     recovered_turn_ids: tuple[str, ...]
 
+    @staticmethod
+    def _boxlite_config(args):
+        if getattr(args, "sandbox_backend", "direct") not in {"auto", "boxlite"}:
+            if getattr(args, "sandbox_config", None):
+                raise ValueError(
+                    "--sandbox-config requires --sandbox-backend boxlite or auto"
+                )
+            return None
+        from .boxlite_adapter import load_boxlite_config
+
+        return load_boxlite_config(
+            getattr(args, "sandbox_config", None),
+            backend=args.sandbox_backend,
+            image=getattr(args, "sandbox_image", None),
+        )
+
     @classmethod
     def from_arguments(cls, args, *, model_client_factory, secret_names_factory):
         workspace = WorkspaceContext.build(
@@ -75,14 +91,16 @@ class RuntimeAssembly:
                 getattr(args, "sandbox_backend", "direct"),
                 self.workspace.repo_root,
                 docker_executable=getattr(args, "sandbox_docker_executable", "docker"),
-                docker_image=getattr(args, "sandbox_image", "python:3.12-slim"),
+                docker_image=getattr(args, "sandbox_image", None) or "python:3.12-slim",
+                boxlite_config=self._boxlite_config(args),
                 docker_memory=getattr(args, "sandbox_memory", "2g"),
                 docker_cpus=getattr(args, "sandbox_cpus", 2.0),
                 docker_pids_limit=getattr(args, "sandbox_pids_limit", 256),
                 docker_workspace_path_converter=getattr(
                     args, "sandbox_workspace_path_converter", None
                 ),
-                verify=getattr(args, "sandbox_backend", "direct") in {"docker", "docker-persistent"},
+                verify=getattr(args, "sandbox_backend", "direct")
+                in {"docker", "docker-persistent", "boxlite", "auto"},
             ),
             "max_new_tokens": profile.max_output_tokens,
             "context_token_budget": getattr(args, "context_token_budget", 3000),
@@ -93,17 +111,22 @@ class RuntimeAssembly:
             "interactive": not bool(getattr(args, "prompt", [])),
             "enable_questions": getattr(args, "enable_questions", False),
         }
-        if getattr(args, "mcp_config", None):
-            options["mcp_servers"] = load_mcp_servers(
-                args.mcp_config, cwd=self.workspace.repo_root,
-                sandbox_adapter=options["sandbox_adapter"],
-                require_isolation=options["require_isolation"],
+        try:
+            if getattr(args, "mcp_config", None):
+                options["mcp_servers"] = load_mcp_servers(
+                    args.mcp_config,
+                    cwd=self.workspace.repo_root,
+                    sandbox_adapter=options["sandbox_adapter"],
+                    require_isolation=options["require_isolation"],
+                )
+            agent = (
+                RepoAgent.from_session(session_id=session_id, **options)
+                if session_id
+                else RepoAgent(**options)
             )
-        agent = (
-            RepoAgent.from_session(session_id=session_id, **options)
-            if session_id
-            else RepoAgent(**options)
-        )
+        except BaseException:
+            options["sandbox_adapter"].close_processes()
+            raise
         agent.recovered_turn_ids = self.recovered_turn_ids
         return agent
 

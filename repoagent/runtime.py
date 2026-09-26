@@ -1328,6 +1328,8 @@ class RepoAgent:
         outcome = None
         with IsolatedSubagentWorkspace(self.root, request.subagent_id) as isolated:
             child_workspace = WorkspaceContext.build(isolated.root)
+            fork_sandbox = getattr(self.sandbox_adapter, "fork", None)
+            child_sandbox = fork_sandbox(isolated.root) if fork_sandbox else self.sandbox_adapter
             child = RepoAgent(
                 model_client=self.model_client,
                 workspace=child_workspace,
@@ -1347,7 +1349,7 @@ class RepoAgent:
                 capability_authority=self.capability_authority,
                 parent_capability_token=self.capability_token,
                 mcp_servers=None,
-                sandbox_adapter=self.sandbox_adapter,
+                sandbox_adapter=child_sandbox,
                 require_isolation=self.require_isolation,
                 network_policy=self.network_policy,
                 context_token_budget=budget.max_input_tokens,
@@ -1402,6 +1404,9 @@ class RepoAgent:
                         else 0
                     ),
                 )
+            finally:
+                if child_sandbox is not self.sandbox_adapter:
+                    child_sandbox.close_processes()
             if child.current_run_dir is not None and self.current_run_dir is not None:
                 evidence = persist_subagent_evidence(
                     self.current_run_dir, request, outcome, child.current_run_dir

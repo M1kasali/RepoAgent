@@ -55,6 +55,7 @@ docs/roadmaps/*
 !docs/roadmaps/mainline-status.md
 !docs/roadmaps/issue-maintainer-demo-plan.md
 !docs/migration.md
+!docs/boxlite-acceptance.md
 !docs/release.md
 !docs/issue-maintainer-demo.md
 !docs/security/

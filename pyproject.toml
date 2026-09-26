@@ -9,12 +9,15 @@ description = "Small local coding agent for repository-grounded engineering task
 requires-python = ">=3.10"
 dependencies = [
   "tiktoken>=0.7,<1",
+  "loguru>=0.7.3,<1",
+  "portalocker==3.2.0",
   "json-repair>=0.61.7,<1",
   "tomli>=2.0; python_version < '3.11'",
   "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
+sandbox = ["boxlite==0.9.5", "pydantic>=2.12,<3"]
 mcp = ["mcp>=1.28,<2", "anyio>=4,<5"]
 tui = ["textual>=0.89,<1"]
 qq = ["qq-botpy==1.2.1"]
@@ -29,6 +32,7 @@ repoagent-demo = "repoagent.offline_demo:main"
 [dependency-groups]
 dev = [
   "pytest>=8.3.5",
+  "pytest-asyncio>=0.23",
   "ruff>=0.4.4",
 ]
 

@@ -1,0 +1,89 @@
+{
+  "reference_commit": "c3a7a1d9032b539ca7a7cc52e46c9c0e29d5cdc3",
+  "replacements": {
+    "pico.sandbox": "repoagent.boxlite_sandbox",
+    "pico.session": "repoagent.session",
+    "pico.utils.atomic_io": "repoagent.session.atomic_io",
+    "pico.utils.portable_lock": "repoagent.session.portable_lock",
+    "pico.utils.helpers": "repoagent.session.helpers",
+    "pico.config.paths": "repoagent.boxlite_sandbox.paths",
+    "pico-harness[channels,sandbox]": "repoagent[sandbox,mcp]"
+  },
+  "files": [
+    {
+      "upstream": "pico/session/manager.py",
+      "local": "repoagent/session/manager.py",
+      "upstream_sha256": "b9191930e5f29dc2e9bdbc903dda83d0e17f6539e738e8c857abc593373d6d03",
+      "local_sha256": "f5838f4311c24a0bdef1ddf7fee38aea68079437ef2fc981c4700498ae3a9083"
+    },
+    {
+      "upstream": "pico/utils/atomic_io.py",
+      "local": "repoagent/session/atomic_io.py",
+      "upstream_sha256": "9276813924875bd7b3aaa210e02215bad22001069fd603c7c263d39dbe8e065f",
+      "local_sha256": "5e8034642fc0902effa889984d693bd3285799e6e27bd20139718687a08a8ae7"
+    },
+    {
+      "upstream": "pico/utils/portable_lock.py",
+      "local": "repoagent/session/portable_lock.py",
+      "upstream_sha256": "1c142048eb8972c2d04603ebf34d2227d5753bcc8805ec8ae242a63cc7fbaa37",
+      "local_sha256": "1c142048eb8972c2d04603ebf34d2227d5753bcc8805ec8ae242a63cc7fbaa37"
+    },
+    {
+      "upstream": "pico/sandbox/_async_utils.py",
+      "local": "repoagent/boxlite_sandbox/_async_utils.py",
+      "upstream_sha256": "212501e9116a1f26816d2a3fc77b80ed9010d2150fd83e523831f1f602022f9d",
+      "local_sha256": "212501e9116a1f26816d2a3fc77b80ed9010d2150fd83e523831f1f602022f9d"
+    },
+    {
+      "upstream": "pico/sandbox/interfaces.py",
+      "local": "repoagent/boxlite_sandbox/interfaces.py",
+      "upstream_sha256": "f677ca67beb5311a1915063a34b93660716dc50eafea90c77c37481e60b5a1ea",
+      "local_sha256": "cf93cb67658cb8744daa9f0c0840c888c47e3b8dc4551e3c55c3f0fe0c7f2a0a"
+    },
+    {
+      "upstream": "pico/sandbox/__init__.py",
+      "local": "repoagent/boxlite_sandbox/__init__.py",
+      "upstream_sha256": "bf6d19c3108a528fd0c7cacabd8a0fc8344ec0b118833ef9db84f81e8f530357",
+      "local_sha256": "91fa97029d15fc3c149874e4376d0d4c8b3a3f5bd0c402511f6bf0fd43b297f9"
+    },
+    {
+      "upstream": "pico/sandbox/_runtime.py",
+      "local": "repoagent/boxlite_sandbox/_runtime.py",
+      "upstream_sha256": "a4520f9b75893b9a0aee0c13d162ae3927fba535391539b7f69faa6e9c3a744f",
+      "local_sha256": "30751b49ef0d0366ce7c5ec69a4ff37c583de77b8a96f084a31a4e3b53cf23b1"
+    },
+    {
+      "upstream": "pico/sandbox/debug_server.py",
+      "local": "repoagent/boxlite_sandbox/debug_server.py",
+      "upstream_sha256": "76914a5ce303e87290eccd88c70611f44a95d61066c71ad24510b28b409ab3dc",
+      "local_sha256": "5f25011c11af933ace6152b43b55385a5335b455cc110272a38bfddab3152b3f"
+    },
+    {
+      "upstream": "pico/sandbox/config.py",
+      "local": "repoagent/boxlite_sandbox/config.py",
+      "upstream_sha256": "703d428b650b54b7fa2169b414bec92563e230ddaafd716debd6d1dd692864f5",
+      "local_sha256": "703d428b650b54b7fa2169b414bec92563e230ddaafd716debd6d1dd692864f5"
+    },
+    {
+      "upstream": "pico/sandbox/direct_executor.py",
+      "local": "repoagent/boxlite_sandbox/direct_executor.py",
+      "upstream_sha256": "d77ecc58adcd09d67c491c180ef5c1630406870196d17228afc5cd4cae76c294",
+      "local_sha256": "c5e3d0ed0f899fcbb95717463a4fd9e646a21b7c962143655093d336ab4ba634"
+    },
+    {
+      "upstream": "pico/sandbox/boxlite_executor.py",
+      "local": "repoagent/boxlite_sandbox/boxlite_executor.py",
+      "upstream_sha256": "7dd1872b3cdfb6c095b929ed71afe52610e6678b846903793558d65c15b1064c",
+      "local_sha256": "da02165996ad53f6037f0971dc5cc1f2b8e36632229ae6567d96c5f8c6efad51"
+    }
+  ],
+  "api_compatibility_patches": [
+    {
+      "local": "repoagent/boxlite_sandbox/boxlite_executor.py",
+      "old": "            # boxlite 0.8.2 \u4e2d network \u662f\u5b57\u7b26\u4e32\u5b57\u6bb5\uff0callow_net \u662f\u72ec\u7acb\u7684\u5217\u8868\u5b57\u6bb5\uff1b\n            # \u8be5\u7248\u672c\u4e0d\u5b58\u5728 NetworkSpec\n            extra_kwargs: dict = {}\n            if self._allow_net is False:\n                extra_kwargs[\"network\"] = \"none\"\n            elif isinstance(self._allow_net, list):\n                extra_kwargs[\"allow_net\"] = self._allow_net\n",
+      "new": "            # The reference pins 0.9.5 but used the older network keywords.\n            # Preserve its policy using the pinned SDK's NetworkSpec API.\n            extra_kwargs: dict = {}\n            if self._allow_net is False:\n                extra_kwargs[\"network\"] = boxlite.NetworkSpec(mode=\"disabled\")\n            elif isinstance(self._allow_net, list):\n                extra_kwargs[\"network\"] = boxlite.NetworkSpec(mode=\"enabled\", allow_net=self._allow_net)\n",
+      "reason": "Pinned BoxLite 0.9.5 requires NetworkSpec; older reference keywords raise TypeError.",
+      "sdk_reference": "https://pypi.org/project/boxlite/0.9.5/"
+    }
+  ]
+}

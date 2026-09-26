@@ -28,28 +28,37 @@ def _workspace(cwd):
     return workspace
 
 
-def mcp_report(config, cwd=".", *, backend="direct", image="python:3.12-slim", docker_executable="docker", path_converter=None):
+def mcp_report(config, cwd=".", *, backend="direct", image=None, sandbox_config=None, docker_executable="docker", path_converter=None):
     from .mcp import MCPManager
     from .mcp_transport import MCPConnectionError, load_mcp_servers
     from .sandbox import build_sandbox_adapter
 
+    if sandbox_config and backend not in {"boxlite", "auto"}:
+        raise ValueError("--sandbox-config requires --backend boxlite or auto")
+    boxlite_config = None
+    if backend in {"boxlite", "auto"}:
+        from .boxlite_adapter import load_boxlite_config
+        boxlite_config = load_boxlite_config(sandbox_config, backend=backend, image=image)
     adapter = build_sandbox_adapter(
-        backend, cwd, docker_image=image, docker_executable=docker_executable,
+        backend, cwd, docker_image=image or "python:3.12-slim", docker_executable=docker_executable,
+        boxlite_config=boxlite_config,
         docker_workspace_path_converter=path_converter,
-        verify=backend in {"docker", "docker-persistent"},
+        verify=backend in {"docker", "docker-persistent", "boxlite", "auto"},
     )
-    manager = MCPManager(
-        load_mcp_servers(config, cwd=cwd, sandbox_adapter=adapter),
-        sandbox_adapter=adapter,
-    )
+    manager = None
     try:
+        manager = MCPManager(
+            load_mcp_servers(config, cwd=cwd, sandbox_adapter=adapter),
+            sandbox_adapter=adapter,
+        )
         try:
             manager.discover()
         except MCPConnectionError:
             pass
     finally:
         try:
-            manager.close()
+            if manager is not None:
+                manager.close()
         finally:
             adapter.close_processes()
     rows = manager.diagnostics
@@ -117,11 +126,11 @@ def provider_report(provider=None):
     return {"schema": "repoagent.providers/v1", "providers": rows}
 
 
-def _session_summary(path):
+def _session_summary(store, session_id):
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = store.inspect(session_id)
         return {
-            "id": str(payload.get("id", path.stem)),
+            "id": str(payload.get("id", session_id)),
             "created_at": str(payload.get("created_at", "")),
             "workspace_root": str(payload.get("workspace_root", "")),
             "history_count": len(payload.get("history", [])),
@@ -129,23 +138,19 @@ def _session_summary(path):
             "status": "valid",
         }
     except (OSError, ValueError, TypeError):
-        return {"id": path.stem, "status": "corrupt"}
+        return {"id": session_id, "status": "corrupt"}
 
 
 def session_report(cwd=".", session_id=None):
     workspace = _workspace(cwd)
     store = SessionStore(workspace_state_root(workspace.repo_root) / "sessions")
-    paths = (
-        (store.path(session_id),)
-        if session_id
-        else tuple(sorted(store.root.glob("*.json"), key=lambda item: item.name))
-    )
-    if session_id and not paths[0].is_file():
+    ids = [session_id] if session_id else store.ids()
+    if session_id and session_id not in store.ids():
         raise ValueError(f"unknown session: {session_id}")
     return {
         "schema": "repoagent.sessions/v1",
         "workspace_root": workspace.repo_root,
-        "sessions": [_session_summary(path) for path in paths],
+        "sessions": [_session_summary(store, sid) for sid in ids],
     }
 
 
@@ -166,16 +171,19 @@ def sandbox_report(
     *,
     backend="direct",
     cwd=".",
-    image="python:3.12-slim",
+    image=None,
+    sandbox_config=None,
     require_isolation=False,
 ):
     backend = str(backend)
+    if sandbox_config and backend not in {"boxlite", "auto"}:
+        raise ValueError("--sandbox-config requires --backend boxlite or auto")
     available = True
     error = ""
     if backend in {"docker", "docker-persistent"}:
         adapter = (
-            DockerSandboxAdapter(cwd, image=image) if backend == "docker"
-            else build_sandbox_adapter(backend, cwd, docker_image=image)
+            DockerSandboxAdapter(cwd, image=image or "python:3.12-slim") if backend == "docker"
+            else build_sandbox_adapter(backend, cwd, docker_image=image or "python:3.12-slim")
         )
         isolated = True
         identity = adapter.identity
@@ -184,7 +192,20 @@ def sandbox_report(
         except ValueError as exc:
             available = False
             error = str(exc)
-    elif backend == "direct":
+    elif backend in {"auto", "boxlite"}:
+        isolated, identity = True, "boxlite_microvm"
+        adapter = None
+        try:
+            from .boxlite_adapter import load_boxlite_config
+            config = load_boxlite_config(sandbox_config, backend=backend, image=image)
+            adapter = build_sandbox_adapter(backend, cwd, boxlite_config=config)
+            adapter.verify_available()
+        except (ValueError, RuntimeError, ImportError) as exc:
+            available, error = False, str(exc)
+        finally:
+            if adapter is not None:
+                adapter.close_processes()
+    elif backend in {"direct", "none"}:
         isolated = False
         identity = "direct_host"
     else:
