@@ -6,8 +6,26 @@ build-backend = "setuptools.build_meta"
 name = "repoagent"
 version = "0.1.1"
 description = "Small local coding agent for repository-grounded engineering tasks"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
+  "typer>=0.20.0,<1.0.0",
+  "litellm>=1.82.1,<1.92.0",
+  "pydantic>=2.12.0,<3.0.0",
+  "pydantic-settings>=2.14.2,<3.0.0",
+  "httpx>=0.28.0,<1.0.0",
+  "rich>=14.0.0,<15.0.0",
+  "croniter>=6.0.0,<7.0.0",
+  "pyyaml>=6.0",
+  "prompt-toolkit>=3.0.0",
+  "questionary>=2.0.0,<3.0.0",
+  "watchfiles>=0.21,<2.0",
+  "tomli-w>=1.2.0",
+  "oauth-cli-kit>=0.1.6,<1.0.0",
+  "mcp>=1.27.0",
+  "orjson>=3.11.6,<4.0",
+  "numpy>=2.0,<3.0",
+  "pillow>=12.3,<13.0",
+  "packaging>=24.0,<26.0",
   "tiktoken>=0.7,<1",
   "loguru>=0.7.3,<1",
   "portalocker==3.2.0",
@@ -23,7 +41,8 @@ tui = ["textual>=0.89,<1"]
 qq = ["qq-botpy==1.2.1"]
 
 [project.scripts]
-repoagent = "repoagent.cli:main"
+repoagent = "repoagent.entrypoint:main"
+repoagent-compat = "repoagent.cli:main"
 repoagent-trace = "repoagent.trace_inspection:main"
 repoagent-eval = "repoagent.evaluation.cli:main"
 repoagent-release-check = "repoagent.release_check:main"
@@ -36,8 +55,18 @@ dev = [
   "ruff>=0.4.4",
 ]
 
+[tool.setuptools]
+license-files = ["LICENSES/*.txt", "LICENSES/*NOTICES.md"]
+
 [tool.setuptools.packages.find]
 include = ["repoagent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
+asyncio_mode = "auto"
+addopts = "--import-mode=importlib -m 'not (real_llm or llm_judge or real_vm or real_channel or external_runtime or e2e)'"
+markers = ["real_llm: paid model calls", "llm_judge: paid model grading", "real_vm: actual VM", "real_channel: actual channel", "external_runtime: external runtime required", "e2e: opt-in upstream subprocess scenario"]
+
+[tool.setuptools.package-data]
+"repoagent.harness" = ["**/*.md", "**/*.sh", "**/*.toml", "**/*.json", "**/*.js", "**/*.html", "**/*.css"]

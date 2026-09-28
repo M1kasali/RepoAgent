@@ -1,0 +1,4 @@
+recursive-include ui-tui *.ts *.tsx *.json *.js *.mjs *.cjs *.md *.yaml
+recursive-include LICENSES *.txt *.md *.json
+prune ui-tui/node_modules
+prune ui-tui/.cache

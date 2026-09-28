@@ -1326,7 +1326,7 @@ def test_build_agent_uses_deepseek_provider_by_default(tmp_path):
             "DEEPSEEK_API_BASE": "https://api.deepseek.com/anthropic",
             "DEEPSEEK_API_KEY": "sk-test",
         },
-        clear=False,
+        clear=True,
     ):
         with (
             patch(

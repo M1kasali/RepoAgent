@@ -30,3 +30,14 @@ location and `helpers.py` contains the two original session path helpers.
 The corresponding `test_pico_session_*` and `test_pico_boxlite_*` tests are adapted
 from the same reference (namespace changes and explicit pytest asyncio markers).
 RepoAgent's dictionary and synchronous tool adapters are separate integration code.
+
+## Main runtime and terminal UI
+
+`repoagent/harness/`, `ui-tui/`, `tests/harness_reference/` and retained benchmark
+fixtures incorporate source from the same pinned commit above. See
+`pico-runtime-NOTICES.md`, `MIT-hermes-agent.txt` and `MIT-ink.txt` for the terminal
+UI attribution chain. `pico-runtime-source.json` records original and adapted
+SHA-256 hashes. `scripts/import_reference_runtime.py` reproduces the namespace,
+product-state, protected-source-path and SDK adaptations; behavioral algorithms
+are retained. Entrypoint routing, wheel packaging and added integration tests
+are RepoAgent integration code.

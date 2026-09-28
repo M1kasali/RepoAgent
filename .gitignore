@@ -74,3 +74,13 @@ examples/
 # Packaging metadata
 repoagent.egg-info/
 pico.egg-info/
+
+# Native terminal dependencies and isolated main-runtime state
+node_modules/
+.repoagent-harness/
+
+# Retained evolution example
+!docs/examples/
+!docs/examples/evolve_appworld.yaml
+!docs/runtime-migration.md
+!docs/runtime-compatibility.md
