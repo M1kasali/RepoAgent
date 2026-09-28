@@ -48,7 +48,7 @@ python scripts/import_reference_runtime.py /path/to/pico-harness-reference --che
 
 ## 验收范围
 
-验收包括参考 Python 契约回归、新旧入口路由、真实 TypeScript 客户端与 Python 生产 RPC 服务通信、前端测试和类型检查、真实 PTY 中的 UI 加载、安装包独立加载，以及原有离线回归。模型响应与外部平台采用离线测试，不新增付费模型实验。
+迁移阶段验收包括参考 Python 契约回归、新旧入口路由、真实 TypeScript 客户端与 Python 生产 RPC 服务通信、前端测试和类型检查、真实 PTY 中的 UI 加载、安装包独立加载，以及原有离线回归。2026-09-27 的模型响应与外部平台采用离线测试；后续真实模型验收单独记录如下。
 
 历史 HAL Mini 36/50、配对实验和 Evolver 小样本成绩保持原冻结口径。本次是执行架构迁移，不能描述成新主路径已经复现这些成绩。
 
@@ -64,3 +64,21 @@ python scripts/import_reference_runtime.py /path/to/pico-harness-reference --che
 - 默认模型测试原先继承当前环境的模型设置，现隔离环境后验证内置默认值；未因此修改业务默认配置。
 
 按照 `agent.md`，工作区中的本次 UI `node_modules/` 与 `dist/` 已清理。源码启动时先按 README 执行 `npm --prefix ui-tui ci` 和 `npm --prefix ui-tui run build`。包含已构建 UI 的本次验收 wheel 保存在 `/tmp/ra-six-dist/`，它是本地临时验收产物，不是发布版本。本次未提交或推送 Git。
+
+### 2026-09-28 真实模型交互验收
+
+验收版本为 `e89dc8547032ab6b3e80650837fba000b45a7479`。从该提交导出独立工作区，在真实 PTY 中启动默认 Node / React / Ink TUI，连接 `deepseek/deepseek-v4-flash`。使用临时配置，关闭外部记忆，禁用 shell、写文件和网页工具，保留读取与后台子任务工具。日常配置未修改。
+
+| 场景 | 实际结果 |
+| --- | --- |
+| 仓库问答 | 模型实际读取 `pyproject.toml` 和 `repoagent/entrypoint.py`，回答项目用途、默认入口、兼容入口和测试命令。 |
+| 重启恢复 | 退出 TUI 后重新启动，用 `/sessions resume tui:20260928_133432_5f2b03` 恢复 JSONL 会话；询问上一轮标记，模型准确返回 `ORCHID-928`，该轮未调用工具。 |
+| 后台子任务 | 实际调用一次 `spawn`，父任务先返回启动回执；子任务读取 `repoagent/harness/tracing/semconv.py`，结果通过同一会话的 `Origin.SUBAGENT` 新 Turn 回流，父任务列出五种 outcome。 |
+
+- 调用记录包含 **8 次运行时模型调用，全部成功**；另有一次最小 Provider 连通性请求，HTTP 200。
+- 审计记录包含 **4 个已完成 Turn**：3 个 user、1 个 subagent，属于同一会话；工具调用为 3 次 `read_file`、1 次 `spawn`。
+- 逐文件比较独立工作区与提交中的 Git blob，**受版本控制的文件无内容变化**。本轮没有修改运行时代码。
+- 8 次运行时调用中，5 次有费用估算，已知小计约 **0.001231 美元**；另 3 次缺少费用估算。该小计不含独立连通性请求，不能当作本次完整费用或账单金额。
+- 本次验证的是主路径真实交互，不是新 benchmark，也未验收 BoxLite 虚拟机、外部平台或缓存优化效果。
+
+验收结束后退出 TUI，删除含凭据的临时配置、工作区副本和原始日志，并清理本次前端依赖与构建产物。仅保留脱敏验收记录；本轮记录未自动提交或推送。
